@@ -14,14 +14,16 @@ publish = false
 [package.metadata.build]
 zig_version = "0.15.2"
 
+# The glibc release timeline for reference: https://sourceware.org/glibc/wiki/Glibc%20Timeline
 [package.metadata.build.glibc]
-# N.B.: 2.17 if the lowest glibc supported by zig 0.15.2.
-default_version = "2.17"
+# N.B.: 2.17 if the lowest glibc supported by zig 0.15.2 and this nets us manylinux_2014
+# compatibility: https://peps.python.org/pep-0599/
+default_version = "2.17"  # Released: 2012-12-25
 
 [package.metadata.build.glibc.by_platform]
 # N.B.: These were determined by bisecting to clean builds.
-powerpc64le-unknown-linux-gnu = "2.19"
-riscv64gc-unknown-linux-gnu = "2.27"
+powerpc64le-unknown-linux-gnu = "2.19"  # Released: 2014-02-07
+riscv64gc-unknown-linux-gnu = "2.27"  # Released: 2018-02-01
 
 [package.metadata.build.clib]
 profile = "release-clib"

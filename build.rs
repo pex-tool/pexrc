@@ -22,11 +22,104 @@ struct Toolchain<'a> {
     targets: Vec<Cow<'a, str>>,
 }
 
+struct GnuLinux<'a> {
+    target: Cow<'a, str>,
+    zigbuild_target: String,
+}
+
+enum Target<'a> {
+    Apple(Cow<'a, str>),
+    GnuLinux(GnuLinux<'a>),
+    Unix(Cow<'a, str>),
+    Windows(Cow<'a, str>),
+}
+
+impl<'a> Target<'a> {
+    fn as_str(&self) -> &str {
+        match self {
+            Target::Apple(target) | Target::Unix(target) | Target::Windows(target) => {
+                target.as_ref()
+            }
+            Target::GnuLinux(linux) => linux.target.as_ref(),
+        }
+    }
+
+    fn shared_library_name(&self, lib_name: &str) -> String {
+        match self {
+            Target::Apple(_) => format!("lib{lib_name}.dylib"),
+            Target::GnuLinux(_) | Target::Unix(_) => format!("lib{lib_name}.so"),
+            Target::Windows(_) => format!("{lib_name}.dll"),
+        }
+    }
+}
+
+struct ClassifiedTargets<'a> {
+    xwin_targets: Vec<Target<'a>>,
+    zigbuild_targets: Vec<Target<'a>>,
+}
+
+impl<'a> ClassifiedTargets<'a> {
+    fn iter_zigbuild_targets(&'a self) -> impl Iterator<Item = &'a str> {
+        self.zigbuild_targets.iter().map(|target| {
+            if let Target::GnuLinux(gnu_linux) = target {
+                gnu_linux.zigbuild_target.as_str()
+            } else {
+                target.as_str()
+            }
+        })
+    }
+
+    fn iter_xwin_targets(&'a self) -> impl Iterator<Item = &'a str> {
+        self.xwin_targets.iter().map(Target::as_str)
+    }
+
+    fn iter_targets(&'a self) -> impl Iterator<Item = &'a Target<'a>> {
+        self.zigbuild_targets.iter().chain(self.xwin_targets.iter())
+    }
+}
+
+impl<'a> Toolchain<'a> {
+    fn classify(self, glibc: &'a Glibc) -> ClassifiedTargets<'a> {
+        let (xwin_targets, zigbuild_targets) = self
+            .targets
+            .into_iter()
+            .map(move |target| {
+                if target.contains("-apple-") {
+                    Target::Apple(target)
+                } else if target.contains("-linux-") {
+                    if target.ends_with("-gnu") {
+                        let zigbuild_target = format!(
+                            "{target}.{glibc_version}",
+                            target = target.as_ref(),
+                            glibc_version = glibc.version(target.as_ref())
+                        );
+                        Target::GnuLinux(GnuLinux {
+                            target,
+                            zigbuild_target,
+                        })
+                    } else {
+                        Target::Unix(target)
+                    }
+                } else if target.contains("-windows-") {
+                    Target::Windows(target)
+                } else {
+                    panic!("The build system does not know how to handle")
+                }
+            })
+            .partition::<Vec<_>, _>(|target| matches!(target, Target::Windows(_)));
+        ClassifiedTargets {
+            xwin_targets,
+            zigbuild_targets,
+        }
+    }
+}
+
 #[derive(Deserialize)]
 struct RustToolchain<'a> {
     #[serde(borrow)]
     toolchain: Toolchain<'a>,
 }
+
 #[derive(Deserialize)]
 struct Glibc<'a> {
     #[serde(borrow)]
@@ -43,6 +136,7 @@ impl<'a> Glibc<'a> {
             .unwrap_or(self.default_version.as_ref())
     }
 }
+
 #[derive(Deserialize)]
 struct Clib<'a> {
     #[serde(borrow)]
@@ -80,6 +174,8 @@ struct CargoManifest<'a> {
 
 #[derive(AsRefStr, EnumCount, EnumIter)]
 enum Tool {
+    #[strum(serialize = "cargo-xwin")]
+    CargoXwin,
     #[strum(serialize = "cargo-zigbuild")]
     CargoZigbuild,
     #[strum(serialize = "zig")]
@@ -91,7 +187,7 @@ enum Tool {
 fn main() -> anyhow::Result<()> {
     env_logger::init();
 
-    let cargo = env::var("CARGO")?;
+    let cargo: PathBuf = env::var("CARGO")?.into();
 
     let data = fs::read_to_string("rust-toolchain")?;
     let rust_toolchain: RustToolchain = toml::from_str(data.as_str())?;
@@ -120,44 +216,21 @@ fn main() -> anyhow::Result<()> {
         cache_dir
     };
 
-    let mut cmd = Command::new(&cargo);
-    cmd.stderr(Stdio::piped());
-    cmd.env_remove("CARGO_ENCODED_RUSTFLAGS");
-    cmd.env("CARGO_TERM_COLOR", "always");
-    for (env_var, path) in ensure_tools_installed(&cargo, &build_config, &tool_install_dir)? {
-        cmd.env(env_var, path);
-    }
-    cmd.args([
-        "zigbuild",
-        "--package",
-        "clib",
-        "--profile",
-        build_config.clib.profile.as_ref(),
-    ]);
-    for target in &rust_toolchain.toolchain.targets {
-        cmd.arg("--target");
-        if target.contains("gnu") {
-            cmd.arg(format!(
-                "{target}.{glibc_version}",
-                target = target.as_ref(),
-                glibc_version = build_config.glibc.version(target.as_ref())
-            ));
-        } else {
-            cmd.arg(target.as_ref());
-        }
-    }
-
-    let child = cmd.spawn()?;
-    let result = child.wait_with_output()?;
-    if !result.status.success() {
-        bail!(
-            "Failed to compile clib with exit code {exit_code}:\n{exe} \\\n  {args}\n{output}",
-            exit_code = result.status,
-            exe = cmd.get_program().to_string_lossy(),
-            args = cmd.get_args().map(OsStr::to_string_lossy).join(" \\\n  "),
-            output = result.stderr.to_str_lossy()
-        );
-    }
+    let targets = rust_toolchain.toolchain.classify(&build_config.glibc);
+    custom_cargo_build(
+        &cargo,
+        ["xwin", "build"],
+        &build_config,
+        &tool_install_dir,
+        targets.iter_xwin_targets(),
+    )?;
+    custom_cargo_build(
+        &cargo,
+        ["zigbuild"],
+        &build_config,
+        &tool_install_dir,
+        targets.iter_zigbuild_targets(),
+    )?;
 
     let out_dir: PathBuf = env::var_os("OUT_DIR").unwrap().into();
     let clibs_dir = out_dir.join("clibs");
@@ -167,28 +240,25 @@ fn main() -> anyhow::Result<()> {
         clibs_dir = clibs_dir.display()
     );
 
-    for target in &rust_toolchain.toolchain.targets {
-        let clib_name = if target.contains("-apple-") {
-            "libpexrc.dylib"
-        } else if target.contains("-pc-windows-") {
-            "pexrc.dll"
-        } else {
-            "libpexrc.so"
-        };
+    for target in targets.iter_targets() {
+        let clib_name = target.shared_library_name("pexrc");
         let clib = target_dir
-            .join(target.as_ref())
+            .join(target.as_str())
             .join(build_config.clib.profile.as_ref())
-            .join(clib_name);
+            .join(&clib_name);
         if !clib.exists() {
             eprintln!(
                 "The clib for {target} does not exist at {clib_path}!",
-                clib_path = clib.display()
+                clib_path = clib.display(),
+                target = target.as_str(),
             );
         }
         io::copy(
             &mut File::open(clib)?,
             &mut zstd::Encoder::new(
-                File::create(clibs_dir.join(format!("{target}.{clib_name}")))?,
+                File::create(
+                    clibs_dir.join(format!("{target}.{clib_name}", target = target.as_str())),
+                )?,
                 build_config.clib.compression_level,
             )?,
         )?;
@@ -197,8 +267,47 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn custom_cargo_build<'a>(
+    cargo: &Path,
+    custom_build_args: impl IntoIterator<Item = &'a str>,
+    build_config: &Build,
+    tool_install_dir: &Path,
+    targets: impl Iterator<Item = &'a str>,
+) -> anyhow::Result<()> {
+    let mut cmd = Command::new(cargo);
+    cmd.stderr(Stdio::piped());
+    cmd.env_remove("CARGO_ENCODED_RUSTFLAGS");
+    cmd.env("CARGO_TERM_COLOR", "always");
+    for (env_var, path) in ensure_tools_installed(cargo, build_config, tool_install_dir)? {
+        cmd.env(env_var, path);
+    }
+    cmd.args(custom_build_args);
+    cmd.args([
+        "--package",
+        "clib",
+        "--profile",
+        build_config.clib.profile.as_ref(),
+    ]);
+    for target in targets {
+        cmd.args(["--target", target]);
+    }
+
+    let child = cmd.spawn()?;
+    let result = child.wait_with_output()?;
+    if result.status.success() {
+        return Ok(());
+    }
+    bail!(
+        "Failed to compile clib with exit code {exit_code}:\n{exe} \\\n  {args}\n{output}",
+        exit_code = result.status,
+        exe = cmd.get_program().to_string_lossy(),
+        args = cmd.get_args().map(OsStr::to_string_lossy).join(" \\\n  "),
+        output = result.stderr.to_str_lossy()
+    )
+}
+
 fn ensure_tools_installed(
-    cargo: &String,
+    cargo: &Path,
     build_config: &Build,
     tool_install_dir: &Path,
 ) -> anyhow::Result<Vec<(OsString, OsString)>> {
@@ -206,7 +315,7 @@ fn ensure_tools_installed(
         env::var_os("PATH").as_deref().map(env::split_paths)
     {
         let search_path = env::join_paths(search_path.chain([PathBuf::from(tool_install_dir)]))?;
-        Cow::Owned(search_path.into())
+        Cow::Owned(search_path)
     } else {
         Cow::Borrowed(tool_install_dir.as_os_str())
     };
@@ -246,7 +355,7 @@ fn ensure_tools_installed(
             && value == "1"
         {
             let mut installed_tools =
-                install_tools(&cargo, &missing_tools, tool_install_dir, &tool_search_path)?;
+                install_tools(cargo, &missing_tools, tool_install_dir, &tool_search_path)?;
             found_tools.append(&mut installed_tools);
         } else {
             bail!(
@@ -297,7 +406,7 @@ fn get_zig_version(zig: impl AsRef<Path>) -> Option<String> {
 }
 
 fn install_tools(
-    cargo: &str,
+    cargo: &Path,
     tools: &[Tool],
     install_dir: &Path,
     search_path: &OsStr,
@@ -351,7 +460,7 @@ fn install_tools(
     }
 }
 
-fn binstall(cargo: &str, spec: &str) -> anyhow::Result<()> {
+fn binstall(cargo: &Path, spec: &str) -> anyhow::Result<()> {
     let result = Command::new(cargo)
         .args(["binstall", "--no-confirm", spec])
         .stderr(Stdio::piped())
