@@ -1,0 +1,12 @@
+[package]
+name = "clib"
+edition = "2024"
+publish = false
+
+[lib]
+name = "pexrc"
+crate-type = ["cdylib"]
+
+[dependencies]
+pexrs = { path = "../pexrs" }
+

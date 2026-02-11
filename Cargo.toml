@@ -1,0 +1,86 @@
+[workspace]
+members = [
+    ".",
+    "crates/clib",
+    "crates/pexrs",
+]
+
+[package]
+name = "pexrc"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[package.metadata.build]
+zig_version = "0.15.2"
+
+[package.metadata.build.glibc]
+# N.B.: 2.17 if the lowest glibc supported by zig 0.15.2.
+default_version = "2.17"
+
+[package.metadata.build.glibc.by_platform]
+# N.B.: These were determined by bisecting to clean builds.
+powerpc64le-unknown-linux-gnu = "2.19"
+riscv64gc-unknown-linux-gnu = "2.27"
+
+[package.metadata.build.clib]
+profile = "release-clib"
+compression_level = 19
+
+[profile.release]
+codegen-units = 1
+lto = true
+strip = "symbols"
+
+[profile.release-clib]
+inherits = "release"
+opt-level = "s"
+
+[[bin]]
+name = "pexrc"
+path = "src/pexrc.rs"
+
+[workspace.dependencies]
+anyhow = "1.0"
+bstr = "1.12"
+dirs = "6.0"
+env_logger = "0.11"
+include_dir = "0.7"
+itertools = "0.14"
+log = "0.4"
+logging_timer = "1.1"
+rayon = "1.11"
+serde = { version = "1.0.228", features = ["derive"] }
+strum = {  version = "0.27", features = ["strum_macros"] }
+strum_macros = "*"
+tempfile = "3.25"
+toml = "0.9"
+which = "8.0"
+zip = { version = "7.4", default-features = false, features = ["deflate", "zstd"] }
+zstd = "0.13"
+
+[build-dependencies]
+anyhow = { workspace = true }
+bstr = { workspace = true }
+dirs = { workspace = true }
+env_logger = { workspace = true }
+itertools = { workspace = true }
+log = { workspace = true }
+serde = { workspace = true }
+strum = { workspace = true }
+strum_macros = { workspace = true }
+toml = { workspace = true }
+which = { workspace = true }
+zstd = { workspace = true }
+
+[dependencies]
+anyhow = { workspace = true }
+env_logger = { workspace = true }
+include_dir = { workspace = true }
+itertools = { workspace = true }
+log = { workspace = true }
+logging_timer = { workspace = true }
+pexrs = { path = "crates/pexrs" }
+tempfile = { workspace = true }
+which = { workspace = true }
+zip = { workspace = true }
