@@ -1,19 +1,22 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::Tool::{CargoXwin, CargoZigbuild, MacOsxSdk, Uv, Zig};
 use anyhow::bail;
 use bstr::ByteSlice;
 use itertools::Itertools;
 use serde::Deserialize;
+use sha2::Digest;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
+use std::io::{ErrorKind, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::{env, fs, io};
-use strum::{EnumCount, IntoEnumIterator};
-use strum_macros::{AsRefStr, EnumCount, EnumIter};
+use strum::EnumCount;
+use strum_macros::{AsRefStr, EnumCount};
 use which::{which_in, which_in_global};
 
 #[derive(Deserialize)]
@@ -120,6 +123,25 @@ struct RustToolchain<'a> {
     toolchain: Toolchain<'a>,
 }
 
+#[derive(Deserialize, Debug)]
+struct Fingerprint<'a> {
+    #[serde(borrow)]
+    algorithm: Cow<'a, str>,
+    #[serde(borrow)]
+    hash: Cow<'a, str>,
+}
+
+#[derive(Deserialize, Debug)]
+struct DownloadArchive<'a> {
+    #[serde(borrow)]
+    url: Cow<'a, str>,
+    size: u64,
+    #[serde(borrow)]
+    fingerprint: Fingerprint<'a>,
+    #[serde(borrow, default)]
+    prefix: Option<Cow<'a, str>>,
+}
+
 #[derive(Deserialize)]
 struct Glibc<'a> {
     #[serde(borrow)]
@@ -147,11 +169,13 @@ struct Clib<'a> {
 #[derive(Deserialize)]
 struct Build<'a> {
     #[serde(borrow)]
-    zig_version: Cow<'a, str>,
+    clib: Clib<'a>,
     #[serde(borrow)]
     glibc: Glibc<'a>,
     #[serde(borrow)]
-    clib: Clib<'a>,
+    mac_osx_sdk: DownloadArchive<'a>,
+    #[serde(borrow)]
+    zig_version: Cow<'a, str>,
 }
 
 #[derive(Deserialize)]
@@ -172,16 +196,56 @@ struct CargoManifest<'a> {
     package: Package<'a>,
 }
 
-#[derive(AsRefStr, EnumCount, EnumIter)]
-enum Tool {
+#[derive(AsRefStr, EnumCount)]
+enum Tool<'a> {
     #[strum(serialize = "cargo-xwin")]
     CargoXwin,
     #[strum(serialize = "cargo-zigbuild")]
     CargoZigbuild,
+    #[strum(serialize = "MacOSX SDK")]
+    MacOsxSdk(&'static str, &'a DownloadArchive<'a>),
     #[strum(serialize = "zig")]
-    Zig(String),
+    Zig(&'a str),
     #[strum(serialize = "uv")]
     Uv,
+}
+
+impl<'a> Tool<'a> {
+    fn collect_tools(build: &'a Build) -> Vec<Tool<'a>> {
+        let mut tools = Vec::with_capacity(Tool::COUNT);
+        tools.push(CargoXwin);
+        tools.push(CargoZigbuild);
+        tools.push(MacOsxSdk("SDKROOT", &build.mac_osx_sdk));
+        tools.push(Zig(build.zig_version.as_ref()));
+        tools.push(Uv);
+        tools
+    }
+}
+
+struct InstallDirs {
+    cache_dir: PathBuf,
+    bin_dir: Option<PathBuf>,
+    download_dir: Option<PathBuf>,
+}
+
+impl InstallDirs {
+    fn new(cache_dir: PathBuf) -> Self {
+        Self {
+            cache_dir,
+            bin_dir: None,
+            download_dir: None,
+        }
+    }
+
+    fn bin_dir(&mut self) -> &Path {
+        self.bin_dir
+            .get_or_insert_with(|| self.cache_dir.join("bin"))
+    }
+
+    fn download_dir(&mut self) -> &Path {
+        self.download_dir
+            .get_or_insert_with(|| self.cache_dir.join("downloads"))
+    }
 }
 
 fn main() -> anyhow::Result<()> {
@@ -205,15 +269,15 @@ fn main() -> anyhow::Result<()> {
     } else {
         PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("target")
     };
-    let tool_install_dir = if let Some(cache_root) = dirs::cache_dir() {
-        cache_root.join("pexrc-dev").join("bin")
+    let mut install_dirs = if let Some(cache_dir) = dirs::cache_dir() {
+        InstallDirs::new(cache_dir.join("pexrc-dev"))
     } else {
-        let cache_dir = target_dir.join(".pexrc-dev").join("bin");
+        let cache_dir = target_dir.join(".pexrc-dev");
         println!(
             "cargo::warning=Failed to discover the user cache dir; using {cache_dir}",
             cache_dir = cache_dir.display()
         );
-        cache_dir
+        InstallDirs::new(cache_dir)
     };
 
     let targets = rust_toolchain.toolchain.classify(&build_config.glibc);
@@ -221,14 +285,14 @@ fn main() -> anyhow::Result<()> {
         &cargo,
         ["xwin", "build"],
         &build_config,
-        &tool_install_dir,
+        &mut install_dirs,
         targets.iter_xwin_targets(),
     )?;
     custom_cargo_build(
         &cargo,
         ["zigbuild"],
         &build_config,
-        &tool_install_dir,
+        &mut install_dirs,
         targets.iter_zigbuild_targets(),
     )?;
 
@@ -271,14 +335,14 @@ fn custom_cargo_build<'a>(
     cargo: &Path,
     custom_build_args: impl IntoIterator<Item = &'a str>,
     build_config: &Build,
-    tool_install_dir: &Path,
+    install_dirs: &mut InstallDirs,
     targets: impl Iterator<Item = &'a str>,
 ) -> anyhow::Result<()> {
     let mut cmd = Command::new(cargo);
     cmd.stderr(Stdio::piped());
     cmd.env_remove("CARGO_ENCODED_RUSTFLAGS");
     cmd.env("CARGO_TERM_COLOR", "always");
-    for (env_var, path) in ensure_tools_installed(cargo, build_config, tool_install_dir)? {
+    for (env_var, path) in ensure_tools_installed(cargo, build_config, install_dirs)? {
         cmd.env(env_var, path);
     }
     cmd.args(custom_build_args);
@@ -309,32 +373,34 @@ fn custom_cargo_build<'a>(
 fn ensure_tools_installed(
     cargo: &Path,
     build_config: &Build,
-    tool_install_dir: &Path,
+    install_dirs: &mut InstallDirs,
 ) -> anyhow::Result<Vec<(OsString, OsString)>> {
-    let tool_search_path = if let Some(search_path) =
-        env::var_os("PATH").as_deref().map(env::split_paths)
-    {
-        let search_path = env::join_paths(search_path.chain([PathBuf::from(tool_install_dir)]))?;
-        Cow::Owned(search_path)
-    } else {
-        Cow::Borrowed(tool_install_dir.as_os_str())
-    };
+    let bin_dir = install_dirs.bin_dir();
+    let tool_search_path =
+        if let Some(search_path) = env::var_os("PATH").as_deref().map(env::split_paths) {
+            let search_path = env::join_paths(search_path.chain([bin_dir.to_path_buf()]))?;
+            Cow::Owned(search_path)
+        } else {
+            Cow::Borrowed(bin_dir.as_os_str())
+        };
 
     let mut missing_tools: Vec<Tool> = Vec::with_capacity(Tool::COUNT);
     let mut found_tools: Vec<(OsString, OsString)> = Vec::with_capacity(Tool::COUNT);
-    for tool in Tool::iter() {
+    let mut downloads: Vec<(&'static str, &DownloadArchive)> = Vec::with_capacity(Tool::COUNT);
+    for tool in Tool::collect_tools(build_config) {
         match tool {
-            Tool::Zig(_) => {
+            Tool::Zig(zig_version) => {
                 if let Some(zig) = find_zig(
                     &["zig", "python-zig"],
-                    build_config.zig_version.as_ref(),
+                    zig_version,
                     tool_search_path.as_ref(),
                 ) {
                     found_tools.push(zig);
                 } else {
-                    missing_tools.push(Tool::Zig(build_config.zig_version.to_string()))
+                    missing_tools.push(tool)
                 }
             }
+            Tool::MacOsxSdk(env_var, download) => downloads.push((env_var, download)),
             tool => {
                 if let Ok(exe) =
                     which_in(tool.as_ref(), Some(&tool_search_path), env::current_dir()?)
@@ -355,7 +421,7 @@ fn ensure_tools_installed(
             && value == "1"
         {
             let mut installed_tools =
-                install_tools(cargo, &missing_tools, tool_install_dir, &tool_search_path)?;
+                install_tools(cargo, &missing_tools, bin_dir, &tool_search_path)?;
             found_tools.append(&mut installed_tools);
         } else {
             bail!(
@@ -367,7 +433,142 @@ fn ensure_tools_installed(
             );
         }
     }
+    for (env_var, download_path) in ensure_downloads(downloads, install_dirs.download_dir())? {
+        found_tools.push((env_var, download_path))
+    }
     Ok(found_tools)
+}
+
+fn ensure_downloads<'a>(
+    downloads: impl IntoIterator<
+        IntoIter = impl ExactSizeIterator<Item = (&'static str, &'a DownloadArchive<'a>)>,
+    >,
+    download_dir: &'a Path,
+) -> anyhow::Result<Vec<(OsString, OsString)>> {
+    let downloads = downloads.into_iter();
+    if downloads.len() == 0 {
+        return Ok(Vec::new());
+    }
+
+    let mut download_paths: Vec<(OsString, OsString)> = Vec::with_capacity(downloads.len());
+    fs::create_dir_all(download_dir)?;
+    for (env_var, download) in downloads {
+        let dst_dir = download_dir.join(download.fingerprint.hash.as_ref());
+        let downloaded_path = if let Some(prefix) = download.prefix.as_ref() {
+            dst_dir.join(prefix.as_ref())
+        } else {
+            dst_dir.clone()
+        };
+        download_paths.push((env_var.into(), downloaded_path.into()));
+
+        // Double-checked lock.
+        if dst_dir.exists() {
+            continue;
+        }
+        let lock_file = File::create(dst_dir.with_added_extension("lck"))?;
+        lock_file.lock()?;
+        if dst_dir.exists() {
+            continue;
+        }
+
+        let hasher = match download.fingerprint.algorithm.as_ref() {
+            "sha256" => sha2::Sha256::new(),
+            algorithm => bail!("No support for {algorithm} hashes."),
+        };
+
+        let url = reqwest::Url::parse(download.url.as_ref())?;
+        let path = url.path();
+        if ![".tar.xz", ".tar.lzma", ".tlz"]
+            .iter()
+            .any(|suffix| path.ends_with(suffix))
+        {
+            bail!("No support for downloading archives of this sort: {path}");
+        }
+
+        let response = reqwest::blocking::get(url)?;
+        if let Some(actual_size) = response.content_length()
+            && actual_size != download.size
+        {
+            bail!(
+                "Expected {url} to be {expected_size} bytes but is {actual_size} bytes.",
+                url = download.url,
+                expected_size = download.size
+            );
+        }
+        let download_dir = tempfile::TempDir::new_in(download_dir)?;
+        let mut digest_reader =
+            DigestReader::new(download.size, hasher, response, download.url.as_ref());
+        let mut tar_stream = tar::Archive::new(xz2::read::XzDecoder::new(&mut digest_reader));
+        tar_stream.unpack(download_dir.path())?;
+        digest_reader.check(
+            download.size,
+            download.fingerprint.hash.as_ref(),
+            download.url.as_ref(),
+        )?;
+        fs::rename(download_dir.keep(), dst_dir)?;
+    }
+    Ok(download_paths)
+}
+
+struct DigestReader<'a, D: Digest, R: Read> {
+    digest: D,
+    reader: R,
+    source: &'a str,
+    expected_size: u64,
+    amount_read: u64,
+}
+
+impl<'a, D: Digest, R: Read> DigestReader<'a, D, R> {
+    fn new(expected_size: u64, digest: D, reader: R, source: &'a str) -> Self {
+        Self {
+            digest,
+            reader,
+            source,
+            expected_size,
+            amount_read: 0,
+        }
+    }
+
+    fn check(self, expected_size: u64, expected_hash: &str, source: &str) -> anyhow::Result<()> {
+        if self.amount_read != expected_size {
+            bail!(
+                "Size of {source} was expected to be {expected_size} bytes but was actually \
+                {actual_size} bytes.",
+                actual_size = self.amount_read
+            );
+        }
+        let actual_hash = hex::encode(self.digest.finalize().as_slice());
+        if actual_hash != expected_hash {
+            bail!(
+                "Fingerprint of {source} did not match:\n\
+                Expected: {expected_hash}\n\
+                Actual:   {actual_hash}"
+            );
+        }
+        Ok(())
+    }
+}
+
+impl<'a, D: Digest, R: Read> Read for DigestReader<'a, D, R> {
+    fn read(&mut self, buffer: &mut [u8]) -> Result<usize, io::Error> {
+        let amount_read = self.reader.read(buffer)?;
+        self.amount_read +=
+            u64::try_from(amount_read).expect("The pointer size will not be greater than 64 bits.");
+        if self.amount_read > self.expected_size {
+            return Err(io::Error::new(
+                ErrorKind::FileTooLarge,
+                format!(
+                    "Read {total_read} bytes from {source} but it was expected to be \
+                    {expected_size} bytes.",
+                    total_read = self.amount_read,
+                    source = self.source,
+                    expected_size = self.expected_size
+                ),
+            ));
+        }
+        self.digest.update(&buffer[0..amount_read]);
+        Ok(amount_read)
+    }
 }
 
 fn find_zig(
@@ -427,7 +628,7 @@ fn install_tools(
     let mut zig_version: Option<&str> = None;
     for tool in tools {
         match tool {
-            Tool::Zig(version) => zig_version = Some(version.as_str()),
+            Tool::Zig(version) => zig_version = Some(version),
             tool => binstall(cargo, tool.as_ref())?,
         }
     }

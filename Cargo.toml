@@ -14,6 +14,10 @@ publish = false
 [package.metadata.build]
 zig_version = "0.15.2"
 
+[package.metadata.build.clib]
+profile = "release-clib"
+compression_level = 19
+
 # The glibc release timeline for reference: https://sourceware.org/glibc/wiki/Glibc%20Timeline
 [package.metadata.build.glibc]
 # N.B.: 2.17 if the lowest glibc supported by zig 0.15.2 and this nets us manylinux_2014
@@ -25,9 +29,11 @@ default_version = "2.17"  # Released: 2012-12-25
 powerpc64le-unknown-linux-gnu = "2.19"  # Released: 2014-02-07
 riscv64gc-unknown-linux-gnu = "2.27"  # Released: 2018-02-01
 
-[package.metadata.build.clib]
-profile = "release-clib"
-compression_level = 19
+[package.metadata.build.mac_osx_sdk]
+url = "https://github.com/joseluisq/macosx-sdks/releases/download/11.3/MacOSX11.3.sdk.tar.xz"
+size = 57683504
+fingerprint = { algorithm = "sha256", hash = "9adc1373d3879e1973d28ad9f17c9051b02931674a3ec2a2498128989ece2cb1" }
+prefix = "MacOSX11.3.sdk"
 
 [profile.release]
 codegen-units = 1
@@ -47,17 +53,22 @@ anyhow = "1.0"
 bstr = "1.12"
 dirs = "6.0"
 env_logger = "0.11"
+hex = "0.4"
 include_dir = "0.7"
 itertools = "0.14"
 log = "0.4"
 logging_timer = "1.1"
 rayon = "1.11"
+reqwest = { version = "0.13", features = ["blocking"] }
 serde = { version = "1.0.228", features = ["derive"] }
-strum = {  version = "0.27", features = ["strum_macros"] }
+sha2 = { version = "0.10" }
+strum = { version = "0.27", features = ["strum_macros"] }
 strum_macros = "*"
+tar = "0.4"
 tempfile = "3.25"
 toml = "0.9"
 which = "8.0"
+xz2 = "0.1"
 zip = { version = "7.4", default-features = false, features = ["deflate", "zstd"] }
 zstd = "0.13"
 
@@ -66,13 +77,19 @@ anyhow = { workspace = true }
 bstr = { workspace = true }
 dirs = { workspace = true }
 env_logger = { workspace = true }
+hex = { workspace = true }
 itertools = { workspace = true }
 log = { workspace = true }
+reqwest = { workspace = true }
 serde = { workspace = true }
+sha2 = { workspace = true }
 strum = { workspace = true }
 strum_macros = { workspace = true }
+tar = { workspace = true }
+tempfile = { workspace = true }
 toml = { workspace = true }
 which = { workspace = true }
+xz2 = { workspace = true }
 zstd = { workspace = true }
 
 [dependencies]
