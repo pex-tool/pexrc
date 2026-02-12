@@ -12,7 +12,7 @@ edition = "2024"
 publish = false
 
 [package.metadata.build]
-zig_version = "0.15.1"
+zig_version = "0.15.2"
 
 [package.metadata.build.cargo_binstall]
 version = "1.17.4"
@@ -85,7 +85,7 @@ strum = { version = "0.27", features = ["strum_macros"] }
 strum_macros = "*"
 tar = "0.4"
 tempfile = "3.25"
-toml = "0.9"
+toml = "1.0"
 which = "8.0"
 xz2 = "0.1"
 zip = { version = "7.4", default-features = false, features = ["deflate", "zstd"] }
