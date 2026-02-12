@@ -339,9 +339,10 @@ fn custom_cargo_build<'a>(
     targets: impl Iterator<Item = &'a str>,
 ) -> anyhow::Result<()> {
     let mut cmd = Command::new(cargo);
-    cmd.stderr(Stdio::piped());
-    cmd.env_remove("CARGO_ENCODED_RUSTFLAGS");
-    cmd.env("CARGO_TERM_COLOR", "always");
+    let cmd = cmd
+        .stderr(Stdio::piped())
+        .env_remove("CARGO_ENCODED_RUSTFLAGS")
+        .env("CARGO_TERM_COLOR", "always");
     for (env_var, path) in ensure_tools_installed(cargo, build_config, install_dirs)? {
         println!(
             "cargo::rustc-env={env_var}={path}",
@@ -350,8 +351,7 @@ fn custom_cargo_build<'a>(
         );
         cmd.env(env_var, path);
     }
-    cmd.args(custom_build_args);
-    cmd.args([
+    cmd.args(custom_build_args).args([
         "--package",
         "clib",
         "--profile",
@@ -361,8 +361,7 @@ fn custom_cargo_build<'a>(
         cmd.args(["--target", target]);
     }
 
-    let child = cmd.spawn()?;
-    let result = child.wait_with_output()?;
+    let result = cmd.spawn()?.wait_with_output()?;
     if result.status.success() {
         return Ok(());
     }
