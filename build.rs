@@ -343,6 +343,11 @@ fn custom_cargo_build<'a>(
     cmd.env_remove("CARGO_ENCODED_RUSTFLAGS");
     cmd.env("CARGO_TERM_COLOR", "always");
     for (env_var, path) in ensure_tools_installed(cargo, build_config, install_dirs)? {
+        println!(
+            "cargo::rustc-env={env_var}={path}",
+            env_var = env_var.display(),
+            path = path.display()
+        );
         cmd.env(env_var, path);
     }
     cmd.args(custom_build_args);
