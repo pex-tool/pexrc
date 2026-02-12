@@ -12,7 +12,24 @@ edition = "2024"
 publish = false
 
 [package.metadata.build]
-zig_version = "0.15.2"
+zig_version = "0.15.1"
+
+[package.metadata.build.cargo_binstall]
+version = "1.17.4"
+artifacts = [
+    # N.B.: We don't cover all our targets here. If you develop on an un-covered target, we'll just
+    # run: `cargo install --locked cargo_binstall@<version>`. The only drawback is that's pretty
+    # slow compared to downloading a pre-built binary.
+    { target = "arch64-apple-darwin", type = "zip", size = 7094752, hash = "sha256:c689061413598fa32b77b6fd2a7300c6392faf008137194ab8a4cdb93c12040a"},
+    { target = "aarch64-pc-windows-msvc", type = "zip", size = 6955036, hash = "sha256:6096f3a5da155fcf06f5fe48ee86a0b40427e48d0abb7206e2bc54572f875400"},
+    { target = "aarch64-unknown-linux-gnu", type = "tgz", size = 7564244, hash = "sha256:d0e901a56fbcf5ef20d488fcf069b48d3841c07a8a7b713ca5639d32a6da13a5"},
+    { target = "aarch64-unknown-linux-musl", type = "tgz", size = 7558045, hash = "sha256:1410ec72b4f23fa6cf8ebb4b55fe03ebca63e14adadf4501d78e91fa004e9689"},
+    { target = "armv7-unknown-linux-gnueabihf", type = "tgz", size = 7279373, hash = "sha256:ff488200a04d2ee8d8cbe024b7347158e9835cbdf5677ff4a0a1b91df36d7dad"},
+    { target = "x86_64-apple-darwin", type = "zip", size = 7738226, hash = "sha256:278a12a049397b9f73df0c1e6c83c15fe184e3f5d824ee9a66460c41e519cfd6"},
+    { target = "x86_64-pc-windows-msvc", type = "zip", size = 7200526, hash = "sha256:9c6df6ed7e0eef153fdd6aa0fe0c873496431ea44e2b209331b2dbd29d0d3c06"},
+    { target = "x86_64-unknown-linux-gnu", type = "tgz", size = 8066818, hash = "sha256:556d8572395a50e7a85bface1ab1025fb23856d2221e1207ec3c16a32331891f"},
+    { target = "x86_64-unknown-linux-musl", type = "tgz", size = 8053450, hash = "sha256:8822793dd22a1fcfba6d7581ed130ec935fb26a0db58fb9b0f01f0fae17d28f8"},
+]
 
 [package.metadata.build.clib]
 profile = "release-clib"
@@ -51,8 +68,10 @@ path = "src/pexrc.rs"
 [workspace.dependencies]
 anyhow = "1.0"
 bstr = "1.12"
+const_format = "0.2"
 dirs = "6.0"
 env_logger = "0.11"
+flate2 = "1.1"
 hex = "0.4"
 include_dir = "0.7"
 itertools = "0.14"
@@ -75,8 +94,10 @@ zstd = "0.13"
 [build-dependencies]
 anyhow = { workspace = true }
 bstr = { workspace = true }
+const_format = { workspace = true }
 dirs = { workspace = true }
 env_logger = { workspace = true }
+flate2 = { workspace = true }
 hex = { workspace = true }
 itertools = { workspace = true }
 log = { workspace = true }
@@ -90,6 +111,7 @@ tempfile = { workspace = true }
 toml = { workspace = true }
 which = { workspace = true }
 xz2 = { workspace = true }
+zip = { workspace = true }
 zstd = { workspace = true }
 
 [dependencies]

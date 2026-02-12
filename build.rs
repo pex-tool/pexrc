@@ -1,9 +1,9 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::Tool::{CargoXwin, CargoZigbuild, MacOsxSdk, Uv, Zig};
 use anyhow::bail;
 use bstr::ByteSlice;
+use const_format::concatcp;
 use itertools::Itertools;
 use serde::Deserialize;
 use sha2::Digest;
@@ -15,8 +15,8 @@ use std::io::{ErrorKind, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::{env, fs, io};
-use strum::EnumCount;
-use strum_macros::{AsRefStr, EnumCount};
+use strum::{EnumCount, IntoEnumIterator};
+use strum_macros::{AsRefStr, EnumCount, EnumIter};
 use which::{which_in, which_in_global};
 
 #[derive(Deserialize)]
@@ -167,7 +167,65 @@ struct Clib<'a> {
 }
 
 #[derive(Deserialize)]
+struct Artifact<'a> {
+    #[serde(borrow)]
+    target: Cow<'a, str>,
+    #[serde(borrow, rename = "type")]
+    archive_type: Cow<'a, str>,
+    size: u64,
+    #[serde(borrow)]
+    hash: Cow<'a, str>,
+}
+
+#[derive(Deserialize)]
+struct CargoBinstall<'a> {
+    #[serde(borrow)]
+    version: Cow<'a, str>,
+    artifacts: Vec<Artifact<'a>>,
+}
+
+impl<'a> CargoBinstall<'a> {
+    fn download_for(&'a self, target: &'a str) -> anyhow::Result<Option<DownloadArchive<'a>>> {
+        for artifact in &self.artifacts {
+            if artifact.target != target {
+                continue;
+            }
+            let (algorithm, hash) = if let Some(idx) = artifact.hash.find(":") {
+                (
+                    &artifact.hash.as_ref()[0..idx],
+                    &artifact.hash.as_ref()[idx + 1..],
+                )
+            } else {
+                bail!(
+                    "Invalid hash {hash} for cargo-binstall target {target}.\n\
+                    Must be of form <algorithm>:<hex digest>",
+                    hash = artifact.hash
+                );
+            };
+            return Ok(Some(DownloadArchive {
+                url: Cow::Owned(format!(
+                    "https://github.com/cargo-bins/cargo-binstall/releases/download/\
+                        v{version}/\
+                        cargo-binstall-{target}.{ext}",
+                    version = self.version,
+                    ext = artifact.archive_type
+                )),
+                size: artifact.size,
+                fingerprint: Fingerprint {
+                    algorithm: Cow::Borrowed(algorithm),
+                    hash: Cow::Borrowed(hash),
+                },
+                prefix: None,
+            }));
+        }
+        Ok(None)
+    }
+}
+
+#[derive(Deserialize)]
 struct Build<'a> {
+    #[serde(borrow)]
+    cargo_binstall: CargoBinstall<'a>,
     #[serde(borrow)]
     clib: Clib<'a>,
     #[serde(borrow)]
@@ -196,55 +254,45 @@ struct CargoManifest<'a> {
     package: Package<'a>,
 }
 
-#[derive(AsRefStr, EnumCount)]
-enum Tool<'a> {
+#[derive(AsRefStr, EnumCount, EnumIter)]
+enum BinstallTool {
     #[strum(serialize = "cargo-xwin")]
     CargoXwin,
     #[strum(serialize = "cargo-zigbuild")]
     CargoZigbuild,
-    #[strum(serialize = "MacOSX SDK")]
-    MacOsxSdk(&'static str, &'a DownloadArchive<'a>),
-    #[strum(serialize = "zig")]
-    Zig(&'a str),
     #[strum(serialize = "uv")]
     Uv,
 }
 
-impl<'a> Tool<'a> {
-    fn collect_tools(build: &'a Build) -> Vec<Tool<'a>> {
-        let mut tools = Vec::with_capacity(Tool::COUNT);
-        tools.push(CargoXwin);
-        tools.push(CargoZigbuild);
-        tools.push(MacOsxSdk("SDKROOT", &build.mac_osx_sdk));
-        tools.push(Zig(build.zig_version.as_ref()));
-        tools.push(Uv);
-        tools
+struct ToolBox<'a> {
+    binstall: &'a CargoBinstall<'a>,
+    zig_version: &'a str,
+    binstall_tools: Vec<BinstallTool>,
+    downloads: Vec<(&'static str, &'a DownloadArchive<'a>)>,
+}
+
+impl<'a> ToolBox<'a> {
+    fn collect_tools(build: &'a Build) -> ToolBox<'a> {
+        ToolBox {
+            binstall: &build.cargo_binstall,
+            zig_version: build.zig_version.as_ref(),
+            binstall_tools: BinstallTool::iter().collect::<Vec<_>>(),
+            downloads: vec![("SDKROOT", &build.mac_osx_sdk)],
+        }
     }
 }
 
 struct InstallDirs {
-    cache_dir: PathBuf,
-    bin_dir: Option<PathBuf>,
-    download_dir: Option<PathBuf>,
+    bin_dir: PathBuf,
+    download_dir: PathBuf,
 }
 
 impl InstallDirs {
     fn new(cache_dir: PathBuf) -> Self {
         Self {
-            cache_dir,
-            bin_dir: None,
-            download_dir: None,
+            bin_dir: cache_dir.join("bin"),
+            download_dir: cache_dir.join("downloads"),
         }
-    }
-
-    fn bin_dir(&mut self) -> &Path {
-        self.bin_dir
-            .get_or_insert_with(|| self.cache_dir.join("bin"))
-    }
-
-    fn download_dir(&mut self) -> &Path {
-        self.download_dir
-            .get_or_insert_with(|| self.cache_dir.join("downloads"))
     }
 }
 
@@ -377,67 +425,69 @@ fn custom_cargo_build<'a>(
 fn ensure_tools_installed(
     cargo: &Path,
     build_config: &Build,
-    install_dirs: &mut InstallDirs,
+    install_dirs: &InstallDirs,
 ) -> anyhow::Result<Vec<(OsString, OsString)>> {
-    let bin_dir = install_dirs.bin_dir();
     let tool_search_path =
         if let Some(search_path) = env::var_os("PATH").as_deref().map(env::split_paths) {
-            let search_path = env::join_paths(search_path.chain([bin_dir.to_path_buf()]))?;
+            let search_path = env::join_paths(search_path.chain([install_dirs.bin_dir.clone()]))?;
             Cow::Owned(search_path)
         } else {
-            Cow::Borrowed(bin_dir.as_os_str())
+            Cow::Borrowed(install_dirs.bin_dir.as_os_str())
         };
 
-    let mut missing_tools: Vec<Tool> = Vec::with_capacity(Tool::COUNT);
-    let mut found_tools: Vec<(OsString, OsString)> = Vec::with_capacity(Tool::COUNT);
-    let mut downloads: Vec<(&'static str, &DownloadArchive)> = Vec::with_capacity(Tool::COUNT);
-    for tool in Tool::collect_tools(build_config) {
-        match tool {
-            Tool::Zig(zig_version) => {
-                if let Some(zig) = find_zig(
-                    &["zig", "python-zig"],
-                    zig_version,
-                    tool_search_path.as_ref(),
-                ) {
-                    found_tools.push(zig);
-                } else {
-                    missing_tools.push(tool)
-                }
-            }
-            Tool::MacOsxSdk(env_var, download) => downloads.push((env_var, download)),
-            tool => {
-                if let Ok(exe) =
-                    which_in(tool.as_ref(), Some(&tool_search_path), env::current_dir()?)
-                {
-                    eprintln!(
-                        "Found {tool} at {exe}",
-                        tool = tool.as_ref(),
-                        exe = exe.display()
-                    );
-                } else {
-                    missing_tools.push(tool)
-                }
-            }
+    let toolbox = ToolBox::collect_tools(build_config);
+    let mut found_tools: Vec<(OsString, OsString)> =
+        Vec::with_capacity(BinstallTool::COUNT + toolbox.downloads.len());
+    let mut missing_binstall_tools: Vec<BinstallTool> = Vec::with_capacity(BinstallTool::COUNT);
+    let mut missing_zig: Option<&str> = None;
+    if let Some(zig) = find_zig(
+        &["zig", "python-zig"],
+        toolbox.zig_version,
+        tool_search_path.as_ref(),
+    ) {
+        found_tools.push(zig);
+    } else {
+        missing_zig = Some(toolbox.zig_version);
+    }
+    for tool in toolbox.binstall_tools {
+        if let Ok(exe) = which_in(tool.as_ref(), Some(&tool_search_path), env::current_dir()?) {
+            eprintln!(
+                "Found {tool} at {exe}",
+                tool = tool.as_ref(),
+                exe = exe.display()
+            );
+        } else {
+            missing_binstall_tools.push(tool)
         }
     }
-    if !missing_tools.is_empty() {
+    if !missing_binstall_tools.is_empty() || missing_zig.is_some() {
         if let Some(value) = env::var_os("PEXRC_INSTALL_TOOLS")
             && value == "1"
         {
-            let mut installed_tools =
-                install_tools(cargo, &missing_tools, bin_dir, &tool_search_path)?;
+            let mut installed_tools = install_tools(
+                cargo,
+                toolbox.binstall,
+                missing_binstall_tools.as_slice(),
+                missing_zig,
+                install_dirs,
+                &tool_search_path,
+            )?;
             found_tools.append(&mut installed_tools);
         } else {
             bail!(
                 "The following tools are required but are not installed: {tools}\n\
                 Searched PATH: {search_path}\n\
                 Re-run with PEXRC_INSTALL_TOOLS=1 to let the build script install these tools.",
-                tools = missing_tools.iter().map(AsRef::as_ref).join(" "),
+                tools = missing_binstall_tools
+                    .iter()
+                    .map(|tool| tool.as_ref().to_owned())
+                    .chain(missing_zig.iter().map(|version| format!("zig@{version}")))
+                    .join(" "),
                 search_path = tool_search_path.display()
             );
         }
     }
-    for (env_var, download_path) in ensure_downloads(downloads, install_dirs.download_dir())? {
+    for (env_var, download_path) in ensure_downloads(toolbox.downloads, install_dirs)? {
         found_tools.push((env_var, download_path))
     }
     Ok(found_tools)
@@ -447,7 +497,7 @@ fn ensure_downloads<'a>(
     downloads: impl IntoIterator<
         IntoIter = impl ExactSizeIterator<Item = (&'static str, &'a DownloadArchive<'a>)>,
     >,
-    download_dir: &'a Path,
+    install_dirs: &'a InstallDirs,
 ) -> anyhow::Result<Vec<(OsString, OsString)>> {
     let downloads = downloads.into_iter();
     if downloads.len() == 0 {
@@ -455,63 +505,103 @@ fn ensure_downloads<'a>(
     }
 
     let mut download_paths: Vec<(OsString, OsString)> = Vec::with_capacity(downloads.len());
-    fs::create_dir_all(download_dir)?;
     for (env_var, download) in downloads {
-        let dst_dir = download_dir.join(download.fingerprint.hash.as_ref());
-        let downloaded_path = if let Some(prefix) = download.prefix.as_ref() {
-            dst_dir.join(prefix.as_ref())
-        } else {
-            dst_dir.clone()
-        };
-        download_paths.push((env_var.into(), downloaded_path.into()));
-
-        // Double-checked lock.
-        if dst_dir.exists() {
-            continue;
-        }
-        let lock_file = File::create(dst_dir.with_added_extension("lck"))?;
-        lock_file.lock()?;
-        if dst_dir.exists() {
-            continue;
-        }
-
-        let hasher = match download.fingerprint.algorithm.as_ref() {
-            "sha256" => sha2::Sha256::new(),
-            algorithm => bail!("No support for {algorithm} hashes."),
-        };
-
-        let url = reqwest::Url::parse(download.url.as_ref())?;
-        let path = url.path();
-        if ![".tar.xz", ".tar.lzma", ".tlz"]
-            .iter()
-            .any(|suffix| path.ends_with(suffix))
-        {
-            bail!("No support for downloading archives of this sort: {path}");
-        }
-
-        let response = reqwest::blocking::get(url)?;
-        if let Some(actual_size) = response.content_length()
-            && actual_size != download.size
-        {
-            bail!(
-                "Expected {url} to be {expected_size} bytes but is {actual_size} bytes.",
-                url = download.url,
-                expected_size = download.size
-            );
-        }
-        let download_dir = tempfile::TempDir::new_in(download_dir)?;
-        let mut digest_reader =
-            DigestReader::new(download.size, hasher, response, download.url.as_ref());
-        let mut tar_stream = tar::Archive::new(xz2::read::XzDecoder::new(&mut digest_reader));
-        tar_stream.unpack(download_dir.path())?;
-        digest_reader.check(
-            download.size,
-            download.fingerprint.hash.as_ref(),
-            download.url.as_ref(),
-        )?;
-        fs::rename(download_dir.keep(), dst_dir)?;
+        let download_path = ensure_download(&install_dirs.download_dir, download)?;
+        download_paths.push((OsString::from(env_var), download_path.into_os_string()));
     }
     Ok(download_paths)
+}
+
+enum ArchiveType {
+    TarLzma,
+    TarGzip,
+    Zip,
+}
+
+impl TryFrom<&str> for ArchiveType {
+    type Error = anyhow::Error;
+
+    fn try_from(path: &str) -> anyhow::Result<Self> {
+        let archive_type = if [".tar.gz", ".tgz"].iter().any(|ext| path.ends_with(ext)) {
+            ArchiveType::TarGzip
+        } else if [".tar.xz", ".tar.lzma", ".tlz"]
+            .iter()
+            .any(|ext| path.ends_with(ext))
+        {
+            ArchiveType::TarLzma
+        } else if [".zip"].iter().any(|ext| path.ends_with(ext)) {
+            ArchiveType::Zip
+        } else {
+            bail!("No support for downloading archives of this sort: {path}");
+        };
+        Ok(archive_type)
+    }
+}
+
+fn ensure_download(download_dir: &Path, download: &DownloadArchive) -> anyhow::Result<PathBuf> {
+    fs::create_dir_all(download_dir)?;
+    let dst_dir = download_dir.join(download.fingerprint.hash.as_ref());
+    let downloaded_path = Ok(if let Some(prefix) = download.prefix.as_ref() {
+        dst_dir.join(prefix.as_ref())
+    } else {
+        dst_dir.clone()
+    });
+
+    // Double-checked lock.
+    if dst_dir.exists() {
+        return downloaded_path;
+    }
+    let lock_file = File::create(dst_dir.with_added_extension("lck"))?;
+    lock_file.lock()?;
+    if dst_dir.exists() {
+        return downloaded_path;
+    }
+
+    let hasher = match download.fingerprint.algorithm.as_ref() {
+        "sha256" => sha2::Sha256::new(),
+        algorithm => bail!("No support for {algorithm} hashes."),
+    };
+
+    let url = reqwest::Url::parse(download.url.as_ref())?;
+    let archive_type = ArchiveType::try_from(url.path())?;
+
+    let response = reqwest::blocking::get(url)?;
+    if let Some(actual_size) = response.content_length()
+        && actual_size != download.size
+    {
+        bail!(
+            "Expected {url} to be {expected_size} bytes but is {actual_size} bytes.",
+            url = download.url,
+            expected_size = download.size
+        );
+    }
+    let download_dir = tempfile::TempDir::new_in(download_dir)?;
+    let mut digest_reader =
+        DigestReader::new(download.size, hasher, response, download.url.as_ref());
+    match archive_type {
+        ArchiveType::TarGzip => {
+            let mut tar_stream =
+                tar::Archive::new(flate2::read::GzDecoder::new(&mut digest_reader));
+            tar_stream.unpack(download_dir.path())?;
+        }
+        ArchiveType::TarLzma => {
+            let mut tar_stream = tar::Archive::new(xz2::read::XzDecoder::new(&mut digest_reader));
+            tar_stream.unpack(download_dir.path())?;
+        }
+        ArchiveType::Zip => {
+            let mut tmp = tempfile::tempfile_in(download_dir.path())?;
+            io::copy(&mut digest_reader, &mut tmp)?;
+            let mut zip = zip::ZipArchive::new(&mut tmp)?;
+            zip.extract(download_dir.path())?;
+        }
+    }
+    digest_reader.check(
+        download.size,
+        download.fingerprint.hash.as_ref(),
+        download.url.as_ref(),
+    )?;
+    fs::rename(download_dir.keep(), dst_dir)?;
+    downloaded_path
 }
 
 struct DigestReader<'a, D: Digest, R: Read> {
@@ -612,36 +702,28 @@ fn get_zig_version(zig: impl AsRef<Path>) -> Option<String> {
 
 fn install_tools(
     cargo: &Path,
-    tools: &[Tool],
-    install_dir: &Path,
+    cargo_binstall: &CargoBinstall,
+    tools: &[BinstallTool],
+    zig: Option<&str>,
+    install_dirs: &InstallDirs,
     search_path: &OsStr,
 ) -> anyhow::Result<Vec<(OsString, OsString)>> {
-    if which_in_global("cargo-binstall", Some(search_path)).is_err() {
-        let result = Command::new(cargo)
-            .args(["install", "--locked", "cargo-binstall"])
-            .stderr(Stdio::piped())
-            .spawn()?
-            .wait_with_output()?;
-        if !result.status.success() {
-            bail!(
-                "Failed to install cargo-binstall to bootstrap tools with:\n{stderr}",
-                stderr = result.stderr.to_str_lossy()
-            )
-        }
-    }
-    let mut zig_version: Option<&str> = None;
     for tool in tools {
-        match tool {
-            Tool::Zig(version) => zig_version = Some(version),
-            tool => binstall(cargo, tool.as_ref())?,
-        }
+        binstall(
+            cargo_binstall,
+            install_dirs,
+            search_path,
+            cargo,
+            tool.as_ref(),
+        )?;
     }
-    if let Some(zig_version) = zig_version {
-        fs::create_dir_all(install_dir)?;
+
+    if let Some(zig_version) = zig {
         let zig_requirement = format!("ziglang=={zig_version}");
+        fs::create_dir_all(&install_dirs.bin_dir)?;
         let result = Command::new("uv")
             .args(["tool", "install", "--force", &zig_requirement])
-            .env("UV_TOOL_BIN_DIR", install_dir.as_os_str())
+            .env("UV_TOOL_BIN_DIR", install_dirs.bin_dir.as_os_str())
             .stderr(Stdio::piped())
             .spawn()?
             .wait_with_output()?;
@@ -665,8 +747,53 @@ fn install_tools(
     }
 }
 
-fn binstall(cargo: &Path, spec: &str) -> anyhow::Result<()> {
+const CARGO_BINSTALL_FILE_NAME: &str = concatcp!("cargo-binstall", env::consts::EXE_SUFFIX);
+
+fn binstall(
+    cargo_binstall: &CargoBinstall,
+    install_dirs: &InstallDirs,
+    search_path: &OsStr,
+    cargo: &Path,
+    spec: &str,
+) -> anyhow::Result<()> {
+    let exes = which_in_global("cargo-binstall", Some(search_path))?.collect::<Vec<_>>();
+    if !exes.is_empty() {
+        eprintln!("Found cargo-binstall at:");
+        for (idx, exe) in exes.iter().enumerate() {
+            eprintln!("{idx} {exe}", idx = idx + 1, exe = exe.display());
+        }
+    } else {
+        let target = env::var("TARGET")?;
+        if let Some(download) = cargo_binstall.download_for(&target)? {
+            let cargo_binstall = ensure_download(&install_dirs.download_dir, &download)?
+                .join(CARGO_BINSTALL_FILE_NAME);
+            let cargo_binstall_fp = File::open(&cargo_binstall)?;
+            cargo_binstall_fp.lock()?;
+            let dst = install_dirs.bin_dir.join(CARGO_BINSTALL_FILE_NAME);
+            if dst.exists() {
+                fs::remove_file(&dst)?;
+            } else {
+                fs::create_dir_all(&install_dirs.bin_dir)?;
+            }
+            fs::hard_link(&cargo_binstall, &dst)?;
+        } else {
+            let spec = format!("cargo-binstall@{version}", version = cargo_binstall.version);
+            let result = Command::new(cargo)
+                .args(["install", "--locked", &spec])
+                .stderr(Stdio::piped())
+                .spawn()?
+                .wait_with_output()?;
+            if !result.status.success() {
+                bail!(
+                    "Failed to install cargo-binstall to bootstrap tools with:\n{stderr}",
+                    stderr = result.stderr.to_str_lossy()
+                )
+            }
+        }
+    }
+
     let result = Command::new(cargo)
+        .env("PATH", search_path)
         .args(["binstall", "--no-confirm", spec])
         .stderr(Stdio::piped())
         .spawn()?
