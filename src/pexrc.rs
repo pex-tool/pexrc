@@ -1,20 +1,20 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
-use anyhow::{Context, anyhow, bail};
-use include_dir::{Dir, include_dir};
-use itertools::Itertools;
-use pexrs::{Algorithm, boot};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::{env, io};
+
+use anyhow::{Context, anyhow, bail};
+use include_dir::{Dir, include_dir};
+use itertools::Itertools;
+use logging_timer::time;
+use pexrs::{Algorithm, boot};
 use tempfile::NamedTempFile;
+use which::which;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
-
-use logging_timer::time;
-use which::which;
 
 static CLIBS_DIR: Dir<'_> = include_dir!("$CLIBS_DIR");
 

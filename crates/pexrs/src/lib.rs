@@ -1,12 +1,13 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
-use logging_timer::time;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use std::fs::File;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{fs, io};
+
+use logging_timer::time;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use zip::ZipArchive;
 
 #[derive(strum_macros::Display, Eq, PartialEq)]

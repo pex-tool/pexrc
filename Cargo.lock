@@ -1123,19 +1123,29 @@ dependencies = [
  "itertools",
  "log",
  "logging_timer",
+ "pexrc-build-system",
  "pexrs",
  "reqwest",
- "serde",
  "sha2",
- "strum",
- "strum_macros",
  "tar",
  "tempfile",
- "toml",
  "which",
  "xz2",
  "zip",
  "zstd",
+]
+
+[[package]]
+name = "pexrc-build-system"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "bstr",
+ "serde",
+ "strum",
+ "strum_macros",
+ "toml",
+ "which",
 ]
 
 [[package]]

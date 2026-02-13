@@ -1,10 +1,10 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
-use pexrs::boot as rust_boot;
 use std::ffi::{CStr, c_char};
-
 use std::path::Path;
+
+use pexrs::boot as rust_boot;
 
 #[inline]
 unsafe fn as_path(value: *const c_char, subject: &str) -> Result<&Path, String> {

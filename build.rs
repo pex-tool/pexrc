@@ -1,273 +1,31 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
-use anyhow::bail;
-use bstr::ByteSlice;
-use const_format::concatcp;
-use itertools::Itertools;
-use serde::Deserialize;
-use sha2::Digest;
 use std::borrow::Cow;
-use std::collections::HashMap;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{ErrorKind, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::{env, fs, io};
-use strum::{EnumCount, IntoEnumIterator};
-use strum_macros::{EnumCount, EnumIter};
+
+use anyhow::bail;
+use bstr::ByteSlice;
+use const_format::concatcp;
+use itertools::Itertools;
+use pexrc_build_system::{
+    BinstallTool,
+    CargoBinstall,
+    DownloadArchive,
+    FoundTool,
+    ToolInventory,
+    Zig,
+    classify_targets,
+    find_zig,
+    inventory_tools,
+};
+use sha2::Digest;
 use which::which_in_global;
-
-#[derive(Deserialize)]
-struct Toolchain<'a> {
-    #[serde(borrow)]
-    targets: Vec<&'a str>,
-}
-
-struct GnuLinux<'a> {
-    target: &'a str,
-    zigbuild_target: String,
-}
-
-enum Target<'a> {
-    Apple(&'a str),
-    GnuLinux(GnuLinux<'a>),
-    Unix(&'a str),
-    Windows(&'a str),
-}
-
-impl<'a> Target<'a> {
-    fn as_str(&self) -> &str {
-        match self {
-            Target::Apple(target) | Target::Unix(target) | Target::Windows(target) => target,
-            Target::GnuLinux(linux) => linux.target,
-        }
-    }
-
-    fn shared_library_name(&self, lib_name: &str) -> String {
-        match self {
-            Target::Apple(_) => format!("lib{lib_name}.dylib"),
-            Target::GnuLinux(_) | Target::Unix(_) => format!("lib{lib_name}.so"),
-            Target::Windows(_) => format!("{lib_name}.dll"),
-        }
-    }
-}
-
-struct ClassifiedTargets<'a> {
-    xwin_targets: Vec<Target<'a>>,
-    zigbuild_targets: Vec<Target<'a>>,
-}
-
-impl<'a> ClassifiedTargets<'a> {
-    fn iter_zigbuild_targets(&'a self) -> impl Iterator<Item = &'a str> {
-        self.zigbuild_targets.iter().map(|target| {
-            if let Target::GnuLinux(gnu_linux) = target {
-                gnu_linux.zigbuild_target.as_str()
-            } else {
-                target.as_str()
-            }
-        })
-    }
-
-    fn iter_xwin_targets(&'a self) -> impl Iterator<Item = &'a str> {
-        self.xwin_targets.iter().map(Target::as_str)
-    }
-
-    fn iter_targets(&'a self) -> impl Iterator<Item = &'a Target<'a>> {
-        self.zigbuild_targets.iter().chain(self.xwin_targets.iter())
-    }
-}
-
-impl<'a> Toolchain<'a> {
-    fn classify(&self, glibc: &'a Glibc) -> ClassifiedTargets<'a> {
-        let (xwin_targets, zigbuild_targets) = self
-            .targets
-            .iter()
-            .map(|target| {
-                if target.contains("-apple-") {
-                    Target::Apple(target)
-                } else if target.contains("-linux-") {
-                    if target.ends_with("-gnu") {
-                        let zigbuild_target = format!(
-                            "{target}.{glibc_version}",
-                            glibc_version = glibc.version(target)
-                        );
-                        Target::GnuLinux(GnuLinux {
-                            target,
-                            zigbuild_target,
-                        })
-                    } else {
-                        Target::Unix(target)
-                    }
-                } else if target.contains("-windows-") {
-                    Target::Windows(target)
-                } else {
-                    panic!("The build system does not know how to handle")
-                }
-            })
-            .partition::<Vec<_>, _>(|target| matches!(target, Target::Windows(_)));
-        ClassifiedTargets {
-            xwin_targets,
-            zigbuild_targets,
-        }
-    }
-}
-
-#[derive(Deserialize)]
-struct RustToolchain<'a> {
-    #[serde(borrow)]
-    toolchain: Toolchain<'a>,
-}
-
-#[derive(Deserialize, Debug)]
-struct Fingerprint<'a> {
-    algorithm: &'a str,
-    hash: &'a str,
-}
-
-#[derive(Deserialize, Debug)]
-struct DownloadArchive<'a> {
-    url: Cow<'a, str>,
-    size: u64,
-    #[serde(borrow)]
-    fingerprint: Fingerprint<'a>,
-    #[serde(default)]
-    prefix: Option<&'a str>,
-}
-
-#[derive(Deserialize)]
-struct Glibc<'a> {
-    default_version: &'a str,
-    by_platform: HashMap<&'a str, &'a str>,
-}
-
-impl<'a> Glibc<'a> {
-    fn version(&self, target: &str) -> &str {
-        self.by_platform
-            .get(target)
-            .map_or(self.default_version, |target| target)
-    }
-}
-
-#[derive(Deserialize)]
-struct Clib<'a> {
-    profile: &'a str,
-    compression_level: i32,
-}
-
-#[derive(Deserialize)]
-struct Artifact<'a> {
-    target: &'a str,
-    #[serde(rename = "type")]
-    archive_type: &'a str,
-    size: u64,
-    hash: &'a str,
-}
-
-#[derive(Deserialize)]
-struct CargoBinstall<'a> {
-    version: &'a str,
-    artifacts: Vec<Artifact<'a>>,
-}
-
-impl<'a> CargoBinstall<'a> {
-    fn download_for(&'a self, target: &'a str) -> anyhow::Result<Option<DownloadArchive<'a>>> {
-        for artifact in &self.artifacts {
-            if artifact.target != target {
-                continue;
-            }
-            let (algorithm, hash) = if let Some(idx) = artifact.hash.find(":") {
-                (&artifact.hash[0..idx], &artifact.hash[idx + 1..])
-            } else {
-                bail!(
-                    "Invalid hash {hash} for cargo-binstall target {target}.\n\
-                    Must be of form <algorithm>:<hex digest>",
-                    hash = artifact.hash
-                );
-            };
-            return Ok(Some(DownloadArchive {
-                url: Cow::Owned(format!(
-                    "https://github.com/cargo-bins/cargo-binstall/releases/download/\
-                        v{version}/\
-                        cargo-binstall-{target}.{ext}",
-                    version = self.version,
-                    ext = artifact.archive_type
-                )),
-                size: artifact.size,
-                fingerprint: Fingerprint { algorithm, hash },
-                prefix: None,
-            }));
-        }
-        Ok(None)
-    }
-}
-
-#[derive(Deserialize)]
-struct Build<'a> {
-    #[serde(borrow)]
-    cargo_binstall: CargoBinstall<'a>,
-    #[serde(borrow)]
-    clib: Clib<'a>,
-    #[serde(borrow)]
-    glibc: Glibc<'a>,
-    #[serde(borrow)]
-    mac_osx_sdk: DownloadArchive<'a>,
-    zig_version: &'a str,
-}
-
-#[derive(Deserialize)]
-struct Metadata<'a> {
-    #[serde(borrow)]
-    build: Build<'a>,
-}
-
-#[derive(Deserialize)]
-struct Package<'a> {
-    #[serde(borrow)]
-    metadata: Metadata<'a>,
-}
-
-#[derive(Deserialize)]
-struct CargoManifest<'a> {
-    #[serde(borrow)]
-    package: Package<'a>,
-}
-
-#[derive(EnumCount, EnumIter)]
-enum BinstallTool {
-    CargoXwin,
-    CargoZigbuild,
-    Uv,
-}
-
-impl BinstallTool {
-    fn binary_name(&self) -> &'static str {
-        match *self {
-            BinstallTool::CargoXwin => "cargo-xwin",
-            BinstallTool::CargoZigbuild => "cargo-zigbuild",
-            BinstallTool::Uv => "uv",
-        }
-    }
-}
-
-struct ToolBox<'a> {
-    binstall: &'a CargoBinstall<'a>,
-    zig_version: &'a str,
-    binstall_tools: Vec<BinstallTool>,
-    downloads: Vec<(&'static str, &'a DownloadArchive<'a>)>,
-}
-
-impl<'a> ToolBox<'a> {
-    fn collect_tools(build: &'a Build) -> ToolBox<'a> {
-        ToolBox {
-            binstall: &build.cargo_binstall,
-            zig_version: build.zig_version,
-            binstall_tools: BinstallTool::iter().collect::<Vec<_>>(),
-            downloads: vec![("SDKROOT", &build.mac_osx_sdk)],
-        }
-    }
-}
 
 struct InstallDirs {
     bin_dir: PathBuf,
@@ -281,6 +39,15 @@ impl InstallDirs {
             download_dir: cache_dir.join("downloads"),
         }
     }
+
+    fn search_path(&self) -> anyhow::Result<Cow<'_, OsStr>> {
+        if let Some(search_path) = env::var_os("PATH").as_deref().map(env::split_paths) {
+            let search_path = env::join_paths(search_path.chain([self.bin_dir.clone()]))?;
+            Ok(Cow::Owned(search_path))
+        } else {
+            Ok(Cow::Borrowed(self.bin_dir.as_os_str()))
+        }
+    }
 }
 
 fn main() -> anyhow::Result<()> {
@@ -288,23 +55,12 @@ fn main() -> anyhow::Result<()> {
 
     let cargo: PathBuf = env::var("CARGO")?.into();
 
-    let data = fs::read_to_string("rust-toolchain")?;
-    let rust_toolchain: RustToolchain = toml::from_str(data.as_str())?;
-
-    let data = {
-        let manifest_path = env::var("CARGO_MANIFEST_PATH")?;
-        fs::read_to_string(manifest_path)?
-    };
-    let build_config = {
-        let cargo_manifest: CargoManifest = toml::from_str(data.as_str())?;
-        cargo_manifest.package.metadata.build
-    };
     let target_dir: PathBuf = if let Some(custom_target_dir) = env::var_os("CARGO_TARGET_DIR") {
         custom_target_dir.into()
     } else {
         PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("target")
     };
-    let mut install_dirs = if let Some(cache_dir) = dirs::cache_dir() {
+    let install_dirs = if let Some(cache_dir) = dirs::cache_dir() {
         InstallDirs::new(cache_dir.join("pexrc-dev"))
     } else {
         let cache_dir = target_dir.join(".pexrc-dev");
@@ -314,20 +70,30 @@ fn main() -> anyhow::Result<()> {
         );
         InstallDirs::new(cache_dir)
     };
+    let tool_search_path = install_dirs.search_path()?;
 
-    let targets = rust_toolchain.toolchain.classify(&build_config.glibc);
+    let data = {
+        let manifest_path = env::var("CARGO_MANIFEST_PATH")?;
+        fs::read_to_string(manifest_path)?
+    };
+    let tool_inventory = inventory_tools(data.as_str(), tool_search_path)?;
+    let found_tools = ensure_tools_installed(&cargo, &tool_inventory, &install_dirs)?;
+
+    let rust_toolchain_contents = fs::read_to_string("rust-toolchain")?;
+    let targets = classify_targets(rust_toolchain_contents.as_str(), &tool_inventory.glibc)?;
+
     custom_cargo_build(
         &cargo,
         ["xwin", "build"],
-        &build_config,
-        &mut install_dirs,
+        &tool_inventory,
+        &found_tools,
         targets.iter_xwin_targets(),
     )?;
     custom_cargo_build(
         &cargo,
         ["zigbuild"],
-        &build_config,
-        &mut install_dirs,
+        &tool_inventory,
+        &found_tools,
         targets.iter_zigbuild_targets(),
     )?;
 
@@ -343,7 +109,7 @@ fn main() -> anyhow::Result<()> {
         let clib_name = target.shared_library_name("pexrc");
         let clib = target_dir
             .join(target.as_str())
-            .join(build_config.clib.profile)
+            .join(tool_inventory.clib.profile)
             .join(&clib_name);
         if !clib.exists() {
             eprintln!(
@@ -358,7 +124,7 @@ fn main() -> anyhow::Result<()> {
                 File::create(
                     clibs_dir.join(format!("{target}.{clib_name}", target = target.as_str())),
                 )?,
-                build_config.clib.compression_level,
+                tool_inventory.clib.compression_level,
             )?,
         )?;
     }
@@ -369,8 +135,8 @@ fn main() -> anyhow::Result<()> {
 fn custom_cargo_build<'a>(
     cargo: &Path,
     custom_build_args: impl IntoIterator<Item = &'a str>,
-    build_config: &Build,
-    install_dirs: &mut InstallDirs,
+    tool_inventory: &ToolInventory,
+    found_tools: impl IntoIterator<Item = &'a FoundTool>,
     targets: impl Iterator<Item = &'a str>,
 ) -> anyhow::Result<()> {
     let mut cmd = Command::new(cargo);
@@ -378,16 +144,20 @@ fn custom_cargo_build<'a>(
         .stderr(Stdio::piped())
         .env_remove("CARGO_ENCODED_RUSTFLAGS")
         .env("CARGO_TERM_COLOR", "always");
-    for (env_var, path) in ensure_tools_installed(cargo, build_config, install_dirs)? {
+    for found_tool in found_tools {
         println!(
             "cargo::rustc-env={env_var}={path}",
-            env_var = env_var.display(),
-            path = path.display()
+            env_var = found_tool.env_var,
+            path = found_tool.path.display()
         );
-        cmd.env(env_var, path);
+        cmd.env(found_tool.env_var, &found_tool.path);
     }
-    cmd.args(custom_build_args)
-        .args(["--package", "clib", "--profile", build_config.clib.profile]);
+    cmd.args(custom_build_args).args([
+        "--package",
+        "clib",
+        "--profile",
+        tool_inventory.clib.profile,
+    ]);
     for target in targets {
         cmd.args(["--target", target]);
     }
@@ -407,9 +177,9 @@ fn custom_cargo_build<'a>(
 
 fn ensure_tools_installed(
     cargo: &Path,
-    build_config: &Build,
+    tool_inventory: &ToolInventory,
     install_dirs: &InstallDirs,
-) -> anyhow::Result<Vec<(OsString, OsString)>> {
+) -> anyhow::Result<Vec<FoundTool>> {
     let tool_search_path =
         if let Some(search_path) = env::var_os("PATH").as_deref().map(env::split_paths) {
             let search_path = env::join_paths(search_path.chain([install_dirs.bin_dir.clone()]))?;
@@ -418,42 +188,16 @@ fn ensure_tools_installed(
             Cow::Borrowed(install_dirs.bin_dir.as_os_str())
         };
 
-    let toolbox = ToolBox::collect_tools(build_config);
-    let mut found_tools: Vec<(OsString, OsString)> =
-        Vec::with_capacity(BinstallTool::COUNT + toolbox.downloads.len());
-    let mut missing_binstall_tools: Vec<BinstallTool> = Vec::with_capacity(BinstallTool::COUNT);
-    let mut missing_zig: Option<&str> = None;
-    if let Some(zig) = find_zig(
-        &["zig", "python-zig"],
-        toolbox.zig_version,
-        tool_search_path.as_ref(),
-    ) {
-        found_tools.push(zig);
-    } else {
-        missing_zig = Some(toolbox.zig_version);
-    }
-    for tool in toolbox.binstall_tools {
-        if let Ok(Some(exe)) = which_in_global(tool.binary_name(), Some(&tool_search_path))
-            .map(|mut found| found.next())
-        {
-            eprintln!(
-                "Found {tool} at {exe}",
-                tool = tool.binary_name(),
-                exe = exe.display()
-            );
-        } else {
-            missing_binstall_tools.push(tool)
-        }
-    }
-    if !missing_binstall_tools.is_empty() || missing_zig.is_some() {
+    let mut found_tools = Vec::new();
+    if !tool_inventory.missing.is_empty() || !tool_inventory.zig.found() {
         if let Some(value) = env::var_os("PEXRC_INSTALL_TOOLS")
             && value == "1"
         {
             let mut installed_tools = install_tools(
                 cargo,
-                toolbox.binstall,
-                missing_binstall_tools.as_slice(),
-                missing_zig,
+                &tool_inventory.binstall,
+                tool_inventory.missing.as_slice(),
+                &tool_inventory.zig,
                 install_dirs,
                 &tool_search_path,
             )?;
@@ -463,36 +207,42 @@ fn ensure_tools_installed(
                 "The following tools are required but are not installed: {tools}\n\
                 Searched PATH: {search_path}\n\
                 Re-run with PEXRC_INSTALL_TOOLS=1 to let the build script install these tools.",
-                tools = missing_binstall_tools
+                tools = tool_inventory
+                    .missing
                     .iter()
                     .map(|tool| Cow::Borrowed(tool.binary_name()))
-                    .chain(missing_zig.iter().map(|version| Cow::Owned(format!("zig@{version}"))))
+                    .chain(
+                        tool_inventory
+                            .zig
+                            .missing_version()
+                            .iter()
+                            .map(|version| Cow::Owned(format!("zig@{version}")))
+                    )
                     .join(" "),
                 search_path = tool_search_path.display()
             );
         }
     }
-    for (env_var, download_path) in ensure_downloads(toolbox.downloads, install_dirs)? {
-        found_tools.push((env_var, download_path))
+    for found in ensure_downloads(&tool_inventory.downloads, install_dirs)? {
+        found_tools.push(found);
     }
     Ok(found_tools)
 }
 
 fn ensure_downloads<'a>(
-    downloads: impl IntoIterator<
-        IntoIter = impl ExactSizeIterator<Item = (&'static str, &'a DownloadArchive<'a>)>,
-    >,
+    downloads: impl AsRef<[(&'static str, DownloadArchive<'a>)]>,
     install_dirs: &'a InstallDirs,
-) -> anyhow::Result<Vec<(OsString, OsString)>> {
-    let downloads = downloads.into_iter();
-    if downloads.len() == 0 {
+) -> anyhow::Result<Vec<FoundTool>> {
+    if downloads.as_ref().is_empty() {
         return Ok(Vec::new());
     }
-
-    let mut download_paths: Vec<(OsString, OsString)> = Vec::with_capacity(downloads.len());
-    for (env_var, download) in downloads {
+    let mut download_paths: Vec<FoundTool> = Vec::with_capacity(downloads.as_ref().len());
+    for (env_var, download) in downloads.as_ref() {
         let download_path = ensure_download(&install_dirs.download_dir, download)?;
-        download_paths.push((OsString::from(env_var), download_path.into_os_string()));
+        download_paths.push(FoundTool {
+            env_var,
+            path: download_path,
+        });
     }
     Ok(download_paths)
 }
@@ -650,49 +400,14 @@ impl<'a, D: Digest, R: Read> Read for DigestReader<'a, D, R> {
     }
 }
 
-fn find_zig(
-    binary_names: &[&str],
-    version: &str,
-    search_path: &OsStr,
-) -> Option<(OsString, OsString)> {
-    for binary_name in binary_names {
-        if let Ok(zig_paths) = which_in_global(binary_name, Some(search_path)) {
-            for zig in zig_paths {
-                if let Some(zig_version) = get_zig_version(&zig)
-                    && zig_version == version
-                {
-                    return Some(("CARGO_ZIGBUILD_ZIG_PATH".into(), zig.into_os_string()));
-                }
-            }
-        }
-    }
-    None
-}
-
-fn get_zig_version(zig: &Path) -> Option<String> {
-    Command::new(zig)
-        .arg("version")
-        .stdout(Stdio::piped())
-        .spawn()
-        .ok()
-        .and_then(|child| child.wait_with_output().ok())
-        .and_then(|result| {
-            if result.status.success() {
-                result.stdout.to_str().ok().map(str::trim).map(String::from)
-            } else {
-                None
-            }
-        })
-}
-
 fn install_tools(
     cargo: &Path,
     cargo_binstall: &CargoBinstall,
     tools: &[BinstallTool],
-    zig: Option<&str>,
+    zig: &Zig,
     install_dirs: &InstallDirs,
     search_path: &OsStr,
-) -> anyhow::Result<Vec<(OsString, OsString)>> {
+) -> anyhow::Result<Vec<FoundTool>> {
     for tool in tools {
         binstall(
             cargo_binstall,
@@ -703,8 +418,8 @@ fn install_tools(
         )?;
     }
 
-    if let Some(zig_version) = zig {
-        let zig_requirement = format!("ziglang=={zig_version}");
+    if let Zig::MissingVersion(version) = zig {
+        let zig_requirement = format!("ziglang=={version}");
         fs::create_dir_all(&install_dirs.bin_dir)?;
         let result = Command::new("uv")
             .args(["tool", "install", "--force", &zig_requirement])
@@ -714,11 +429,11 @@ fn install_tools(
             .wait_with_output()?;
         if !result.status.success() {
             bail!(
-                "Failed to install zig {zig_version} via `uv tool install {zig_requirement}`:\n\
+                "Failed to install zig {version} via `uv tool install {zig_requirement}`:\n\
                 {stderr}",
                 stderr = result.stderr.to_str_lossy()
             )
-        } else if let Some(zig) = find_zig(&["python-zig"], zig_version, search_path) {
+        } else if let Some(zig) = find_zig(&["python-zig"], version, search_path) {
             Ok(vec![zig])
         } else {
             bail!(
