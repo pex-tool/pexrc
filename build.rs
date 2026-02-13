@@ -1,6 +1,7 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::borrow::Cow;
 use std::ffi::OsStr;
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -11,9 +12,10 @@ use anyhow::bail;
 use bstr::ByteSlice;
 use itertools::Itertools;
 use pexrc_build_system::{
+    Clib,
     FoundTool,
     InstallDirs,
-    ToolInventory,
+    ToolInstallation,
     classify_targets,
     inventory_tools,
 };
@@ -45,22 +47,43 @@ fn main() -> anyhow::Result<()> {
         fs::read_to_string(manifest_path)?
     };
     let tool_inventory = inventory_tools(data.as_str(), install_dirs)?;
-    let found_tools = tool_inventory.ensure_tools_installed(&cargo)?;
+    let install_missing_tools = env::var_os("PEXRC_INSTALL_TOOLS").unwrap_or_default() == "1";
+    let found_tools = tool_inventory.ensure_tools_installed(&cargo, install_missing_tools)?;
+    let (clib, glibc, found_tools) = match found_tools {
+        ToolInstallation::Success((clib, glibc, found_tools)) => (clib, glibc, found_tools),
+        ToolInstallation::Failure((zig, missing_binstall_tools, tool_search_path)) => {
+            bail!(
+                "The following tools are required but are not installed: {tools}\n\
+                Searched PATH: {search_path}\n\
+                Re-run with PEXRC_INSTALL_TOOLS=1 to let the build script install these tools.",
+                tools = missing_binstall_tools
+                    .iter()
+                    .map(|tool| Cow::Borrowed(tool.binary_name()))
+                    .chain(
+                        zig.missing_version()
+                            .iter()
+                            .map(|version| Cow::Owned(format!("zig@{version}")))
+                    )
+                    .join(" "),
+                search_path = tool_search_path.display()
+            );
+        }
+    };
 
     let rust_toolchain_contents = fs::read_to_string("rust-toolchain")?;
-    let targets = classify_targets(rust_toolchain_contents.as_str(), &tool_inventory.glibc)?;
+    let targets = classify_targets(rust_toolchain_contents.as_str(), &glibc)?;
 
     custom_cargo_build(
         &cargo,
         ["xwin", "build"],
-        &tool_inventory,
+        &clib,
         &found_tools,
         targets.iter_xwin_targets(),
     )?;
     custom_cargo_build(
         &cargo,
         ["zigbuild"],
-        &tool_inventory,
+        &clib,
         &found_tools,
         targets.iter_zigbuild_targets(),
     )?;
@@ -75,24 +98,24 @@ fn main() -> anyhow::Result<()> {
 
     for target in targets.iter_all_targets() {
         let clib_name = target.shared_library_name("pexrc");
-        let clib = target_dir
+        let clib_path = target_dir
             .join(target.as_str())
-            .join(tool_inventory.clib.profile)
+            .join(clib.profile)
             .join(&clib_name);
-        if !clib.exists() {
+        if !clib_path.exists() {
             eprintln!(
                 "The clib for {target} does not exist at {clib_path}!",
-                clib_path = clib.display(),
+                clib_path = clib_path.display(),
                 target = target.as_str(),
             );
         }
         io::copy(
-            &mut File::open(clib)?,
+            &mut File::open(clib_path)?,
             &mut zstd::Encoder::new(
                 File::create(
                     clibs_dir.join(format!("{target}.{clib_name}", target = target.as_str())),
                 )?,
-                tool_inventory.clib.compression_level,
+                clib.compression_level,
             )?,
         )?;
     }
@@ -103,7 +126,7 @@ fn main() -> anyhow::Result<()> {
 fn custom_cargo_build<'a>(
     cargo: &Path,
     custom_build_args: impl IntoIterator<Item = &'a str>,
-    tool_inventory: &ToolInventory,
+    clib: &Clib,
     found_tools: impl IntoIterator<Item = &'a FoundTool>,
     targets: impl Iterator<Item = &'a str>,
 ) -> anyhow::Result<()> {
@@ -120,12 +143,8 @@ fn custom_cargo_build<'a>(
         );
         cmd.env(found_tool.env_var, &found_tool.path);
     }
-    cmd.args(custom_build_args).args([
-        "--package",
-        "clib",
-        "--profile",
-        tool_inventory.clib.profile,
-    ]);
+    cmd.args(custom_build_args)
+        .args(["--package", "clib", "--profile", clib.profile]);
     for target in targets {
         cmd.args(["--target", target]);
     }

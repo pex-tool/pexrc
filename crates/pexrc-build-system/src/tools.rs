@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::borrow::Cow;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -11,7 +11,6 @@ use std::{env, fs};
 use anyhow::bail;
 use bstr::ByteSlice;
 use const_format::concatcp;
-use itertools::Itertools;
 use strum::{EnumCount, IntoEnumIterator};
 use strum_macros::{EnumCount, EnumIter};
 use which::which_in_global;
@@ -178,8 +177,8 @@ impl<'a> Zig<'a> {
 }
 
 pub struct ToolInventory<'a> {
-    pub clib: Clib<'a>,
-    pub glibc: Glibc<'a>,
+    clib: Clib<'a>,
+    glibc: Glibc<'a>,
     binstall: CargoBinstall<'a>,
     zig: Zig<'a>,
     downloads: Vec<(&'static str, DownloadArchive<'a>)>,
@@ -187,8 +186,17 @@ pub struct ToolInventory<'a> {
     install_dirs: InstallDirs,
 }
 
+pub enum ToolInstallation<'a> {
+    Success((Clib<'a>, Glibc<'a>, Vec<FoundTool>)),
+    Failure((Zig<'a>, Vec<BinstallTool>, OsString)),
+}
+
 impl<'a> ToolInventory<'a> {
-    pub fn ensure_tools_installed(&self, cargo: &Path) -> anyhow::Result<Vec<FoundTool>> {
+    pub fn ensure_tools_installed(
+        self,
+        cargo: &Path,
+        install_missing_tools: bool,
+    ) -> anyhow::Result<ToolInstallation<'a>> {
         let tool_search_path =
             if let Some(search_path) = env::var_os("PATH").as_deref().map(env::split_paths) {
                 let search_path =
@@ -201,9 +209,7 @@ impl<'a> ToolInventory<'a> {
         let mut found_tools = Vec::new();
 
         if !self.missing.is_empty() || !self.zig.found() {
-            if let Some(value) = env::var_os("PEXRC_INSTALL_TOOLS")
-                && value == "1"
-            {
+            if install_missing_tools {
                 let zig = install_tools(
                     cargo,
                     &self.binstall,
@@ -214,23 +220,11 @@ impl<'a> ToolInventory<'a> {
                 )?;
                 found_tools.push(zig.into_owned());
             } else {
-                bail!(
-                    "The following tools are required but are not installed: {tools}\n\
-                    Searched PATH: {search_path}\n\
-                    Re-run with PEXRC_INSTALL_TOOLS=1 to let the build script install these tools.",
-                    tools = self
-                        .missing
-                        .iter()
-                        .map(|tool| Cow::Borrowed(tool.binary_name()))
-                        .chain(
-                            self.zig
-                                .missing_version()
-                                .iter()
-                                .map(|version| Cow::Owned(format!("zig@{version}")))
-                        )
-                        .join(" "),
-                    search_path = tool_search_path.display()
-                );
+                return Ok(ToolInstallation::Failure((
+                    self.zig,
+                    self.missing,
+                    tool_search_path.into_owned(),
+                )));
             }
         }
         for (env_var, download) in &self.downloads {
@@ -240,7 +234,11 @@ impl<'a> ToolInventory<'a> {
                 path: download_path,
             });
         }
-        Ok(found_tools)
+        Ok(ToolInstallation::Success((
+            self.clib,
+            self.glibc,
+            found_tools,
+        )))
     }
 }
 

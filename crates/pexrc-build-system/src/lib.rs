@@ -5,9 +5,11 @@ mod config;
 mod downloads;
 mod tools;
 
+pub use config::Clib;
+
 use crate::config::{CargoManifest, ClassifiedTargets, Glibc, RustToolchain};
 use crate::tools::ToolBox;
-pub use crate::tools::{FoundTool, InstallDirs, ToolInventory};
+pub use crate::tools::{FoundTool, InstallDirs, ToolInstallation, ToolInventory};
 
 pub fn inventory_tools(
     cargo_manifest_contents: &str,
