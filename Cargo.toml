@@ -95,21 +95,14 @@ zstd = "0.13"
 [build-dependencies]
 anyhow = { workspace = true }
 bstr = { workspace = true }
-pexrc-build-system = { path = "crates/pexrc-build-system" }
 const_format = { workspace = true }
+pexrc-build-system = { path = "crates/pexrc-build-system" }
 dirs = { workspace = true }
 env_logger = { workspace = true }
-flate2 = { workspace = true }
-hex = { workspace = true }
 itertools = { workspace = true }
 log = { workspace = true }
-reqwest = { workspace = true }
 sha2 = { workspace = true }
-tar = { workspace = true }
-tempfile = { workspace = true }
 which = { workspace = true }
-xz2 = { workspace = true }
-zip = { workspace = true }
 zstd = { workspace = true }
 
 [dependencies]

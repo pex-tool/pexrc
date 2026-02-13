@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 mod config;
+mod downloads;
 mod tools;
 
 use std::ffi::OsStr;
 
 pub use crate::config::{CargoBinstall, DownloadArchive};
 use crate::config::{CargoManifest, ClassifiedTargets, Glibc, RustToolchain};
+pub use crate::downloads::{ensure_download, ensure_downloads};
 use crate::tools::ToolBox;
 pub use crate::tools::{BinstallTool, FoundTool, ToolInventory, Zig, find_zig};
 
