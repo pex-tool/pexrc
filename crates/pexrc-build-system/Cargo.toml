@@ -5,8 +5,10 @@ edition = "2024"
 [dependencies]
 anyhow = { workspace = true }
 bstr = { workspace = true }
+const_format = { workspace = true }
 flate2 = { workspace = true }
 hex = { workspace = true }
+itertools = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 sha2 = { workspace = true }

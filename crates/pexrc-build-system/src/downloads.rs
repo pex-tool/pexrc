@@ -9,25 +9,7 @@ use std::{fs, io};
 use anyhow::bail;
 use sha2::{Digest, Sha256};
 
-use crate::{DownloadArchive, FoundTool};
-
-pub fn ensure_downloads<'a>(
-    downloads: impl AsRef<[(&'static str, DownloadArchive<'a>)]>,
-    download_dir: &'a Path,
-) -> anyhow::Result<Vec<FoundTool>> {
-    if downloads.as_ref().is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut download_paths: Vec<FoundTool> = Vec::with_capacity(downloads.as_ref().len());
-    for (env_var, download) in downloads.as_ref() {
-        let download_path = ensure_download(download, download_dir)?;
-        download_paths.push(FoundTool {
-            env_var,
-            path: download_path,
-        });
-    }
-    Ok(download_paths)
-}
+use crate::config::DownloadArchive;
 
 enum ArchiveType {
     TarLzma,
@@ -116,7 +98,10 @@ impl<'a, D: Digest, R: Read> Read for DigestReader<'a, D, R> {
     }
 }
 
-pub fn ensure_download(download: &DownloadArchive, download_dir: &Path) -> anyhow::Result<PathBuf> {
+pub(crate) fn ensure_download(
+    download: &DownloadArchive,
+    download_dir: &Path,
+) -> anyhow::Result<PathBuf> {
     fs::create_dir_all(download_dir)?;
     let dst_dir = download_dir.join(download.fingerprint.hash);
     let downloaded_path = Ok(if let Some(prefix) = download.prefix {

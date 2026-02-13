@@ -5,23 +5,19 @@ mod config;
 mod downloads;
 mod tools;
 
-use std::ffi::OsStr;
-
-pub use crate::config::{CargoBinstall, DownloadArchive};
 use crate::config::{CargoManifest, ClassifiedTargets, Glibc, RustToolchain};
-pub use crate::downloads::{ensure_download, ensure_downloads};
 use crate::tools::ToolBox;
-pub use crate::tools::{BinstallTool, FoundTool, ToolInventory, Zig, find_zig};
+pub use crate::tools::{FoundTool, InstallDirs, ToolInventory};
 
 pub fn inventory_tools(
     cargo_manifest_contents: &str,
-    search_path: impl AsRef<OsStr>,
+    install_dirs: InstallDirs,
 ) -> anyhow::Result<ToolInventory<'_>> {
     let build_config = {
         let cargo_manifest: CargoManifest = toml::from_str(cargo_manifest_contents)?;
         cargo_manifest.package.metadata.build
     };
-    Ok(ToolBox::from(build_config).find_tools(&search_path))
+    ToolBox::from(build_config).find_tools(install_dirs)
 }
 
 pub fn classify_targets<'a>(

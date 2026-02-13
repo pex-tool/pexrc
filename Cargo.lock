@@ -1123,7 +1123,6 @@ dependencies = [
  "logging_timer",
  "pexrc-build-system",
  "pexrs",
- "sha2",
  "tempfile",
  "which",
  "zip",
@@ -1136,8 +1135,10 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "bstr",
+ "const_format",
  "flate2",
  "hex",
+ "itertools",
  "reqwest",
  "serde",
  "sha2",

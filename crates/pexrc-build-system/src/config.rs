@@ -56,7 +56,7 @@ impl<'a> ClassifiedTargets<'a> {
         self.xwin_targets.iter().map(Target::as_str)
     }
 
-    pub fn iter_targets(&'a self) -> impl Iterator<Item = &'a Target<'a>> {
+    pub fn iter_all_targets(&'a self) -> impl Iterator<Item = &'a Target<'a>> {
         self.zigbuild_targets.iter().chain(self.xwin_targets.iter())
     }
 }

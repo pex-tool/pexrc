@@ -100,8 +100,6 @@ pexrc-build-system = { path = "crates/pexrc-build-system" }
 dirs = { workspace = true }
 env_logger = { workspace = true }
 itertools = { workspace = true }
-log = { workspace = true }
-sha2 = { workspace = true }
 which = { workspace = true }
 zstd = { workspace = true }
 
