@@ -96,7 +96,6 @@ zstd = "0.13"
 anyhow = { workspace = true }
 bstr = { workspace = true }
 pexrc-build-system = { path = "crates/pexrc-build-system" }
-dirs = { workspace = true }
 env_logger = { workspace = true }
 itertools = { workspace = true }
 zstd = { workspace = true }

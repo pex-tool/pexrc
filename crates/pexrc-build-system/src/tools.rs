@@ -124,6 +124,10 @@ pub struct InstallDirs {
 }
 
 impl InstallDirs {
+    pub fn system(base: impl AsRef<Path>) -> Option<Self> {
+        dirs::cache_dir().map(|cache_dir| Self::new(cache_dir.join(base)))
+    }
+
     pub fn new(cache_dir: PathBuf) -> Self {
         Self {
             bin_dir: cache_dir.join("bin"),
@@ -176,7 +180,7 @@ impl<'a> Zig<'a> {
     }
 }
 
-pub struct ToolInventory<'a> {
+pub(crate) struct ToolInventory<'a> {
     clib: Clib<'a>,
     glibc: Glibc<'a>,
     binstall: CargoBinstall<'a>,
@@ -192,7 +196,7 @@ pub enum ToolInstallation<'a> {
 }
 
 impl<'a> ToolInventory<'a> {
-    pub fn ensure_tools_installed(
+    pub(crate) fn ensure_tools_installed(
         self,
         cargo: &Path,
         install_missing_tools: bool,

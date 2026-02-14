@@ -17,7 +17,7 @@ use pexrc_build_system::{
     InstallDirs,
     ToolInstallation,
     classify_targets,
-    inventory_tools,
+    ensure_tools_installed,
 };
 
 fn main() -> anyhow::Result<()> {
@@ -31,26 +31,28 @@ fn main() -> anyhow::Result<()> {
         PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("target")
     };
 
-    let install_dirs = if let Some(cache_dir) = dirs::cache_dir() {
-        InstallDirs::new(cache_dir.join("pexrc-dev"))
-    } else {
-        let cache_dir = target_dir.join(".pexrc-dev");
+    let install_dirs = InstallDirs::system("pexrc-dev").unwrap_or_else(|| {
+        let cache_base_dir = target_dir.join(".pexrc-dev");
         println!(
-            "cargo::warning=Failed to discover the user cache dir; using {cache_dir}",
-            cache_dir = cache_dir.display()
+            "cargo::warning=Failed to discover the user cache dir; using {cache_base_dir}",
+            cache_base_dir = cache_base_dir.display()
         );
-        InstallDirs::new(cache_dir)
-    };
+        InstallDirs::new(cache_base_dir)
+    });
 
-    let data = {
+    let cargo_manifest_contents = {
         let manifest_path = env::var("CARGO_MANIFEST_PATH")?;
         fs::read_to_string(manifest_path)?
     };
-    let tool_inventory = inventory_tools(data.as_str(), install_dirs)?;
     let install_missing_tools = env::var_os("PEXRC_INSTALL_TOOLS").unwrap_or_default() == "1";
-    let found_tools = tool_inventory.ensure_tools_installed(&cargo, install_missing_tools)?;
-    let (clib, glibc, found_tools) = match found_tools {
-        ToolInstallation::Success((clib, glibc, found_tools)) => (clib, glibc, found_tools),
+    let tool_installation = ensure_tools_installed(
+        &cargo,
+        &cargo_manifest_contents,
+        install_dirs,
+        install_missing_tools,
+    )?;
+    let (clib, glibc, found_tools) = match tool_installation {
+        ToolInstallation::Success(results) => results,
         ToolInstallation::Failure((zig, missing_binstall_tools, tool_search_path)) => {
             bail!(
                 "The following tools are required but are not installed: {tools}\n\
@@ -71,7 +73,7 @@ fn main() -> anyhow::Result<()> {
     };
 
     let rust_toolchain_contents = fs::read_to_string("rust-toolchain")?;
-    let targets = classify_targets(rust_toolchain_contents.as_str(), &glibc)?;
+    let targets = classify_targets(&rust_toolchain_contents, &glibc)?;
 
     custom_cargo_build(
         &cargo,
