@@ -1114,7 +1114,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bstr",
- "const_format",
  "dirs",
  "env_logger",
  "include_dir",
@@ -1138,7 +1137,6 @@ dependencies = [
  "const_format",
  "flate2",
  "hex",
- "itertools",
  "reqwest",
  "serde",
  "sha2",

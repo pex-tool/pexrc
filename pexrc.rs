@@ -9,6 +9,7 @@ use std::{env, io};
 use anyhow::{Context, anyhow, bail};
 use include_dir::{Dir, include_dir};
 use itertools::Itertools;
+use log::info;
 use logging_timer::time;
 use pexrs::{Algorithm, boot};
 use tempfile::NamedTempFile;
@@ -50,9 +51,9 @@ fn main() -> anyhow::Result<()> {
         3
     };
 
-    log::info!("Embedded clibs:");
+    info!("Embedded clibs:");
     for (idx, file) in CLIBS_DIR.files().enumerate() {
-        log::info!(
+        info!(
             "{idx} {clib} {size}",
             idx = idx + 1,
             clib = file.path().display(),
@@ -69,14 +70,14 @@ fn main() -> anyhow::Result<()> {
             )
         })?;
 
-        log::info!(
+        info!(
             "Using compression level {compression_level}, algorithm {algorithm} and {modifier} gc \
             the extraction dir.",
             modifier = if gc { "will" } else { "will not" }
         );
         transcode(pex_path, Some(compression_level))?;
 
-        log::info!("Booting PEX with {python}.", python = python.display());
+        info!("Booting PEX with {python}.", python = python.display());
         boot(python, pex_path, Some(algorithm), gc)
     } else {
         bail!(
