@@ -64,7 +64,7 @@ opt-level = "s"
 
 [[bin]]
 name = "pexrc"
-path = "src/pexrc.rs"
+path = "pexrc.rs"
 
 [workspace.dependencies]
 anyhow = "1.0"
