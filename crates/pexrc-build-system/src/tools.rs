@@ -15,8 +15,8 @@ use strum::{EnumCount, IntoEnumIterator};
 use strum_macros::{EnumCount, EnumIter};
 use which::which_in_global;
 
-use crate::config::{Build, CargoBinstall, Clib, DownloadArchive, Glibc};
 use crate::downloads::ensure_download;
+use crate::metadata::{Build, CargoBinstall, Clib, DownloadArchive, Glibc};
 
 pub(crate) struct ToolBox<'a> {
     clib: Clib<'a>,

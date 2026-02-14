@@ -9,7 +9,7 @@ use std::{fs, io};
 use anyhow::bail;
 use sha2::{Digest, Sha256};
 
-use crate::config::DownloadArchive;
+use crate::metadata::DownloadArchive;
 
 enum ArchiveType {
     TarLzma,
