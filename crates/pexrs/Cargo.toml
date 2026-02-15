@@ -5,6 +5,7 @@ publish = false
 
 [dependencies]
 anyhow = { workspace = true }
+log = { workspace = true }
 logging_timer = { workspace = true }
 rayon = { workspace = true }
 strum_macros = { workspace = true }

@@ -2,10 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::fs::File;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::{Command, ExitStatus};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{fs, io};
 
+use anyhow::{anyhow, bail};
+use log::info;
 use logging_timer::time;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use zip::ZipArchive;
@@ -18,11 +21,19 @@ pub enum Algorithm {
 
 #[time("debug", "{}")]
 pub fn boot(
-    _python: impl AsRef<Path>,
+    python: impl AsRef<Path>,
+    python_args: Vec<String>,
     pex: impl AsRef<Path> + Sync + Send,
+    argv: Vec<String>,
     algorithm: Option<Algorithm>,
     gc: bool,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<ExitStatus> {
+    info!(
+        "boot({python}, {pex}, {argv:?})",
+        python = python.as_ref().display(),
+        pex = pex.as_ref().display(),
+        argv = argv
+    );
     let pex_zip = ZipArchive::new(File::open(pex.as_ref())?)?;
     let metadata = pex_zip.metadata();
     let zip_entry_iter = (0..pex_zip.len()).into_par_iter();
@@ -61,7 +72,14 @@ pub fn boot(
         zip_open_count = zip_open_count.load(Ordering::SeqCst),
         thread_count = rayon::current_num_threads(),
     );
-    Ok(())
+    // TODO: execv for unix.
+    Command::new(python.as_ref())
+        .args(python_args)
+        .arg(dst_dir.path())
+        .args(argv)
+        .spawn()?
+        .wait()
+        .map_err(|err| anyhow!("{err}"))
 }
 
 fn extract_idx(
@@ -81,4 +99,12 @@ fn extract_idx(
         io::copy(&mut zip_file, &mut dst_file)?;
     }
     Ok(())
+}
+
+#[time("debug", "{}")]
+pub fn mount(
+    _python: impl AsRef<Path>,
+    _pex: impl AsRef<Path> + Sync + Send,
+) -> anyhow::Result<PathBuf> {
+    bail!("TODO: XXX")
 }

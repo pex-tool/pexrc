@@ -1,1 +1,14 @@
+# Rust build
 /target/
+
+# Python "build"
+*.py[cdo]
+__pycache__/
+/.mypy_cache*/
+/.pytest_cache/
+/.ruff_cache/
+/.venv/
+/python/pexrc/__pex__/
+
+# General
+/dist/

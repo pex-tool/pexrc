@@ -4,6 +4,7 @@
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::Path;
+use std::process::ExitCode;
 use std::{env, io};
 
 use anyhow::{Context, anyhow, bail};
@@ -19,7 +20,7 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 static CLIBS_DIR: Dir<'_> = include_dir!("$CLIBS_DIR");
 
-fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<ExitCode> {
     env_logger::init();
 
     let algorithm = env::args_os()
@@ -78,7 +79,27 @@ fn main() -> anyhow::Result<()> {
         transcode(pex_path, Some(compression_level))?;
 
         info!("Booting PEX with {python}.", python = python.display());
-        boot(python, pex_path, Some(algorithm), gc)
+        match boot(
+            python,
+            Vec::new(),
+            pex_path,
+            Vec::new(),
+            Some(algorithm),
+            gc,
+        ) {
+            Ok(exit_status) => {
+                if let Some(code) = exit_status.code()
+                    && let Ok(exit_code) = u8::try_from(code)
+                {
+                    Ok(ExitCode::from(exit_code))
+                } else if exit_status.success() {
+                    Ok(ExitCode::SUCCESS)
+                } else {
+                    Ok(ExitCode::FAILURE)
+                }
+            }
+            Err(err) => Err(anyhow!("{err}")),
+        }
     } else {
         bail!(
             "Usage: {} [pex file]",

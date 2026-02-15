@@ -21,6 +21,8 @@ use pexrc_build_system::{
 };
 
 fn main() -> anyhow::Result<()> {
+    println!("cargo::rerun-if-changed=crates");
+
     env_logger::init();
 
     let cargo: PathBuf = env::var("CARGO")?.into();
@@ -42,9 +44,13 @@ fn main() -> anyhow::Result<()> {
 
     let cargo_manifest_contents = {
         let manifest_path = env::var("CARGO_MANIFEST_PATH")?;
+        println!("cargo::rerun-if-changed={manifest_path}");
         fs::read_to_string(manifest_path)?
     };
+
+    println!("cargo::rerun-if-env-changed=PEXRC_INSTALL_TOOLS");
     let install_missing_tools = env::var_os("PEXRC_INSTALL_TOOLS").unwrap_or_default() == "1";
+
     let tool_installation = ensure_tools_installed(
         &cargo,
         &cargo_manifest_contents,
@@ -72,6 +78,7 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
+    println!("cargo::rerun-if-changed=rust-toolchain");
     let rust_toolchain_contents = fs::read_to_string("rust-toolchain")?;
     let targets = classify_targets(&rust_toolchain_contents, &glibc)?;
 
@@ -90,8 +97,12 @@ fn main() -> anyhow::Result<()> {
         targets.iter_zigbuild_targets(),
     )?;
 
-    let out_dir: PathBuf = env::var_os("OUT_DIR").unwrap().into();
-    let clibs_dir = out_dir.join("clibs");
+    let (clibs_dir, compress) = if let Some(lib_dir) = env::var_os("PEXRC_LIB_DIR") {
+        (PathBuf::from(lib_dir), false)
+    } else {
+        let out_dir = env::var_os("OUT_DIR").unwrap();
+        (PathBuf::from(out_dir).join("clibs"), true)
+    };
     fs::create_dir_all(&clibs_dir)?;
     println!(
         "cargo::rustc-env=CLIBS_DIR={clibs_dir}",
@@ -111,15 +122,17 @@ fn main() -> anyhow::Result<()> {
                 target = target.as_str(),
             );
         }
-        io::copy(
-            &mut File::open(clib_path)?,
-            &mut zstd::Encoder::new(
-                File::create(
-                    clibs_dir.join(format!("{target}.{clib_name}", target = target.as_str())),
-                )?,
-                clib.compression_level,
-            )?,
+        let mut dst = File::create(
+            clibs_dir.join(format!("{target}.{clib_name}", target = target.as_str())),
         )?;
+        if compress {
+            io::copy(
+                &mut File::open(clib_path)?,
+                &mut zstd::Encoder::new(dst, clib.compression_level)?,
+            )?;
+        } else {
+            io::copy(&mut File::open(clib_path)?, &mut dst)?;
+        }
     }
 
     Ok(())
