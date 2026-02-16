@@ -94,6 +94,7 @@ strum = { version = "0.27", features = ["strum_macros"] }
 strum_macros = "*"
 tar = "0.4"
 tempfile = "3.25"
+textwrap = "0.16"
 toml = "1.0"
 which = "8.0"
 xz2 = "0.1"

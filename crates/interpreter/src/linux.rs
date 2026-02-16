@@ -185,7 +185,7 @@ impl LinuxInfo {
 
 #[cfg(target_os = "linux")]
 #[cfg(test)]
-mod test {
+mod tests {
     use std::path::PathBuf;
     use std::process::{Command, Stdio};
 

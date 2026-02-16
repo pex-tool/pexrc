@@ -66,3 +66,74 @@ impl Interpreter {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use textwrap::dedent;
+    use std::ffi::OsString;
+    use std::path::PathBuf;
+    use std::process::{Command, Stdio};
+
+    use crate::Interpreter;
+
+    #[test]
+    fn test_tags_same_as_packaging() {
+        let venv_dir = tempfile::tempdir().unwrap();
+        let python_exe = {
+            let python_exe_basename = {
+                let python_exe_bytes = Command::new("uv")
+                    .args(["python", "find"])
+                    .stdout(Stdio::piped())
+                    .spawn()
+                    .unwrap()
+                    .wait_with_output()
+                    .unwrap()
+                    .stdout;
+                let python_exe = PathBuf::from(String::from_utf8(python_exe_bytes).unwrap().trim());
+                Command::new(&python_exe)
+                    .args(["-m", "venv"])
+                    .arg(venv_dir.path())
+                    .spawn()
+                    .unwrap()
+                    .wait()
+                    .unwrap();
+                OsString::from(python_exe.file_name().unwrap())
+            };
+
+            let python_exe = if build_target::target_os() == build_target::Os::Windows {
+                venv_dir.path().join("Scripts")
+            } else {
+                venv_dir.path().join("bin")
+            }
+            .join(python_exe_basename);
+            Command::new(&python_exe)
+                .args(["-m", "pip", "install", "packaging"])
+                .spawn()
+                .unwrap()
+                .wait()
+                .unwrap();
+            python_exe
+        };
+
+        let tags_output = Command::new(&python_exe)
+            .arg("-c")
+            .arg(dedent("
+                import json
+                import sys
+
+                from packaging import tags
+
+                json.dump(list(map(str, tags.sys_tags())), sys.stdout)
+            "))
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap()
+            .wait_with_output()
+            .unwrap()
+            .stdout;
+        let expected_tags: Vec<String> =
+            serde_json::from_str(String::from_utf8(tags_output).unwrap().as_str()).unwrap();
+        let interpreter = Interpreter::load(python_exe).unwrap();
+        assert_eq!(expected_tags, interpreter.supported_tags);
+    }
+}

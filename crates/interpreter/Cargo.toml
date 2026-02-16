@@ -17,3 +17,5 @@ build-tests = []
 [dev-dependencies]
 interpreter = { path = ".", features = ["build-tests"]}
 build-target = { workspace = true }
+tempfile = { workspace = true }
+textwrap = { workspace = true }
