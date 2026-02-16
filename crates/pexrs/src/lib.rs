@@ -11,6 +11,7 @@ use anyhow::{anyhow, bail};
 use interpreter::Interpreter;
 use log::{debug, info};
 use logging_timer::time;
+use pex_info::PexInfo;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use zip::ZipArchive;
 
@@ -35,10 +36,15 @@ pub fn boot(
         pex = pex.as_ref().display(),
         argv = argv
     );
+
     let interpreter = Interpreter::load(&python)?;
     debug!("Loaded interpreter info:\n{interpreter:#?}");
 
-    let pex_zip = ZipArchive::new(File::open(pex.as_ref())?)?;
+    let mut pex_zip = ZipArchive::new(File::open(pex.as_ref())?)?;
+    let pex_info_fp = pex_zip.by_name("PEX-INFO")?;
+    let pex_info = PexInfo::parse(pex_info_fp, pex.as_ref().join("PEX-INFO").to_str())?;
+    debug!("Loaded PEX-INFO:\n{pex_info:#?}");
+
     let metadata = pex_zip.metadata();
     let zip_entry_iter = (0..pex_zip.len()).into_par_iter();
 

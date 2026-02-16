@@ -261,7 +261,7 @@ class ELFFile(object):
             if data[self._p_idx[0]] != 3:  # Not PT_INTERP.
                 continue
             self._f.seek(data[self._p_idx[1]])
-            return self._f.read(data[self._p_idx[2]]).strip(b"\0")
+            return self._f.read(data[self._p_idx[2]]).rstrip(b"\0")
         return None
 
 

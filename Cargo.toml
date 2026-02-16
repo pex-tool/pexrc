@@ -6,6 +6,7 @@ members = [
     ".",
     "crates/clib",
     "crates/interpreter",
+    "crates/pex-info",
     "crates/pexrc-build-system",
     "crates/pexrs",
 ]
