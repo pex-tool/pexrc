@@ -104,7 +104,7 @@ impl LinuxInfo {
             let (interpreter_path, is_musl) = {
                 let interpreter = elf.segment_data(&program_header)?;
                 let is_musl = interpreter
-                    .windows("musl".len())
+                    .windows(b"musl".len())
                     .any(|window| window == b"musl");
                 let eos = interpreter
                     .iter()
@@ -180,5 +180,65 @@ impl LinuxInfo {
             "Failed to gather information about the libc linked by {exe}",
             exe = exe.as_ref().display()
         );
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[cfg(test)]
+mod test {
+    use std::path::PathBuf;
+    use std::process::{Command, Stdio};
+
+    use build_target::Env;
+
+    use crate::linux::LinuxInfo;
+
+    #[test]
+    fn test_parse() {
+        let assert_linux_info = if matches!(build_target::target_env(), Some(Env::Musl)) {
+            |linux_info: LinuxInfo| assert!(matches!(linux_info, LinuxInfo::MuslLinux(_)))
+        } else {
+            |linux_info: LinuxInfo| {
+                let manylinux = match linux_info {
+                    LinuxInfo::ManyLinux(manylinux) => manylinux,
+                    LinuxInfo::MuslLinux(libc_version) => {
+                        panic!("Expected manylinux but detected musl {libc_version:?}")
+                    }
+                };
+                assert_eq!(
+                    matches!(build_target::target_env(), Some(Env::Gnu)),
+                    manylinux.glibc.is_some(),
+                    "The build target is {target:#?}",
+                    target = build_target::target()
+                );
+                if manylinux.armhf {
+                    assert_eq!(
+                        build_target::PointerWidth::U32,
+                        build_target::target_pointer_width()
+                    );
+                    assert_eq!(build_target::Endian::Little, build_target::target_endian());
+                    assert_eq!(build_target::Arch::Arm, build_target::target_arch());
+                }
+                if manylinux.i686 {
+                    assert_eq!(
+                        build_target::PointerWidth::U32,
+                        build_target::target_pointer_width()
+                    );
+                    assert_eq!(build_target::Endian::Little, build_target::target_endian());
+                    assert_eq!(build_target::Arch::X86, build_target::target_arch());
+                }
+            }
+        };
+        let python_exe_bytes = Command::new("uv")
+            .args(["python", "find"])
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap()
+            .wait_with_output()
+            .unwrap()
+            .stdout;
+        let python_exe = PathBuf::from(String::from_utf8(python_exe_bytes).unwrap().trim());
+        let linux_info = LinuxInfo::parse(python_exe).unwrap();
+        assert_linux_info(linux_info);
     }
 }

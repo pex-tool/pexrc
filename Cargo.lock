@@ -134,6 +134,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "build-target"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "78e2ceaf91e22593e194211930aea78a41af58e49e872474ebf4335bf649aad1"
+
+[[package]]
 name = "bumpalo"
 version = "3.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -874,7 +880,9 @@ name = "interpreter"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "build-target",
  "elf",
+ "interpreter",
  "serde",
  "serde_json",
 ]

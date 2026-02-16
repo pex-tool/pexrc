@@ -10,3 +10,10 @@ anyhow = { workspace = true }
 elf = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+[features]
+build-tests = []
+
+[dev-dependencies]
+interpreter = { path = ".", features = ["build-tests"]}
+build-target = { workspace = true }
