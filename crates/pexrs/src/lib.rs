@@ -8,7 +8,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{fs, io};
 
 use anyhow::{anyhow, bail};
-use log::info;
+use interpreter::Interpreter;
+use log::{debug, info};
 use logging_timer::time;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use zip::ZipArchive;
@@ -34,6 +35,9 @@ pub fn boot(
         pex = pex.as_ref().display(),
         argv = argv
     );
+    let interpreter = Interpreter::load(&python)?;
+    debug!("Loaded interpreter info:\n{interpreter:#?}");
+
     let pex_zip = ZipArchive::new(File::open(pex.as_ref())?)?;
     let metadata = pex_zip.metadata();
     let zip_entry_iter = (0..pex_zip.len()).into_par_iter();

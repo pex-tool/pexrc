@@ -34,7 +34,6 @@ unsafe fn as_argv(
     // SAFETY: argv must be an array of length argc of null-terminated character arrays.
     let c_argv = unsafe { std::slice::from_raw_parts(argv, argc) };
 
-    eprintln!("argc: {argc}");
     let mut argv = Vec::with_capacity(argc);
     for (idx, c_arg) in c_argv.iter().take(argc).enumerate() {
         if c_arg.is_null() {
