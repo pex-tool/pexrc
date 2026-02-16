@@ -8,12 +8,13 @@ mod tools;
 
 use std::path::Path;
 
-pub use metadata::Clib;
-use rust_toolchain::{ClassifiedTargets, Toolchain, parse_toolchain};
+pub use metadata::{Clib, Glibc};
+pub use rust_toolchain::{ClassifiedTargets, GnuLinux, Target};
+use rust_toolchain::{Toolchain, parse_toolchain};
 
-use crate::metadata::{Glibc, Metadata, parse_metadata};
+use crate::metadata::{Metadata, parse_metadata};
 use crate::tools::ToolBox;
-pub use crate::tools::{FoundTool, InstallDirs, ToolInstallation};
+pub use crate::tools::{BinstallTool, FoundTool, InstallDirs, ToolInstallation, Zig};
 
 pub fn ensure_tools_installed<'a>(
     cargo: &Path,

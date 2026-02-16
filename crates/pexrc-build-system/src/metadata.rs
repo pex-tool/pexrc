@@ -8,19 +8,19 @@ use anyhow::bail;
 use serde::Deserialize;
 
 #[derive(Deserialize, Debug)]
-pub struct Fingerprint<'a> {
-    pub algorithm: &'a str,
-    pub hash: &'a str,
+pub(crate) struct Fingerprint<'a> {
+    pub(crate) algorithm: &'a str,
+    pub(crate) hash: &'a str,
 }
 
 #[derive(Deserialize, Debug)]
-pub struct DownloadArchive<'a> {
-    pub url: Cow<'a, str>,
-    pub size: u64,
+pub(crate) struct DownloadArchive<'a> {
+    pub(crate) url: Cow<'a, str>,
+    pub(crate) size: u64,
     #[serde(borrow)]
-    pub fingerprint: Fingerprint<'a>,
+    pub(crate) fingerprint: Fingerprint<'a>,
     #[serde(default)]
-    pub prefix: Option<&'a str>,
+    pub(crate) prefix: Option<&'a str>,
 }
 
 #[derive(Deserialize)]
@@ -53,9 +53,9 @@ pub struct Artifact<'a> {
 }
 
 #[derive(Deserialize)]
-pub struct CargoBinstall<'a> {
-    pub version: &'a str,
-    pub artifacts: Vec<Artifact<'a>>,
+pub(crate) struct CargoBinstall<'a> {
+    pub(crate) version: &'a str,
+    pub(crate) artifacts: Vec<Artifact<'a>>,
 }
 
 impl<'a> CargoBinstall<'a> {
@@ -91,16 +91,16 @@ impl<'a> CargoBinstall<'a> {
 }
 
 #[derive(Deserialize)]
-pub struct Build<'a> {
+pub(crate) struct Build<'a> {
     #[serde(borrow)]
-    pub cargo_binstall: CargoBinstall<'a>,
+    pub(crate) cargo_binstall: CargoBinstall<'a>,
     #[serde(borrow)]
-    pub clib: Clib<'a>,
+    pub(crate) clib: Clib<'a>,
     #[serde(borrow)]
-    pub glibc: Glibc<'a>,
+    pub(crate) glibc: Glibc<'a>,
     #[serde(borrow)]
-    pub mac_osx_sdk: DownloadArchive<'a>,
-    pub zig_version: &'a str,
+    pub(crate) mac_osx_sdk: DownloadArchive<'a>,
+    pub(crate) zig_version: &'a str,
 }
 
 #[derive(Deserialize)]
