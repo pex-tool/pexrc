@@ -9,7 +9,6 @@ members = [
     "crates/pex-info",
     "crates/pexrc-build-system",
     "crates/pexrs",
-    "crates/venv",
 ]
 
 [package]
