@@ -39,8 +39,18 @@ impl<'a> Glibc<'a> {
 
 #[derive(Deserialize)]
 pub struct Clib<'a> {
-    pub profile: &'a str,
     pub compression_level: i32,
+    #[serde(borrow)]
+    profiles: HashMap<&'a str, &'a str>,
+}
+
+impl<'a> Clib<'a> {
+    pub fn profile_for(&'a self, profile: &'a str) -> &'a str {
+        self.profiles
+            .get(profile)
+            .map(|profile| *profile)
+            .unwrap_or(profile)
+    }
 }
 
 #[derive(Deserialize)]

@@ -16,7 +16,7 @@ def ensure_clib():
 
     env = os.environ.copy()
     env.update(PEXRC_LIB_DIR=os.path.abspath(os.path.join("python", "pexrc", "__pex__", ".lib")))
-    subprocess.check_call(args=["cargo", "build", "--release"], env=env)
+    subprocess.check_call(args=["cargo", "build"], env=env)
 
 
 def run_tests():

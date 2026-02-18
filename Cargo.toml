@@ -9,6 +9,7 @@ members = [
     "crates/pex-info",
     "crates/pexrc-build-system",
     "crates/pexrs",
+    "crates/venv",
 ]
 
 [package]
@@ -38,8 +39,8 @@ artifacts = [
 ]
 
 [package.metadata.build.clib]
-profile = "release-clib"
 compression_level = 19
+profiles = { release = "release-clib" }
 
 # The glibc release timeline for reference: https://sourceware.org/glibc/wiki/Glibc%20Timeline
 [package.metadata.build.glibc]
@@ -98,7 +99,7 @@ textwrap = "0.16"
 toml = "1.0"
 which = "8.0"
 xz2 = "0.1"
-zip = { version = "7.4", default-features = false, features = ["deflate", "zstd"] }
+zip = { version = "8.1", default-features = false, features = ["deflate", "zstd"] }
 zstd = "0.13"
 
 [build-dependencies]

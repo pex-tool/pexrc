@@ -1,6 +1,8 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::env;
+
 use serde::Deserialize;
 
 use crate::metadata::Glibc;
@@ -40,6 +42,50 @@ pub struct ClassifiedTargets<'a> {
 }
 
 impl<'a> ClassifiedTargets<'a> {
+    pub fn parse(targets: impl Iterator<Item = &'a str>, glibc: &'a Glibc<'a>) -> Self {
+        let (xwin_targets, zigbuild_targets) = targets
+            .map(|target| {
+                if target.contains("-apple-") {
+                    Target::Apple(target)
+                } else if target.contains("-linux-") {
+                    if target.ends_with("-gnu") {
+                        let zigbuild_target = format!(
+                            "{target}.{glibc_version}",
+                            glibc_version = glibc.version(target)
+                        );
+                        Target::GnuLinux(GnuLinux {
+                            target,
+                            zigbuild_target,
+                        })
+                    } else {
+                        Target::Unix(target)
+                    }
+                } else if target.contains("-windows-") {
+                    Target::Windows(target)
+                } else {
+                    panic!("The build system does not know how to handle")
+                }
+            })
+            .partition::<Vec<_>, _>(|target| matches!(target, Target::Windows(_)));
+        Self {
+            xwin_targets,
+            zigbuild_targets,
+        }
+    }
+
+    pub fn is_just_current(&'a self) -> anyhow::Result<Option<&'a str>> {
+        let current_target = env::var("TARGET")?;
+        let mut all_targets_iter = self.iter_all_targets();
+        if let Some(target) = all_targets_iter.next()
+            && target.as_str() == current_target
+            && all_targets_iter.next().is_none()
+        {
+            Ok(Some(target.as_str()))
+        } else {
+            Ok(None)
+        }
+    }
+
     pub fn iter_zigbuild_targets(&'a self) -> impl Iterator<Item = &'a str> {
         self.zigbuild_targets.iter().map(|target| {
             if let Target::GnuLinux(gnu_linux) = target {
@@ -67,36 +113,7 @@ pub(crate) struct Toolchain<'a> {
 
 impl<'a> Toolchain<'a> {
     pub(crate) fn classify_targets(&self, glibc: &'a Glibc<'a>) -> ClassifiedTargets<'a> {
-        let (xwin_targets, zigbuild_targets) = self
-            .targets
-            .iter()
-            .map(|target| {
-                if target.contains("-apple-") {
-                    Target::Apple(target)
-                } else if target.contains("-linux-") {
-                    if target.ends_with("-gnu") {
-                        let zigbuild_target = format!(
-                            "{target}.{glibc_version}",
-                            glibc_version = glibc.version(target)
-                        );
-                        Target::GnuLinux(GnuLinux {
-                            target,
-                            zigbuild_target,
-                        })
-                    } else {
-                        Target::Unix(target)
-                    }
-                } else if target.contains("-windows-") {
-                    Target::Windows(target)
-                } else {
-                    panic!("The build system does not know how to handle")
-                }
-            })
-            .partition::<Vec<_>, _>(|target| matches!(target, Target::Windows(_)));
-        ClassifiedTargets {
-            xwin_targets,
-            zigbuild_targets,
-        }
+        ClassifiedTargets::parse(self.targets.iter().map(|target| *target), glibc)
     }
 }
 

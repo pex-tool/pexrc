@@ -69,10 +69,11 @@ impl Interpreter {
 
 #[cfg(test)]
 mod tests {
-    use textwrap::dedent;
     use std::ffi::OsString;
     use std::path::PathBuf;
     use std::process::{Command, Stdio};
+
+    use textwrap::dedent;
 
     use crate::Interpreter;
 
@@ -117,14 +118,16 @@ mod tests {
 
         let tags_output = Command::new(&python_exe)
             .arg("-c")
-            .arg(dedent("
+            .arg(dedent(
+                "
                 import json
                 import sys
 
                 from packaging import tags
 
                 json.dump(list(map(str, tags.sys_tags())), sys.stdout)
-            "))
+                ",
+            ))
             .stdout(Stdio::piped())
             .spawn()
             .unwrap()

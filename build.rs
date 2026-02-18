@@ -6,12 +6,13 @@ use std::ffi::OsStr;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::{env, fs, io};
+use std::{env, fs, io, iter};
 
-use anyhow::bail;
+use anyhow::{anyhow, bail};
 use bstr::ByteSlice;
 use itertools::Itertools;
 use pexrc_build_system::{
+    ClassifiedTargets,
     Clib,
     FoundTool,
     InstallDirs,
@@ -78,25 +79,6 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    println!("cargo::rerun-if-changed=rust-toolchain");
-    let rust_toolchain_contents = fs::read_to_string("rust-toolchain")?;
-    let targets = classify_targets(&rust_toolchain_contents, &glibc)?;
-
-    custom_cargo_build(
-        &cargo,
-        ["xwin", "build"],
-        &clib,
-        &found_tools,
-        targets.iter_xwin_targets(),
-    )?;
-    custom_cargo_build(
-        &cargo,
-        ["zigbuild"],
-        &clib,
-        &found_tools,
-        targets.iter_zigbuild_targets(),
-    )?;
-
     let (clibs_dir, compress) = if let Some(lib_dir) = env::var_os("PEXRC_LIB_DIR") {
         (PathBuf::from(lib_dir), false)
     } else {
@@ -109,12 +91,84 @@ fn main() -> anyhow::Result<()> {
         clibs_dir = clibs_dir.display()
     );
 
+    let profile = env::var("PROFILE")?;
+    let profile = clib.profile_for(&profile);
+
+    println!("cargo::rerun-if-env-changed=PEXRC_TARGETS");
+    let custom_targets = env::var("PEXRC_TARGETS").ok();
+    if let Some(targets) = &custom_targets
+        && targets.to_ascii_lowercase() == "all"
+    {
+        println!("cargo::rerun-if-changed=rust-toolchain");
+        let rust_toolchain_contents = fs::read_to_string("rust-toolchain")?;
+        let targets = classify_targets(&rust_toolchain_contents, &glibc)?;
+        custom_cargo_build(
+            &cargo,
+            &["xwin", "build"],
+            &profile,
+            &found_tools,
+            targets.iter_xwin_targets(),
+        )?;
+        custom_cargo_build(
+            &cargo,
+            &["zigbuild"],
+            &profile,
+            &found_tools,
+            targets.iter_zigbuild_targets(),
+        )?;
+        collect_clibs(&targets, &target_dir, &profile, &clib, &clibs_dir, compress)
+    } else {
+        if let Some(targets) = &custom_targets
+            && !targets.is_empty()
+            && targets.to_ascii_lowercase() != "current"
+        {
+            bail!(
+                "Unrecognized custom targets `PEXRC_TARGETS={targets}`.\n\
+                Only `current` (the default) and `all` are recognized."
+            )
+        }
+        let target = env::var("TARGET")?;
+        let targets = ClassifiedTargets::parse([target.as_str()].into_iter(), &glibc);
+        // N.B.: We need to use a custom --target-dir to avoid a deadlock on the ambient target that
+        // would otherwise occur calling into cargo build recursively here.
+        let tgt_dir = target_dir.join("clib");
+        custom_cargo_build(
+            &cargo,
+            &[
+                "build",
+                "--target-dir",
+                tgt_dir.to_str().ok_or_else(|| {
+                    anyhow!(
+                        "The target directory of {target_dir} must be a UTF-8 path",
+                        target_dir = target_dir.display()
+                    )
+                })?,
+            ],
+            &profile,
+            &found_tools,
+            iter::empty(),
+        )?;
+        collect_clibs(&targets, &tgt_dir, &profile, &clib, &clibs_dir, compress)
+    }
+}
+
+fn collect_clibs<'a>(
+    targets: &'a ClassifiedTargets<'a>,
+    target_dir: &Path,
+    profile: &'a str,
+    clib: &'a Clib<'a>,
+    clibs_dir: &Path,
+    compress: bool,
+) -> anyhow::Result<()> {
+    let profile = clib.profile_for(profile);
     for target in targets.iter_all_targets() {
         let clib_name = target.shared_library_name("pexrc");
-        let clib_path = target_dir
-            .join(target.as_str())
-            .join(clib.profile)
-            .join(&clib_name);
+        let clib_path = if targets.is_just_current()?.is_some() {
+            target_dir.join(profile).join("deps")
+        } else {
+            target_dir.join(target.as_str()).join(profile)
+        }
+        .join(&clib_name);
         if !clib_path.exists() {
             eprintln!(
                 "The clib for {target} does not exist at {clib_path}!",
@@ -140,9 +194,9 @@ fn main() -> anyhow::Result<()> {
 
 fn custom_cargo_build<'a>(
     cargo: &Path,
-    custom_build_args: impl IntoIterator<Item = &'a str>,
-    clib: &Clib,
-    found_tools: impl IntoIterator<Item = &'a FoundTool>,
+    custom_build_args: &[&str],
+    profile: &str,
+    found_tools: &[FoundTool],
     targets: impl Iterator<Item = &'a str>,
 ) -> anyhow::Result<()> {
     let mut cmd = Command::new(cargo);
@@ -158,8 +212,10 @@ fn custom_cargo_build<'a>(
         );
         cmd.env(found_tool.env_var, &found_tool.path);
     }
-    cmd.args(custom_build_args)
-        .args(["--package", "clib", "--profile", clib.profile]);
+    cmd.args(custom_build_args).args(["--package", "clib"]);
+    if profile != "debug" {
+        cmd.args(["--profile", profile]);
+    }
     for target in targets {
         cmd.args(["--target", target]);
     }
