@@ -113,7 +113,7 @@ pub(crate) struct Toolchain<'a> {
 
 impl<'a> Toolchain<'a> {
     pub(crate) fn classify_targets(&self, glibc: &'a Glibc<'a>) -> ClassifiedTargets<'a> {
-        ClassifiedTargets::parse(self.targets.iter().map(|target| *target), glibc)
+        ClassifiedTargets::parse(self.targets.iter().copied(), glibc)
     }
 }
 

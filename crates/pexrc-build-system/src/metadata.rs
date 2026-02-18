@@ -46,10 +46,7 @@ pub struct Clib<'a> {
 
 impl<'a> Clib<'a> {
     pub fn profile_for(&'a self, profile: &'a str) -> &'a str {
-        self.profiles
-            .get(profile)
-            .map(|profile| *profile)
-            .unwrap_or(profile)
+        self.profiles.get(profile).copied().unwrap_or(profile)
     }
 }
 

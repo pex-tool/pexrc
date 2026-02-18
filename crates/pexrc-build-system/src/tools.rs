@@ -211,7 +211,6 @@ impl<'a> ToolInventory<'a> {
             };
 
         let mut found_tools = Vec::new();
-
         if !self.missing.is_empty() || !self.zig.found() {
             if install_missing_tools {
                 let zig = install_tools(
@@ -230,6 +229,8 @@ impl<'a> ToolInventory<'a> {
                     tool_search_path.into_owned(),
                 )));
             }
+        } else if let Zig::Found(zig) = self.zig {
+            found_tools.push(zig)
         }
         for (env_var, download) in &self.downloads {
             let download_path = ensure_download(download, &self.install_dirs.download_dir)?;
