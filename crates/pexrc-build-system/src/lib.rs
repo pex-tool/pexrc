@@ -8,7 +8,7 @@ mod tools;
 
 use std::path::Path;
 
-pub use metadata::{Clib, Glibc};
+pub use metadata::{Clib, ClibConfiguration, Glibc};
 pub use rust_toolchain::{ClassifiedTargets, GnuLinux, Target};
 use rust_toolchain::{Toolchain, parse_toolchain};
 

@@ -38,8 +38,11 @@ artifacts = [
 ]
 
 [package.metadata.build.clib]
+compression_level = 3
+
+[package.metadata.build.clib.profiles.release]
+profile = "release-clib"
 compression_level = 19
-profiles = { release = "release-clib" }
 
 # The glibc release timeline for reference: https://sourceware.org/glibc/wiki/Glibc%20Timeline
 [package.metadata.build.glibc]

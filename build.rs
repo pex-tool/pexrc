@@ -13,7 +13,7 @@ use bstr::ByteSlice;
 use itertools::Itertools;
 use pexrc_build_system::{
     ClassifiedTargets,
-    Clib,
+    ClibConfiguration,
     FoundTool,
     InstallDirs,
     ToolInstallation,
@@ -58,7 +58,7 @@ fn main() -> anyhow::Result<()> {
         install_dirs,
         install_missing_tools,
     )?;
-    let (clib, glibc, found_tools) = match tool_installation {
+    let (mut clib, glibc, found_tools) = match tool_installation {
         ToolInstallation::Success(results) => results,
         ToolInstallation::Failure((zig, missing_binstall_tools, tool_search_path)) => {
             bail!(
@@ -114,7 +114,7 @@ fn main() -> anyhow::Result<()> {
     );
 
     let profile = env::var("PROFILE")?;
-    let profile = clib.profile_for(&profile);
+    let clib_configuration = clib.configuration_for(&profile);
 
     // N.B.: We need to use a custom --target-dir to avoid a deadlock on the ambient target that
     // would otherwise occur calling into cargo build recursively below.
@@ -134,48 +134,58 @@ fn main() -> anyhow::Result<()> {
         custom_cargo_build(
             &cargo,
             &["zigbuild", "--target-dir", tgt_arg],
-            profile,
+            clib_configuration.profile,
             &found_tools,
             targets.iter_zigbuild_targets(),
         )?;
         custom_cargo_build(
             &cargo,
             &["xwin", "build", "--target-dir", tgt_arg],
-            profile,
+            clib_configuration.profile,
             &found_tools,
             targets.iter_xwin_targets(),
         )?;
-        collect_clibs(&targets, &tgt_path, profile, &clib, &clibs_dir, compress)
+        collect_clibs(
+            &targets,
+            &tgt_path,
+            clib_configuration,
+            &clibs_dir,
+            compress,
+        )
     } else {
         let target = env::var("TARGET")?;
         let targets = ClassifiedTargets::parse([target.as_str()].into_iter(), &glibc);
         custom_cargo_build(
             &cargo,
             &["build", "--target-dir", tgt_arg],
-            profile,
+            clib_configuration.profile,
             &found_tools,
             iter::empty(),
         )?;
-        collect_clibs(&targets, &tgt_path, profile, &clib, &clibs_dir, compress)
+        collect_clibs(
+            &targets,
+            &tgt_path,
+            clib_configuration,
+            &clibs_dir,
+            compress,
+        )
     }
 }
 
 fn collect_clibs<'a>(
     targets: &'a ClassifiedTargets<'a>,
     target_dir: &Path,
-    profile: &'a str,
-    clib: &'a Clib<'a>,
+    clib: &'a ClibConfiguration<'a>,
     clibs_dir: &Path,
     compress: bool,
 ) -> anyhow::Result<()> {
-    let profile = clib.profile_for(profile);
     let is_just_current_target = targets.is_just_current()?;
     for target in targets.iter_all_targets() {
         let clib_name = target.shared_library_name("pexrc");
         let clib_path = if is_just_current_target.is_some() {
-            target_dir.join(profile).join("deps")
+            target_dir.join(clib.profile).join("deps")
         } else {
-            target_dir.join(target.as_str()).join(profile)
+            target_dir.join(target.as_str()).join(clib.profile)
         }
         .join(&clib_name);
         if !clib_path.exists() {

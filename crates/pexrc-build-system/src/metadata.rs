@@ -38,15 +38,26 @@ impl<'a> Glibc<'a> {
 }
 
 #[derive(Deserialize)]
+pub struct ClibConfiguration<'a> {
+    pub profile: &'a str,
+    pub compression_level: i32,
+}
+
+#[derive(Deserialize)]
 pub struct Clib<'a> {
     pub compression_level: i32,
     #[serde(borrow)]
-    profiles: HashMap<&'a str, &'a str>,
+    profiles: HashMap<&'a str, ClibConfiguration<'a>>,
 }
 
 impl<'a> Clib<'a> {
-    pub fn profile_for(&'a self, profile: &'a str) -> &'a str {
-        self.profiles.get(profile).copied().unwrap_or(profile)
+    pub fn configuration_for(&'a mut self, profile: &'a str) -> &'a ClibConfiguration<'a> {
+        self.profiles
+            .entry(profile)
+            .or_insert_with(|| ClibConfiguration {
+                profile,
+                compression_level: self.compression_level,
+            })
     }
 }
 
