@@ -78,6 +78,9 @@ fn main() -> anyhow::Result<()> {
             );
         }
     };
+    println!("cargo::rerun-if-env-changed=PROFILE");
+    let profile = env::var("PROFILE")?;
+    let clib = clib.configuration_for(&profile);
 
     println!("cargo::rerun-if-env-changed=PEXRC_TARGETS");
     let all_targets = match env::var("PEXRC_TARGETS")
@@ -113,9 +116,6 @@ fn main() -> anyhow::Result<()> {
         clibs_dir = clibs_dir.display()
     );
 
-    let profile = env::var("PROFILE")?;
-    let clib_configuration = clib.configuration_for(&profile);
-
     // N.B.: We need to use a custom --target-dir to avoid a deadlock on the ambient target that
     // would otherwise occur calling into cargo build recursively below.
     let tgt_path = target_dir.join("clib");
@@ -134,81 +134,30 @@ fn main() -> anyhow::Result<()> {
         custom_cargo_build(
             &cargo,
             &["zigbuild", "--target-dir", tgt_arg],
-            clib_configuration.profile,
+            clib.profile,
             &found_tools,
             targets.iter_zigbuild_targets(),
         )?;
         custom_cargo_build(
             &cargo,
             &["xwin", "build", "--target-dir", tgt_arg],
-            clib_configuration.profile,
+            clib.profile,
             &found_tools,
             targets.iter_xwin_targets(),
         )?;
-        collect_clibs(
-            &targets,
-            &tgt_path,
-            clib_configuration,
-            &clibs_dir,
-            compress,
-        )
+        collect_clibs(&targets, &tgt_path, clib, &clibs_dir, compress)
     } else {
         let target = env::var("TARGET")?;
         let targets = ClassifiedTargets::parse([target.as_str()].into_iter(), &glibc);
         custom_cargo_build(
             &cargo,
             &["build", "--target-dir", tgt_arg],
-            clib_configuration.profile,
+            clib.profile,
             &found_tools,
             iter::empty(),
         )?;
-        collect_clibs(
-            &targets,
-            &tgt_path,
-            clib_configuration,
-            &clibs_dir,
-            compress,
-        )
+        collect_clibs(&targets, &tgt_path, clib, &clibs_dir, compress)
     }
-}
-
-fn collect_clibs<'a>(
-    targets: &'a ClassifiedTargets<'a>,
-    target_dir: &Path,
-    clib: &'a ClibConfiguration<'a>,
-    clibs_dir: &Path,
-    compress: bool,
-) -> anyhow::Result<()> {
-    let is_just_current_target = targets.is_just_current()?;
-    for target in targets.iter_all_targets() {
-        let clib_name = target.shared_library_name("pexrc");
-        let clib_path = if is_just_current_target.is_some() {
-            target_dir.join(clib.profile).join("deps")
-        } else {
-            target_dir.join(target.as_str()).join(clib.profile)
-        }
-        .join(&clib_name);
-        if !clib_path.exists() {
-            eprintln!(
-                "The clib for {target} does not exist at {clib_path}!",
-                clib_path = clib_path.display(),
-                target = target.as_str(),
-            );
-        }
-        let mut dst = File::create(
-            clibs_dir.join(format!("{target}.{clib_name}", target = target.as_str())),
-        )?;
-        if compress {
-            io::copy(
-                &mut File::open(clib_path)?,
-                &mut zstd::Encoder::new(dst, clib.compression_level)?,
-            )?;
-        } else {
-            io::copy(&mut File::open(clib_path)?, &mut dst)?;
-        }
-    }
-
-    Ok(())
 }
 
 fn custom_cargo_build<'a>(
@@ -251,4 +200,43 @@ fn custom_cargo_build<'a>(
         args = cmd.get_args().map(OsStr::to_string_lossy).join(" \\\n  "),
         output = result.stderr.to_str_lossy()
     )
+}
+
+fn collect_clibs<'a>(
+    targets: &'a ClassifiedTargets<'a>,
+    target_dir: &Path,
+    clib: &'a ClibConfiguration<'a>,
+    clibs_dir: &Path,
+    compress: bool,
+) -> anyhow::Result<()> {
+    let is_just_current_target = targets.is_just_current()?;
+    for target in targets.iter_all_targets() {
+        let clib_name = target.shared_library_name("pexrc");
+        let clib_path = if is_just_current_target.is_some() {
+            target_dir.join(clib.profile).join("deps")
+        } else {
+            target_dir.join(target.as_str()).join(clib.profile)
+        }
+        .join(&clib_name);
+        if !clib_path.exists() {
+            eprintln!(
+                "The clib for {target} does not exist at {clib_path}!",
+                clib_path = clib_path.display(),
+                target = target.as_str(),
+            );
+        }
+        let mut dst = File::create(
+            clibs_dir.join(format!("{target}.{clib_name}", target = target.as_str())),
+        )?;
+        if compress {
+            io::copy(
+                &mut File::open(clib_path)?,
+                &mut zstd::Encoder::new(dst, clib.compression_level)?,
+            )?;
+        } else {
+            io::copy(&mut File::open(clib_path)?, &mut dst)?;
+        }
+    }
+
+    Ok(())
 }
