@@ -167,6 +167,7 @@ impl<'a> WheelResolver for ZipAppPex<'a> {
                 }
                 resolved_by_project_name.insert(requirement.name, file_name);
                 for req in requirements {
+                    // TODO: XXX: Is there a way to restructure the graph walk to avoid this clone?
                     to_resolve.push_back((req, requirement.extras.clone()))
                 }
                 break;

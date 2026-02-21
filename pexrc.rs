@@ -1,6 +1,7 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::borrow::Cow;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -80,7 +81,10 @@ fn main() -> anyhow::Result<()> {
     } else {
         bail!(
             "Usage: {} [pex file]",
-            env::args().next().unwrap_or_else(|| "pexrc".to_string())
+            env::args()
+                .next()
+                .map(Cow::Owned)
+                .unwrap_or_else(|| Cow::Borrowed("pexrc"))
         )
     }
 }

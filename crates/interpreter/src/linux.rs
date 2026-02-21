@@ -96,7 +96,7 @@ impl LinuxInfo {
     pub(crate) fn parse(exe: impl AsRef<Path>) -> anyhow::Result<Self> {
         let exe_fp = File::open(&exe)?;
         let mut elf: ElfStream<AnyEndian, _> = ElfStream::open_stream(exe_fp)?;
-        let segments = elf.segments().to_owned();
+        let segments = elf.segments().clone();
         for program_header in segments {
             if program_header.p_type != elf::abi::PT_INTERP {
                 continue;
