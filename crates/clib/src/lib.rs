@@ -107,10 +107,8 @@ pub unsafe extern "C" fn boot(
         }
     };
 
-    match rust_boot(python_exe_path, python_argv, pex_path, argv, None, true) {
-        Ok(status) => status
-            .code()
-            .unwrap_or_else(|| if status.success() { 0 } else { 1 }),
+    match rust_boot(python_exe_path, python_argv, pex_path, argv, true) {
+        Ok(code) => code,
         Err(err) => {
             eprintln!(
                 "Problem booting PEX at {pex_path}: {err}",

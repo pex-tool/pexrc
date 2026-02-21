@@ -7,15 +7,40 @@ use std::collections::HashMap;
 use anyhow::bail;
 use serde::Deserialize;
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize)]
+pub(crate) enum FileType {
+    #[serde(rename = "blob")]
+    Blob,
+    #[serde(rename = "txz")]
+    TarLzma,
+    #[serde(rename = "tgz")]
+    TarGzip,
+    #[serde(rename = "zip")]
+    Zip,
+}
+
+impl FileType {
+    pub(crate) fn from_ext(ext: &str) -> Self {
+        match ext {
+            "tar.gz" | "tgz" => FileType::TarGzip,
+            "tar.xz" => FileType::TarLzma,
+            "zip" => FileType::Zip,
+            _ => FileType::Blob,
+        }
+    }
+}
+
+#[derive(Deserialize)]
 pub(crate) struct Fingerprint<'a> {
     pub(crate) algorithm: &'a str,
     pub(crate) hash: &'a str,
 }
 
-#[derive(Deserialize, Debug)]
-pub(crate) struct DownloadArchive<'a> {
+#[derive(Deserialize)]
+pub(crate) struct Download<'a> {
     pub(crate) url: Cow<'a, str>,
+    #[serde(rename = "type")]
+    pub(crate) file_type: FileType,
     pub(crate) size: u64,
     #[serde(borrow)]
     pub(crate) fingerprint: Fingerprint<'a>,
@@ -77,7 +102,7 @@ pub(crate) struct CargoBinstall<'a> {
 }
 
 impl<'a> CargoBinstall<'a> {
-    pub fn download_for(&'a self, target: &'a str) -> anyhow::Result<Option<DownloadArchive<'a>>> {
+    pub fn download_for(&'a self, target: &'a str) -> anyhow::Result<Option<Download<'a>>> {
         for artifact in &self.artifacts {
             if artifact.target != target {
                 continue;
@@ -91,7 +116,7 @@ impl<'a> CargoBinstall<'a> {
                     hash = artifact.hash
                 );
             };
-            return Ok(Some(DownloadArchive {
+            return Ok(Some(Download {
                 url: Cow::Owned(format!(
                     "https://github.com/cargo-bins/cargo-binstall/releases/download/\
                         v{version}/\
@@ -99,6 +124,7 @@ impl<'a> CargoBinstall<'a> {
                     version = self.version,
                     ext = artifact.archive_type
                 )),
+                file_type: FileType::from_ext(artifact.archive_type),
                 size: artifact.size,
                 fingerprint: Fingerprint { algorithm, hash },
                 prefix: None,
@@ -117,7 +143,8 @@ pub(crate) struct Build<'a> {
     #[serde(borrow)]
     pub(crate) glibc: Glibc<'a>,
     #[serde(borrow)]
-    pub(crate) mac_osx_sdk: DownloadArchive<'a>,
+    pub(crate) mac_osx_sdk: Download<'a>,
+    pub(crate) virtualenv: Download<'a>,
     pub(crate) zig_version: &'a str,
 }
 

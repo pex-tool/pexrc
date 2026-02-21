@@ -3,16 +3,15 @@
 
 use std::fs::File;
 use std::io::{Read, Write};
-use std::path::Path;
-use std::process::ExitCode;
-use std::{env, io};
+use std::path::{Path, PathBuf};
+use std::{env, io, process};
 
 use anyhow::{Context, anyhow, bail};
 use include_dir::{Dir, include_dir};
 use itertools::Itertools;
 use log::info;
 use logging_timer::time;
-use pexrs::{Algorithm, boot};
+use pexrs::boot;
 use tempfile::NamedTempFile;
 use which::which;
 use zip::write::SimpleFileOptions;
@@ -20,18 +19,8 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 static CLIBS_DIR: Dir<'_> = include_dir!("$CLIBS_DIR");
 
-fn main() -> anyhow::Result<ExitCode> {
+fn main() -> anyhow::Result<()> {
     env_logger::init();
-
-    let algorithm = env::args_os()
-        .find_map(|arg| {
-            if arg == "--init" {
-                Some(Algorithm::TryForEachInit)
-            } else {
-                None
-            }
-        })
-        .unwrap_or(Algorithm::TryForEach);
 
     let gc = !env::args_os().any(|arg| arg == "--keep");
 
@@ -52,6 +41,21 @@ fn main() -> anyhow::Result<ExitCode> {
         3
     };
 
+    let python = if let Some(raw_value) =
+        env::args_os()
+            .tuple_windows::<(_, _)>()
+            .find_map(|(flag, value)| {
+                if flag.as_os_str() == "--python" {
+                    Some(value)
+                } else {
+                    None
+                }
+            }) {
+        PathBuf::from(raw_value)
+    } else {
+        which("python").context("Failed to find a Python executable to boot PEX with.")?
+    };
+
     info!("Embedded clibs:");
     for (idx, file) in CLIBS_DIR.files().enumerate() {
         info!(
@@ -64,42 +68,15 @@ fn main() -> anyhow::Result<ExitCode> {
 
     if let Some(pex_file) = env::args_os().nth(1).as_deref() {
         let pex_path = Path::new(pex_file);
-        let python = which("python").with_context(|| {
-            format!(
-                "Failed to find a Python executable to boot {pex} with.",
-                pex = pex_path.display()
-            )
-        })?;
-
         info!(
-            "Using compression level {compression_level}, algorithm {algorithm} and {modifier} gc \
-            the extraction dir.",
+            "Using compression level {compression_level} and {modifier} gc the extraction dir.",
             modifier = if gc { "will" } else { "will not" }
         );
         transcode(pex_path, Some(compression_level))?;
 
         info!("Booting PEX with {python}.", python = python.display());
-        match boot(
-            python,
-            Vec::new(),
-            pex_path,
-            Vec::new(),
-            Some(algorithm),
-            gc,
-        ) {
-            Ok(exit_status) => {
-                if let Some(code) = exit_status.code()
-                    && let Ok(exit_code) = u8::try_from(code)
-                {
-                    Ok(ExitCode::from(exit_code))
-                } else if exit_status.success() {
-                    Ok(ExitCode::SUCCESS)
-                } else {
-                    Ok(ExitCode::FAILURE)
-                }
-            }
-            Err(err) => Err(anyhow!("{err}")),
-        }
+        let exit_code = boot(python, Vec::new(), pex_path, Vec::new(), gc)?;
+        process::exit(exit_code)
     } else {
         bail!(
             "Usage: {} [pex file]",

@@ -1,6 +1,7 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io;
 use std::io::Read;
@@ -16,6 +17,16 @@ pub enum BinPath {
     Append,
     #[serde(rename = "prepend")]
     Prepend,
+}
+
+impl BinPath {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            BinPath::False => "false",
+            BinPath::Append => "append",
+            BinPath::Prepend => "prepend",
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -64,12 +75,15 @@ pub struct PexInfo {
 }
 
 impl PexInfo {
-    pub fn parse(data: impl Read, source: Option<&str>) -> anyhow::Result<PexInfo> {
+    pub fn parse<'a>(
+        data: impl Read,
+        source: Option<impl FnOnce() -> Cow<'a, str>>,
+    ) -> anyhow::Result<PexInfo> {
         let contents = io::read_to_string(data)?;
         serde_json::from_str(&contents).map_err(|err| {
             anyhow!(
                 "Failed to parse PEX-INFO from {source}: {err}",
-                source = source.unwrap_or("<string>")
+                source = source.map(|f| f()).unwrap_or(Cow::Borrowed("<string>"))
             )
         })
     }

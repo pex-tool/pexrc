@@ -16,7 +16,7 @@ use strum_macros::{EnumCount, EnumIter};
 use which::which_in_global;
 
 use crate::downloads::ensure_download;
-use crate::metadata::{Build, CargoBinstall, Clib, DownloadArchive, Glibc};
+use crate::metadata::{Build, CargoBinstall, Clib, Download, Glibc};
 
 pub(crate) struct ToolBox<'a> {
     clib: Clib<'a>,
@@ -24,7 +24,7 @@ pub(crate) struct ToolBox<'a> {
     zig_version: &'a str,
     glibc: Glibc<'a>,
     binstall_tools: Vec<BinstallTool>,
-    downloads: Vec<(&'static str, DownloadArchive<'a>)>,
+    downloads: Vec<(&'static str, Download<'a>)>,
 }
 
 impl<'a> From<Build<'a>> for ToolBox<'a> {
@@ -120,7 +120,7 @@ fn get_zig_version(zig: &Path) -> Option<String> {
 
 pub struct InstallDirs {
     bin_dir: PathBuf,
-    download_dir: PathBuf,
+    pub(crate) download_dir: PathBuf,
 }
 
 impl InstallDirs {
@@ -185,7 +185,7 @@ pub(crate) struct ToolInventory<'a> {
     glibc: Glibc<'a>,
     binstall: CargoBinstall<'a>,
     zig: Zig<'a>,
-    downloads: Vec<(&'static str, DownloadArchive<'a>)>,
+    downloads: Vec<(&'static str, Download<'a>)>,
     missing: Vec<BinstallTool>,
     install_dirs: InstallDirs,
 }

@@ -6,9 +6,11 @@ members = [
     ".",
     "crates/clib",
     "crates/interpreter",
-    "crates/pex-info",
+    "crates/pex",
     "crates/pexrc-build-system",
     "crates/pexrs",
+    "crates/platform", "crates/testing",
+    "crates/venv",
 ]
 
 [package]
@@ -26,7 +28,7 @@ artifacts = [
     # N.B.: We don't cover all our targets here. If you develop on an un-covered target, we'll just
     # run: `cargo install --locked cargo_binstall@<version>`. The only drawback is that's pretty
     # slow compared to downloading a pre-built binary.
-    { target = "arch64-apple-darwin", type = "zip", size = 7094752, hash = "sha256:c689061413598fa32b77b6fd2a7300c6392faf008137194ab8a4cdb93c12040a"},
+    { target = "arch64-apple-darwin", type = "zip", size = 7094752, hash = "sha256:c689061413598fa32b77b6fd2a7300c6392faf008137194ab8a4cdb93c12040a" },
     { target = "aarch64-pc-windows-msvc", type = "zip", size = 6955036, hash = "sha256:6096f3a5da155fcf06f5fe48ee86a0b40427e48d0abb7206e2bc54572f875400"},
     { target = "aarch64-unknown-linux-gnu", type = "tgz", size = 7564244, hash = "sha256:d0e901a56fbcf5ef20d488fcf069b48d3841c07a8a7b713ca5639d32a6da13a5"},
     { target = "aarch64-unknown-linux-musl", type = "tgz", size = 7558045, hash = "sha256:1410ec72b4f23fa6cf8ebb4b55fe03ebca63e14adadf4501d78e91fa004e9689"},
@@ -57,9 +59,16 @@ riscv64gc-unknown-linux-gnu = "2.27"  # Released: 2018-02-01
 
 [package.metadata.build.mac_osx_sdk]
 url = "https://github.com/joseluisq/macosx-sdks/releases/download/11.3/MacOSX11.3.sdk.tar.xz"
+type = "txz"
 size = 57683504
 fingerprint = { algorithm = "sha256", hash = "9adc1373d3879e1973d28ad9f17c9051b02931674a3ec2a2498128989ece2cb1" }
 prefix = "MacOSX11.3.sdk"
+
+[package.metadata.build.virtualenv]
+url = "https://raw.githubusercontent.com/pypa/virtualenv/fdfec65ff031997503fb409f365ee3aeb4c2c89f/virtualenv.py"
+type = "blob"
+size = 106996
+fingerprint = { algorithm = "sha256", hash = "26497108bbd3a71cada865d712878bc3957fcaebf2bc431357f560f0524e6273" }
 
 [profile.release]
 codegen-units = 1
@@ -79,26 +88,35 @@ anyhow = "1.0"
 bstr = "1.12"
 build-target = "0.8"
 const_format = "0.2"
+ctor = "0.6"
 dirs = "6.0"
 elf = "0.8"
 env_logger = "0.11"
 flate2 = "1.1"
+glob = "0.3"
 hex = "0.4"
 include_dir = "0.7"
+indexmap = "2.13"
 itertools = "0.14"
 log = "0.4"
 logging_timer = "1.1"
+pep440_rs = "0.7"
+pep508_rs = "0.9"
+python-pkginfo = "0.6"
 rayon = "1.11"
 reqwest = { version = "0.13", features = ["blocking"] }
+rstest = "0.26"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = { version = "0.10" }
 strum = { version = "0.27", features = ["strum_macros"] }
 strum_macros = "*"
 tar = "0.4"
+target-lexicon = "0.13"
 tempfile = "3.25"
 textwrap = "0.16"
 toml = "1.0"
+url = "2.5"
 which = "8.0"
 xz2 = "0.1"
 zip = { version = "8.1", default-features = false, features = ["deflate", "zstd"] }

@@ -1,0 +1,248 @@
+// Copyright 2026 Pex project contributors.
+// SPDX-License-Identifier: Apache-2.0
+
+use std::borrow::Cow;
+use std::fs::File;
+use std::io::Write;
+use std::path::Path;
+use std::{fs, io};
+
+use anyhow::anyhow;
+use itertools::Itertools;
+use pex::{BinPath, Pex, PexInfo, ZipAppPex};
+use platform::{link_or_copy, mark_executable, path_as_bytes, path_as_str};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use zip::ZipArchive;
+
+use crate::virtualenv::Virtualenv;
+
+const VENV_PEX_PY: &str = include_str!("venv_pex.py");
+const VENV_PEX_REPL_PY: &str = include_str!("venv_pex_repl.py");
+
+pub fn populate(venv: &Virtualenv, pex: &Pex) -> anyhow::Result<()> {
+    let site_packages_path = venv.site_packages_path();
+    let (path, pex_info) = match pex {
+        Pex::Loose(_) => todo!("XXX: Implement loose PEX venv population."),
+        Pex::Packed(_) => todo!("XXX: Implement packed PEX venv population."),
+        Pex::ZipApp(ZipAppPex(path, pex_info)) => {
+            let mut pex_zip = ZipArchive::new(File::open(path)?)?;
+            let metadata = pex_zip.metadata();
+            let extract_indexes = pex_zip
+                .file_names()
+                .enumerate()
+                .filter_map(|(idx, name)| {
+                    if [".bootstrap/", "__pex__/"]
+                        .iter()
+                        .any(|exclude_dir| name.starts_with(exclude_dir))
+                        || ["PEX-INFO", "__main__.py", ".deps/"].contains(&name)
+                    {
+                        None
+                    } else {
+                        Some(idx)
+                    }
+                })
+                .collect::<Vec<_>>();
+            extract_indexes
+                .into_par_iter()
+                .try_for_each(|index| -> anyhow::Result<()> {
+                    let zip_fp = File::open(path)?;
+                    let mut zip =
+                        unsafe { ZipArchive::unsafe_new_with_metadata(zip_fp, metadata.clone()) };
+                    extract_idx(&site_packages_path, index, &mut zip)?;
+                    Ok(())
+                })?;
+            let mut pex_info_src_fp = pex_zip.by_name("PEX-INFO")?;
+            let mut pex_info_dst_fp = File::create_new(venv.path.join("PEX-INFO"))?;
+            io::copy(&mut pex_info_src_fp, &mut pex_info_dst_fp)?;
+            (path, pex_info)
+        }
+    };
+
+    write_main(&venv, pex_info)?;
+    write_repl(venv, path, pex_info)
+}
+
+fn extract_idx(
+    dst_dir: impl AsRef<Path>,
+    index: usize,
+    zip: &mut ZipArchive<File>,
+) -> anyhow::Result<()> {
+    let mut zip_file = zip.by_index(index)?;
+    let dst_path =
+        dst_dir
+            .as_ref()
+            .join(if zip_file.name().starts_with(".deps/") {
+                zip_file.name().splitn(3, "/").nth(2).ok_or_else(|| {
+                    anyhow!("Invalid PEX .deps/ entry {name}", name = zip_file.name())
+                })?
+            } else {
+                zip_file.name()
+            });
+    if zip_file.is_dir() {
+        fs::create_dir_all(dst_path)?;
+    } else {
+        if let Some(parent_dir) = dst_path.parent() {
+            fs::create_dir_all(parent_dir)?;
+        }
+        let mut dst_file = File::create_new(dst_path)?;
+        io::copy(&mut zip_file, &mut dst_file)?;
+    }
+    Ok(())
+}
+
+fn write_shebang_bytes(file: &mut File, venv: &Virtualenv) -> anyhow::Result<()> {
+    for chunk in [b"#!", path_as_bytes(&venv.interpreter.path)?, b"\n"] {
+        file.write_all(chunk)?;
+    }
+    Ok(())
+}
+
+fn as_python_bool(value: bool) -> &'static str {
+    if value { "True" } else { "False" }
+}
+
+fn as_optional_python_str(value: Option<&str>) -> Cow<'_, str> {
+    if let Some(value) = value {
+        Cow::Owned(format!("r\"{value}\""))
+    } else {
+        Cow::Borrowed("None")
+    }
+}
+
+fn write_main(venv: &&Virtualenv, pex_info: &PexInfo) -> anyhow::Result<()> {
+    let mut main_py_fp = File::create_new(venv.path.join("__main__.py"))?;
+
+    write_shebang_bytes(&mut main_py_fp, venv)?;
+    main_py_fp.write_all(VENV_PEX_PY.as_bytes())?;
+    write!(
+        main_py_fp,
+        "{}",
+        format_args!(
+            r#"
+
+if __name__ == "__main__":
+    boot(
+        shebang_python=r"{shebang_python}",
+        venv_bin_dir=r"{venv_bin_dir}",
+        bin_path=r"{bin_path}",
+        strip_pex_env={strip_pex_env},
+        inject_env={{{inject_env}}},
+        inject_args=[{inject_args}],
+        entry_point={entry_point},
+        script={script},
+        hermetic_re_exec={hermetic_re_exec},
+    )
+"#,
+            shebang_python = path_as_str(&venv.interpreter.path)?,
+            venv_bin_dir = venv.bin_dir_relpath,
+            bin_path = pex_info
+                .venv_bin_path
+                .as_ref()
+                .unwrap_or(&BinPath::False)
+                .as_str(),
+            strip_pex_env = as_python_bool(pex_info.strip_pex_env.unwrap_or(true)),
+            inject_env = pex_info
+                .inject_env
+                .iter()
+                .map(|(k, v)| format!("r\"{k}\":r\"{v}\""))
+                .join(","),
+            inject_args = pex_info
+                .inject_args
+                .iter()
+                .map(|v| format!("r\"{v}\""))
+                .join(","),
+            entry_point = as_optional_python_str(pex_info.entry_point.as_deref()),
+            script = as_optional_python_str(pex_info.script.as_deref()),
+            hermetic_re_exec = as_python_bool(pex_info.venv_hermetic_scripts)
+        )
+    )?;
+    mark_executable(&mut main_py_fp)?;
+    link_or_copy(Path::new("__main__.py"), venv.path.join("pex"))
+}
+
+fn write_repl(venv: &Virtualenv, pex: &Path, pex_info: &PexInfo) -> anyhow::Result<()> {
+    let mut pex_repl_py_fp = File::create_new(venv.path.join("pex-repl"))?;
+    write_shebang_bytes(&mut pex_repl_py_fp, venv)?;
+    pex_repl_py_fp.write_all(VENV_PEX_REPL_PY.as_bytes())?;
+    // TODO: XXX: Need to append a if __name__ == "__main__" that calls _create_pex_repl(...)
+    // const activation_summary, const activation_details = res: {
+    //         if (wheels_to_install.*) |wheels| {
+    //             const summary = try std.fmt.allocPrint(
+    //                 allocator,
+    //                 "{d} {s} and {d} activated {s}",
+    //                 .{
+    //                     self.pex_info.requirements.len,
+    //                     if (self.pex_info.requirements.len > 1) "requirements" else "requirement",
+    //                     wheels.entries.len,
+    //                     if (wheels.entries.len > 1) "distributions" else "distribution",
+    //                 },
+    //             );
+    //             errdefer allocator.free(summary);
+    //
+    //             var details = std.ArrayList(u8).init(allocator);
+    //             errdefer details.deinit();
+    //
+    //             var details_writer = details.writer();
+    //             try details_writer.writeAll("Requirements:\n");
+    //             for (self.pex_info.requirements) |requirement| {
+    //                 try details_writer.writeAll("  ");
+    //                 try details_writer.writeAll(requirement);
+    //                 try details_writer.writeByte('\n');
+    //             }
+    //             try details_writer.writeAll("Activated Distributions:\n");
+    //             for (wheels.entries) |wheel| {
+    //                 try details_writer.writeAll("  ");
+    //                 try details_writer.writeAll(wheel.name);
+    //                 try details_writer.writeByte('\n');
+    //             }
+    //             break :res .{ summary, try details.toOwnedSlice() };
+    //         } else {
+    //             break :res .{ "no dependencies", "" };
+    //         }
+    //     };
+    write!(
+        pex_repl_py_fp,
+        "{}",
+        format_args!(
+            r#"
+
+
+_PS1 = "{ps1}"
+_PS2 = "{ps2}"
+_PEX_VERSION = "{pex_version}"
+_SEED_PEX = r"{seed_pex}"
+_ACTIVATION_SUMMARY = "{activation_summary}"
+_ACTIVATION_DETAILS = """{activation_details}"""
+
+
+if __name__ == "__main__":
+    import os
+
+    _create_pex_repl(
+        ps1=_PS1,
+        ps2=_PS2,
+        pex_version=_PEX_VERSION,
+        pex_info=os.path.join(os.path.dirname(__file__), "PEX-INFO"),
+        seed_pex=_SEED_PEX,
+        activation_summary=_ACTIVATION_SUMMARY,
+        activation_details=_ACTIVATION_DETAILS,
+        history=os.environ.get("PEX_INTERPRETER_HISTORY", "0").lower() in ("1", "true"),
+        history_file=os.environ.get("PEX_INTERPRETER_HISTORY_FILE")
+    )
+"#,
+            ps1 = ">>>",
+            ps2 = "...",
+            pex_version = pex_info
+                .build_properties
+                .get("pex_version")
+                .map(String::as_ref)
+                .unwrap_or("(unknown version)"),
+            seed_pex = path_as_str(pex)?,
+            activation_summary = "",
+            activation_details = "",
+        )
+    )?;
+    mark_executable(&mut pex_repl_py_fp)?;
+
+    Ok(())
+}

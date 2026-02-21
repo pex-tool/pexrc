@@ -11,8 +11,9 @@ anyhow = { workspace = true }
 interpreter = { path = "../interpreter" }
 log = { workspace = true }
 logging_timer = { workspace = true }
-pex-info = { path = "../pex-info" }
+pex = { path = "../pex" }
 rayon = { workspace = true }
 strum_macros = { workspace = true }
 tempfile = { workspace = true }
+venv = { path = "../venv" }
 zip = { workspace = true }

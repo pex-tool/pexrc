@@ -1,0 +1,23 @@
+# Copyright 2026 Pex project contributors.
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "venv"
+edition = "2024"
+
+[dependencies]
+anyhow = { workspace = true }
+const_format = { workspace = true }
+pex = { path = "../pex" }
+platform = { path = "../platform" }
+interpreter = { path = "../interpreter" }
+itertools = { workspace = true }
+rayon = { workspace = true }
+tempfile = { workspace = true }
+zip = { workspace = true }
+
+[build-dependencies]
+anyhow = { workspace = true }
+build-target = { workspace = true }
+env_logger = { workspace = true }
+pexrc-build-system = { path = "../pexrc-build-system" }

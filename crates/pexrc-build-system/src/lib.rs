@@ -6,15 +6,24 @@ mod metadata;
 mod rust_toolchain;
 mod tools;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub use metadata::{Clib, ClibConfiguration, Glibc};
 pub use rust_toolchain::{ClassifiedTargets, GnuLinux, Target};
 use rust_toolchain::{Toolchain, parse_toolchain};
 
+use crate::downloads::ensure_download;
 use crate::metadata::{Metadata, parse_metadata};
 use crate::tools::ToolBox;
 pub use crate::tools::{BinstallTool, FoundTool, InstallDirs, ToolInstallation, Zig};
+
+pub fn download_virtualenv(
+    cargo_manifest_contents: &str,
+    install_dirs: InstallDirs,
+) -> anyhow::Result<PathBuf> {
+    let metadata: Metadata = parse_metadata(cargo_manifest_contents)?;
+    ensure_download(&metadata.build.virtualenv, &install_dirs.download_dir)
+}
 
 pub fn ensure_tools_installed<'a>(
     cargo: &Path,

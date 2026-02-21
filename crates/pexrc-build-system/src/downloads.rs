@@ -6,36 +6,10 @@ use std::io::{ErrorKind, Read};
 use std::path::{Path, PathBuf};
 use std::{fs, io};
 
-use anyhow::bail;
+use anyhow::{anyhow, bail};
 use sha2::{Digest, Sha256};
 
-use crate::metadata::DownloadArchive;
-
-enum ArchiveType {
-    TarLzma,
-    TarGzip,
-    Zip,
-}
-
-impl TryFrom<&str> for ArchiveType {
-    type Error = anyhow::Error;
-
-    fn try_from(path: &str) -> anyhow::Result<Self> {
-        let archive_type = if [".tar.gz", ".tgz"].iter().any(|ext| path.ends_with(ext)) {
-            ArchiveType::TarGzip
-        } else if [".tar.xz", ".tar.lzma", ".tlz"]
-            .iter()
-            .any(|ext| path.ends_with(ext))
-        {
-            ArchiveType::TarLzma
-        } else if [".zip"].iter().any(|ext| path.ends_with(ext)) {
-            ArchiveType::Zip
-        } else {
-            bail!("No support for downloading archives of this sort: {path}");
-        };
-        Ok(archive_type)
-    }
-}
+use crate::metadata::{Download, FileType};
 
 struct DigestReader<'a, D: Digest, R: Read> {
     digest: D,
@@ -98,26 +72,37 @@ impl<'a, D: Digest, R: Read> Read for DigestReader<'a, D, R> {
     }
 }
 
-pub(crate) fn ensure_download(
-    download: &DownloadArchive,
-    download_dir: &Path,
-) -> anyhow::Result<PathBuf> {
+pub(crate) fn ensure_download(download: &Download, download_dir: &Path) -> anyhow::Result<PathBuf> {
     fs::create_dir_all(download_dir)?;
     let dst_dir = download_dir.join(download.fingerprint.hash);
-    let downloaded_path = Ok(if let Some(prefix) = download.prefix {
-        dst_dir.join(prefix)
-    } else {
-        dst_dir.clone()
-    });
+    let downloaded_path =
+        match download.file_type {
+            FileType::Blob => {
+                let filename = Path::new(download.url.as_ref()).file_name().ok_or_else(|| {
+                anyhow!(
+                    "Expected download of blob to have a filename but this URL does not: {url}",
+                    url = download.url.as_ref()
+                )
+            })?;
+                dst_dir.join(filename)
+            }
+            _ => {
+                if let Some(prefix) = download.prefix {
+                    dst_dir.join(prefix)
+                } else {
+                    dst_dir.clone()
+                }
+            }
+        };
 
     // Double-checked lock.
     if dst_dir.exists() {
-        return downloaded_path;
+        return Ok(downloaded_path);
     }
     let lock_file = File::create(dst_dir.with_added_extension("lck"))?;
     lock_file.lock()?;
     if dst_dir.exists() {
-        return downloaded_path;
+        return Ok(downloaded_path);
     }
 
     let hasher = match download.fingerprint.algorithm {
@@ -126,9 +111,8 @@ pub(crate) fn ensure_download(
     };
 
     let url = reqwest::Url::parse(download.url.as_ref())?;
-    let archive_type = ArchiveType::try_from(url.path())?;
 
-    let response = reqwest::blocking::get(url)?;
+    let response = reqwest::blocking::get(url.as_ref())?;
     if let Some(actual_size) = response.content_length()
         && actual_size != download.size
     {
@@ -141,17 +125,27 @@ pub(crate) fn ensure_download(
     let download_dir = tempfile::TempDir::new_in(download_dir)?;
     let mut digest_reader =
         DigestReader::new(download.size, hasher, response, download.url.as_ref());
-    match archive_type {
-        ArchiveType::TarGzip => {
+    match download.file_type {
+        FileType::Blob => {
+            let mut dst = File::create_new(
+                download_dir.path().join(
+                    downloaded_path
+                        .file_name()
+                        .expect("We ensured blob paths had a file_name above."),
+                ),
+            )?;
+            io::copy(&mut digest_reader, &mut dst)?;
+        }
+        FileType::TarGzip => {
             let mut tar_stream =
                 tar::Archive::new(flate2::read::GzDecoder::new(&mut digest_reader));
             tar_stream.unpack(download_dir.path())?;
         }
-        ArchiveType::TarLzma => {
+        FileType::TarLzma => {
             let mut tar_stream = tar::Archive::new(xz2::read::XzDecoder::new(&mut digest_reader));
             tar_stream.unpack(download_dir.path())?;
         }
-        ArchiveType::Zip => {
+        FileType::Zip => {
             let mut tmp = tempfile::tempfile_in(download_dir.path())?;
             io::copy(&mut digest_reader, &mut tmp)?;
             let mut zip = zip::ZipArchive::new(&mut tmp)?;
@@ -164,5 +158,5 @@ pub(crate) fn ensure_download(
         download.url.as_ref(),
     )?;
     fs::rename(download_dir.keep(), dst_dir)?;
-    downloaded_path
+    Ok(downloaded_path)
 }

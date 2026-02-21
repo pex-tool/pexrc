@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use anyhow::anyhow;
+use pep508_rs::MarkerEnvironment;
 use serde::Deserialize;
 
 const INTERPRETER_PY: &str = include_str!("interpreter.py");
@@ -19,28 +20,13 @@ pub struct PythonVersion {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct MarkerEnv {
-    pub os_name: String,
-    pub sys_platform: String,
-    pub platform_machine: String,
-    pub platform_python_implementation: String,
-    pub platform_release: String,
-    pub platform_system: String,
-    pub platform_version: String,
-    pub python_version: String,
-    pub python_full_version: String,
-    pub implementation_name: String,
-    pub implementation_version: String,
-}
-
-#[derive(Debug, Deserialize)]
 pub struct Interpreter {
     pub path: PathBuf,
     pub realpath: PathBuf,
     pub prefix: PathBuf,
     pub base_prefix: Option<PathBuf>,
     pub version: PythonVersion,
-    pub marker_env: MarkerEnv,
+    pub marker_env: MarkerEnvironment,
     pub macos_framework_build: bool,
     pub supported_tags: Vec<String>,
     pub has_ensurepip: bool,
@@ -69,54 +55,25 @@ impl Interpreter {
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::OsString;
+
     use std::path::PathBuf;
     use std::process::{Command, Stdio};
 
+    use rstest::rstest;
+    use testing::venv_python_exe;
     use textwrap::dedent;
 
     use crate::Interpreter;
 
-    #[test]
-    fn test_tags_same_as_packaging() {
-        let venv_dir = tempfile::tempdir().unwrap();
-        let python_exe = {
-            let python_exe_basename = {
-                let python_exe_bytes = Command::new("uv")
-                    .args(["python", "find"])
-                    .stdout(Stdio::piped())
-                    .spawn()
-                    .unwrap()
-                    .wait_with_output()
-                    .unwrap()
-                    .stdout;
-                let python_exe = PathBuf::from(String::from_utf8(python_exe_bytes).unwrap().trim());
-                Command::new(&python_exe)
-                    .args(["-m", "venv"])
-                    .arg(venv_dir.path())
-                    .spawn()
-                    .unwrap()
-                    .wait()
-                    .unwrap();
-                OsString::from(python_exe.file_name().unwrap())
-            };
-
-            let python_exe = if build_target::target_os() == build_target::Os::Windows {
-                venv_dir.path().join("Scripts")
-            } else {
-                venv_dir.path().join("bin")
-            }
-            .join(python_exe_basename);
-            Command::new(&python_exe)
-                .args(["-m", "pip", "install", "packaging"])
-                .spawn()
-                .unwrap()
-                .wait()
-                .unwrap();
-            python_exe
-        };
-
-        let tags_output = Command::new(&python_exe)
+    #[rstest]
+    fn test_tags_same_as_packaging(venv_python_exe: PathBuf) {
+        Command::new(&venv_python_exe)
+            .args(["-m", "pip", "install", "packaging"])
+            .spawn()
+            .unwrap()
+            .wait()
+            .unwrap();
+        let tags_output = Command::new(&venv_python_exe)
             .arg("-c")
             .arg(dedent(
                 "
@@ -136,7 +93,8 @@ mod tests {
             .stdout;
         let expected_tags: Vec<String> =
             serde_json::from_str(String::from_utf8(tags_output).unwrap().as_str()).unwrap();
-        let interpreter = Interpreter::load(python_exe).unwrap();
+
+        let interpreter = Interpreter::load(venv_python_exe).unwrap();
         assert_eq!(expected_tags, interpreter.supported_tags);
     }
 }

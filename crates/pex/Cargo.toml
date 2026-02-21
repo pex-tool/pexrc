@@ -2,19 +2,26 @@
 # SPDX-License-Identifier: Apache-2.0
 
 [package]
-name = "interpreter"
+name = "pex"
 edition = "2024"
 
 [dependencies]
 anyhow = { workspace = true }
+indexmap = { workspace = true }
+interpreter = { path = "../interpreter" }
+itertools = { workspace = true }
+pep440_rs = { workspace = true }
 pep508_rs = { workspace = true }
-elf = { workspace = true }
+python-pkginfo = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+url = { workspace = true }
+zip = { workspace = true }
 
 [dev-dependencies]
+ctor = { workspace = true }
+glob = { workspace = true }
 rstest = { workspace = true }
 target-lexicon = { workspace = true }
 tempfile = { workspace = true }
 testing = { path = "../testing" }
-textwrap = { workspace = true }

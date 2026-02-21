@@ -1,0 +1,9 @@
+[package]
+name = "testing"
+edition = "2024"
+
+[dependencies]
+ctor = { workspace = true }
+rstest = { workspace = true }
+target-lexicon = { workspace = true }
+tempfile = { workspace = true }
