@@ -121,22 +121,22 @@ impl<'a> WheelResolver for ZipAppPex<'a> {
 
         let mut resolved_by_project_name: IndexMap<PackageName, &str> =
             IndexMap::with_capacity(wheels_by_project_name.len());
-        let mut to_resolve: VecDeque<(Requirement<Url>, Vec<ExtraName>)> = self
+        let mut indexed_extras: Vec<Vec<ExtraName>> = vec![Vec::new()];
+        let mut to_resolve: VecDeque<(Requirement<Url>, usize)> = self
             .1
             .requirements
             .iter()
             .map(|requirement| {
-                Requirement::from_str(requirement).map(|requirement| (requirement, Vec::new()))
+                Requirement::from_str(requirement).map(|requirement| (requirement, 0))
             })
             .collect::<Result<_, _>>()?;
-
-        while let Some((requirement, extras)) = to_resolve.pop_front() {
+        while let Some((requirement, extras_index)) = to_resolve.pop_front() {
             if resolved_by_project_name.contains_key(&requirement.name) {
                 continue;
             }
             if !requirement
                 .marker
-                .evaluate(&interpreter.marker_env, &extras)
+                .evaluate(&interpreter.marker_env, &indexed_extras[extras_index])
             {
                 continue;
             }
@@ -165,10 +165,16 @@ impl<'a> WheelResolver for ZipAppPex<'a> {
                         ),
                     }
                 }
+                let extras_index = if requirement.extras.is_empty() {
+                    0
+                } else {
+                    let idx = indexed_extras.len();
+                    indexed_extras.push(requirement.extras);
+                    idx
+                };
                 resolved_by_project_name.insert(requirement.name, file_name);
                 for req in requirements {
-                    // TODO: XXX: Is there a way to restructure the graph walk to avoid this clone?
-                    to_resolve.push_back((req, requirement.extras.clone()))
+                    to_resolve.push_back((req, extras_index))
                 }
                 break;
             }
