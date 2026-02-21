@@ -240,27 +240,13 @@ mod tests {
         pex
     }
 
-    #[fixture]
-    fn interpreter(python_exe: &Path) -> Interpreter {
-        Interpreter::load(python_exe).unwrap()
-    }
-
     #[rstest]
-    fn test_resolve(pex: PathBuf, interpreter: Interpreter) {
+    fn test_resolve(pex: PathBuf, python_exe: &Path) {
         let pex = match Pex::load(&pex).unwrap() {
             Pex::ZipApp(zip_app_pex) => zip_app_pex,
             _ => panic!("Unexpected pex type"),
         };
-
-        let expected_requirements: Vec<Requirement<Url>> = vec![
-            Requirement::from_str("requests[socks]==2.32.5").unwrap(),
-            Requirement::from_str("charset_normalizer<4,>=2").unwrap(),
-            Requirement::from_str("idna<4,>=2.5").unwrap(),
-            Requirement::from_str("urllib3<3,>=1.21.1").unwrap(),
-            Requirement::from_str("certifi>=2017.4.17").unwrap(),
-            Requirement::from_str("PySocks!=1.5.7,>=1.5.6; extra == \"socks\"").unwrap(),
-        ];
-
+        let interpreter = Interpreter::load(python_exe).unwrap();
         let resolved = pex
             .resolve(&interpreter)
             .unwrap()
@@ -272,6 +258,14 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
 
+        let expected_requirements: Vec<Requirement<Url>> = vec![
+            Requirement::from_str("requests[socks]==2.32.5").unwrap(),
+            Requirement::from_str("charset_normalizer<4,>=2").unwrap(),
+            Requirement::from_str("idna<4,>=2.5").unwrap(),
+            Requirement::from_str("urllib3<3,>=1.21.1").unwrap(),
+            Requirement::from_str("certifi>=2017.4.17").unwrap(),
+            Requirement::from_str("PySocks!=1.5.7,>=1.5.6; extra == \"socks\"").unwrap(),
+        ];
         for (expected_requirement, (project_name, version)) in
             itertools::zip_eq(expected_requirements, resolved)
         {
