@@ -68,8 +68,9 @@ impl<'a> ClassifiedTargets<'a> {
             })
             .partition::<Vec<_>, _>(|target| matches!(target, Target::Windows(_)));
         Self {
-            xwin_targets,
-            zigbuild_targets,
+            // TODO: Resolve cargo xwin build issues or delete the cargo-xwin code paths.
+            xwin_targets: vec![],
+            zigbuild_targets: xwin_targets.into_iter().chain(zigbuild_targets).collect(),
         }
     }
 
