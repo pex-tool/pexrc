@@ -12,6 +12,7 @@ use const_format::concatcp;
 use interpreter::Interpreter;
 use logging_timer::time;
 use platform::link_or_copy;
+use target_lexicon::{OperatingSystem, Triple};
 
 const VIRTUALENV_PY: &str = include_str!(env!("VIRTUALENV_PY"));
 const SCRIPTS_DIR: &str = env!("SCRIPTS_DIR");
@@ -46,7 +47,15 @@ impl<'a> Virtualenv<'a> {
             };
         fs::rename(workdir.path(), path)?;
         workdir.disable_cleanup(true);
-        let venv_interpreter = Interpreter::load(path.join(VENV_PYTHON_RELPATH))?;
+
+        let mut venv_interpreter = interpreter.clone();
+        venv_interpreter.base_prefix = Some(venv_interpreter.prefix);
+        venv_interpreter.prefix = path.to_path_buf();
+        venv_interpreter.path = path.join(VENV_PYTHON_RELPATH);
+        if Triple::host().operating_system == OperatingSystem::Windows {
+            venv_interpreter.realpath = venv_interpreter.path.clone();
+        }
+
         Ok(Self {
             path,
             interpreter: venv_interpreter,

@@ -102,7 +102,7 @@ fn extract_idx(
         match File::create_new(&dst_path) {
             Ok(mut dst_file) => {
                 io::copy(&mut zip_file, &mut dst_file)?;
-            },
+            }
             Err(_) => {
                 // TODO: Track provenance.
                 warn!("Collision for {dst_path}", dst_path = dst_path.display());

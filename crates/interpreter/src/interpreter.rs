@@ -11,7 +11,7 @@ use serde::Deserialize;
 
 const INTERPRETER_PY: &str = include_str!("interpreter.py");
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct PythonVersion {
     pub major: u8,
     pub minor: u8,
@@ -20,7 +20,7 @@ pub struct PythonVersion {
     pub serial: u8,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Interpreter {
     pub path: PathBuf,
     pub realpath: PathBuf,
