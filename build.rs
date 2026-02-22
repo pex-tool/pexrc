@@ -98,16 +98,17 @@ fn main() -> anyhow::Result<()> {
     };
 
     let (clibs_dir, compress) = {
-        let (clibs_dir, compress) = if let Some(lib_dir) = env::var_os("PEXRC_LIB_DIR") {
+        println!("cargo::rerun-if-env-changed=PEXRC_LIB_DIR");
+        if let Some(lib_dir) = env::var_os("PEXRC_LIB_DIR") {
             (PathBuf::from(lib_dir), false)
         } else {
             let out_dir = env::var_os("OUT_DIR").unwrap();
-            (PathBuf::from(out_dir).join("clibs"), true)
-        };
-        if all_targets {
-            (clibs_dir.join("all"), compress)
-        } else {
-            (clibs_dir.join("current"), compress)
+            let clibs_dir = PathBuf::from(out_dir).join("clibs");
+            if all_targets {
+                (clibs_dir.join("all"), true)
+            } else {
+                (clibs_dir.join("current"), true)
+            }
         }
     };
     fs::create_dir_all(&clibs_dir)?;

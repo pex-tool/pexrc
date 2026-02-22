@@ -29,8 +29,6 @@ def test_boot(tmpdir):
             "cowsay",
             "-o",
             pex,
-            "--pex-root",
-            pex_root,
             "--runtime-pex-root",
             pex_root,
         ]

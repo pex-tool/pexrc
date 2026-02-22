@@ -241,7 +241,7 @@ if __name__ == "__main__":
         activation_details=_ACTIVATION_DETAILS,
         history=os.environ.get("PEX_INTERPRETER_HISTORY", "0").lower() in ("1", "true"),
         history_file=os.environ.get("PEX_INTERPRETER_HISTORY_FILE")
-    )
+    )()
 "#,
             ps1 = ">>>",
             ps2 = "...",
