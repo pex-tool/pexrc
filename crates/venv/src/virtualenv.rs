@@ -10,6 +10,7 @@ use std::{env, fs};
 use anyhow::{anyhow, bail};
 use const_format::concatcp;
 use interpreter::Interpreter;
+use logging_timer::time;
 use platform::link_or_copy;
 
 const VIRTUALENV_PY: &str = include_str!(env!("VIRTUALENV_PY"));
@@ -25,6 +26,7 @@ pub struct Virtualenv<'a> {
 }
 
 impl<'a> Virtualenv<'a> {
+    #[time("debug", "Virtualenv.{}")]
     pub fn create(
         interpreter: &Interpreter,
         path: &'a Path,

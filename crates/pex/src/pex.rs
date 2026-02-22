@@ -12,6 +12,7 @@ use anyhow::{anyhow, bail};
 use indexmap::IndexMap;
 use interpreter::Interpreter;
 use itertools::Itertools;
+use logging_timer::time;
 use pep440_rs::Version;
 use pep508_rs::{ExtraName, PackageName, Requirement, VersionOrUrl};
 use url::Url;
@@ -46,6 +47,7 @@ impl<'a> MetadataReader for ZipAppPexMetadataReader<'a> {
 
 // TODO: XXX: This just uses PEX-INFO to resolve wheel file names, it is not ZipAppPex-specific.
 impl<'a> WheelResolver for ZipAppPex<'a> {
+    #[time("debug", "WheelResolver.{}")]
     fn resolve(&self, interpreter: &Interpreter) -> anyhow::Result<Vec<&str>> {
         let python_version = Version::new([
             u64::from(interpreter.version.major),

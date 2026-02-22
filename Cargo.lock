@@ -1023,6 +1023,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "elf",
+ "logging_timer",
  "pep508_rs",
  "rstest",
  "serde",
@@ -1353,6 +1354,7 @@ dependencies = [
  "indexmap",
  "interpreter",
  "itertools 0.14.0",
+ "logging_timer",
  "pep440_rs",
  "pep508_rs",
  "python-pkginfo",
@@ -2576,6 +2578,7 @@ dependencies = [
  "env_logger",
  "interpreter",
  "itertools 0.14.0",
+ "logging_timer",
  "pex",
  "pexrc-build-system",
  "platform",

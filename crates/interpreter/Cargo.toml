@@ -9,6 +9,7 @@ edition = "2024"
 anyhow = { workspace = true }
 pep508_rs = { workspace = true }
 elf = { workspace = true }
+logging_timer = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

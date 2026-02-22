@@ -10,6 +10,7 @@ anyhow = { workspace = true }
 indexmap = { workspace = true }
 interpreter = { path = "../interpreter" }
 itertools = { workspace = true }
+logging_timer = { workspace = true }
 pep440_rs = { workspace = true }
 pep508_rs = { workspace = true }
 python-pkginfo = { workspace = true }

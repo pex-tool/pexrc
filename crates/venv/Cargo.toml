@@ -12,6 +12,7 @@ pex = { path = "../pex" }
 platform = { path = "../platform" }
 interpreter = { path = "../interpreter" }
 itertools = { workspace = true }
+logging_timer = { workspace = true }
 rayon = { workspace = true }
 tempfile = { workspace = true }
 zip = { workspace = true }

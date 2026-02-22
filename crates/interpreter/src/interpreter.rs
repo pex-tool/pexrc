@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use anyhow::anyhow;
+use logging_timer::time;
 use pep508_rs::MarkerEnvironment;
 use serde::Deserialize;
 
@@ -33,6 +34,7 @@ pub struct Interpreter {
 }
 
 impl Interpreter {
+    #[time("debug", "Interpreter.{}")]
     pub fn load(python_exe: impl AsRef<Path>) -> anyhow::Result<Interpreter> {
         let mut command = Command::new(python_exe.as_ref());
         command.arg("-sE").arg("-c").arg(INTERPRETER_PY);

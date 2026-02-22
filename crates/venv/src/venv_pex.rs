@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
@@ -9,7 +10,8 @@ use std::{fs, io};
 
 use anyhow::anyhow;
 use itertools::Itertools;
-use pex::{BinPath, Pex, PexInfo, ZipAppPex};
+use logging_timer::time;
+use pex::{BinPath, Pex, PexInfo, WheelResolver};
 use platform::{link_or_copy, mark_executable, path_as_bytes, path_as_str};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use zip::ZipArchive;
@@ -19,13 +21,18 @@ use crate::virtualenv::Virtualenv;
 const VENV_PEX_PY: &str = include_str!("venv_pex.py");
 const VENV_PEX_REPL_PY: &str = include_str!("venv_pex_repl.py");
 
+#[time("debug", "venv_pex.{}")]
 pub fn populate(venv: &Virtualenv, pex: &Pex) -> anyhow::Result<()> {
     let site_packages_path = venv.site_packages_path();
     let (path, pex_info) = match pex {
         Pex::Loose(_) => todo!("XXX: Implement loose PEX venv population."),
         Pex::Packed(_) => todo!("XXX: Implement packed PEX venv population."),
-        Pex::ZipApp(ZipAppPex(path, pex_info)) => {
-            let mut pex_zip = ZipArchive::new(File::open(path)?)?;
+        Pex::ZipApp(zip_app_pex) => {
+            let selected_wheels = zip_app_pex
+                .resolve(&venv.interpreter)?
+                .into_iter()
+                .collect::<HashSet<_>>();
+            let mut pex_zip = ZipArchive::new(File::open(zip_app_pex.0)?)?;
             let metadata = pex_zip.metadata();
             let extract_indexes = pex_zip
                 .file_names()
@@ -35,6 +42,12 @@ pub fn populate(venv: &Virtualenv, pex: &Pex) -> anyhow::Result<()> {
                         .iter()
                         .any(|exclude_dir| name.starts_with(exclude_dir))
                         || ["PEX-INFO", "__main__.py", ".deps/"].contains(&name)
+                        || name.starts_with(".deps/")
+                            && name[6..]
+                                .split("/")
+                                .next()
+                                .map(|whl_name| !selected_wheels.contains(whl_name))
+                                .unwrap_or(true)
                     {
                         None
                     } else {
@@ -45,7 +58,7 @@ pub fn populate(venv: &Virtualenv, pex: &Pex) -> anyhow::Result<()> {
             extract_indexes
                 .into_par_iter()
                 .try_for_each(|index| -> anyhow::Result<()> {
-                    let zip_fp = File::open(path)?;
+                    let zip_fp = File::open(zip_app_pex.0)?;
                     let mut zip =
                         unsafe { ZipArchive::unsafe_new_with_metadata(zip_fp, metadata.clone()) };
                     extract_idx(&site_packages_path, index, &mut zip)?;
@@ -54,7 +67,7 @@ pub fn populate(venv: &Virtualenv, pex: &Pex) -> anyhow::Result<()> {
             let mut pex_info_src_fp = pex_zip.by_name("PEX-INFO")?;
             let mut pex_info_dst_fp = File::create_new(venv.path.join("PEX-INFO"))?;
             io::copy(&mut pex_info_src_fp, &mut pex_info_dst_fp)?;
-            (path, pex_info)
+            (zip_app_pex.0, &zip_app_pex.1)
         }
     };
 
