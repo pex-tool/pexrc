@@ -2578,6 +2578,7 @@ dependencies = [
  "env_logger",
  "interpreter",
  "itertools 0.14.0",
+ "log",
  "logging_timer",
  "pex",
  "pexrc-build-system",

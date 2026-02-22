@@ -10,6 +10,7 @@ use std::{fs, io};
 
 use anyhow::anyhow;
 use itertools::Itertools;
+use log::warn;
 use logging_timer::time;
 use pex::{BinPath, Pex, PexInfo, WheelResolver};
 use platform::{link_or_copy, mark_executable, path_as_bytes, path_as_str};
@@ -38,6 +39,7 @@ pub fn populate(venv: &Virtualenv, pex: &Pex) -> anyhow::Result<()> {
                 .file_names()
                 .enumerate()
                 .filter_map(|(idx, name)| {
+                    // TODO: XXX: Deal with .layout and .prefix/ in wheel chroots.
                     if [".bootstrap/", "__pex__/"]
                         .iter()
                         .any(|exclude_dir| name.starts_with(exclude_dir))
@@ -97,8 +99,15 @@ fn extract_idx(
         if let Some(parent_dir) = dst_path.parent() {
             fs::create_dir_all(parent_dir)?;
         }
-        let mut dst_file = File::create_new(dst_path)?;
-        io::copy(&mut zip_file, &mut dst_file)?;
+        match File::create_new(&dst_path) {
+            Ok(mut dst_file) => {
+                io::copy(&mut zip_file, &mut dst_file)?;
+            },
+            Err(_) => {
+                // TODO: Track provenance.
+                warn!("Collision for {dst_path}", dst_path = dst_path.display());
+            }
+        }
     }
     Ok(())
 }
