@@ -49,7 +49,9 @@ impl<'a> Virtualenv<'a> {
         workdir.disable_cleanup(true);
 
         let mut venv_interpreter = interpreter.clone();
-        venv_interpreter.base_prefix = Some(venv_interpreter.prefix);
+        venv_interpreter.base_prefix = venv_interpreter
+            .base_prefix
+            .or(Some(venv_interpreter.prefix));
         venv_interpreter.prefix = path.to_path_buf();
         venv_interpreter.path = path.join(VENV_PYTHON_RELPATH);
         if Triple::host().operating_system == OperatingSystem::Windows {
