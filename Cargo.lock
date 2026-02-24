@@ -2696,8 +2696,10 @@ dependencies = [
  "pexrc-build-system",
  "platform",
  "rayon",
+ "rstest",
  "target-lexicon",
  "tempfile",
+ "testing",
  "zip 8.1.0",
 ]
 

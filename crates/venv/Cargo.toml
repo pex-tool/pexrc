@@ -19,6 +19,10 @@ target-lexicon = { workspace = true }
 tempfile = { workspace = true }
 zip = { workspace = true }
 
+[dev-dependencies]
+rstest = { workspace = true}
+testing = { path = "../testing" }
+
 [build-dependencies]
 anyhow = { workspace = true }
 build-target = { workspace = true }

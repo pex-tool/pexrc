@@ -158,26 +158,15 @@ fn site_packages_relpath<'a>(interpreter: &Interpreter) -> Cow<'a, Path> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-    use std::process::{Command, Stdio};
-
     use interpreter::Interpreter;
+    use rstest::rstest;
+    use testing::python_exe;
 
-    use crate::virtualenv::Virtualenv;
+    use crate::virtualenv::{Path, Virtualenv};
 
-    #[test]
-    fn test_create() {
-        let python_exe_bytes = Command::new("uv")
-            .args(["python", "find"])
-            .stdout(Stdio::piped())
-            .spawn()
-            .unwrap()
-            .wait_with_output()
-            .unwrap()
-            .stdout;
-        let python_exe = PathBuf::from(String::from_utf8(python_exe_bytes).unwrap().trim());
+    #[rstest]
+    fn test_create(python_exe: &Path) {
         let interpreter = Interpreter::load(python_exe).unwrap();
-
         let venv_dir = tempfile::tempdir().unwrap();
         let venv = Virtualenv::create(&interpreter, venv_dir.path(), false).unwrap();
         assert_eq!(

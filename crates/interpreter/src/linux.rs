@@ -186,15 +186,16 @@ impl LinuxInfo {
 #[cfg(target_os = "linux")]
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-    use std::process::{Command, Stdio};
+    use std::path::Path;
 
+    use rstest::rstest;
     use target_lexicon::{Architecture, Endianness, Environment, PointerWidth, Triple};
+    use testing::python_exe;
 
     use crate::linux::LinuxInfo;
 
-    #[test]
-    fn test_parse() {
+    #[rstest]
+    fn test_parse(python_exe: &Path) {
         let assert_linux_info = if matches!(Triple::host().environment, Environment::Musl) {
             |linux_info: LinuxInfo| assert!(matches!(linux_info, LinuxInfo::MuslLinux(_)))
         } else {
@@ -235,15 +236,6 @@ mod tests {
                 }
             }
         };
-        let python_exe_bytes = Command::new("uv")
-            .args(["python", "find"])
-            .stdout(Stdio::piped())
-            .spawn()
-            .unwrap()
-            .wait_with_output()
-            .unwrap()
-            .stdout;
-        let python_exe = PathBuf::from(String::from_utf8(python_exe_bytes).unwrap().trim());
         let linux_info = LinuxInfo::parse(python_exe).unwrap();
         assert_linux_info(linux_info);
     }
