@@ -1,104 +1,59 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::borrow::Cow;
 use std::fs::File;
+use std::io;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::{env, io, process};
 
-use anyhow::{Context, anyhow, bail};
+use anyhow::Context;
+use clap::{Parser, Subcommand};
 use include_dir::{Dir, include_dir};
-use itertools::Itertools;
 use log::info;
-use logging_timer::time;
-use pexrs::boot;
+use owo_colors::OwoColorize as _;
+use platform::mark_executable;
 use tempfile::NamedTempFile;
-use which::which;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
-static CLIBS_DIR: Dir<'_> = include_dir!("$CLIBS_DIR");
+const CLIBS_DIR: Dir<'_> = include_dir!("$CLIBS_DIR");
+const MAIN: &[u8] = include_bytes!("python/pexrc/__init__.py");
 
-fn main() -> anyhow::Result<()> {
-    env_logger::init();
+/// Pex Runtime Control.
+#[derive(Parser)]
+#[command(version, about, long_about = None)]
+struct Cli {
+    #[command(flatten)]
+    verbosity: clap_verbosity_flag::Verbosity,
 
-    let gc = !env::args_os().any(|arg| arg == "--keep");
+    #[command(flatten)]
+    color: colorchoice_clap::Color,
 
-    let compression_level = if let Some(raw_value) = env::args_os()
-        .tuple_windows::<(_, _)>()
-        .find_map(|(flag, value)| {
-            if flag.as_os_str() == "--compression" {
-                Some(value)
-            } else {
-                None
-            }
-        }) {
-        let value = raw_value.to_str().ok_or_else(|| {
-            anyhow!("The --compression given is not parseable as an integer: {raw_value:?}")
-        })?;
-        value.parse::<i64>()?
-    } else {
-        3
-    };
-
-    let python = if let Some(raw_value) =
-        env::args_os()
-            .tuple_windows::<(_, _)>()
-            .find_map(|(flag, value)| {
-                if flag.as_os_str() == "--python" {
-                    Some(value)
-                } else {
-                    None
-                }
-            }) {
-        PathBuf::from(raw_value)
-    } else {
-        which("python").context("Failed to find a Python executable to boot PEX with.")?
-    };
-
-    info!("Embedded clibs:");
-    for (idx, file) in CLIBS_DIR.files().enumerate() {
-        info!(
-            "{idx} {clib} {size}",
-            idx = idx + 1,
-            clib = file.path().display(),
-            size = file.contents().len()
-        )
-    }
-
-    if let Some(pex_file) = env::args_os().nth(1).as_deref() {
-        let pex_path = Path::new(pex_file);
-        info!(
-            "Using compression level {compression_level} and {modifier} gc the extraction dir.",
-            modifier = if gc { "will" } else { "will not" }
-        );
-        transcode(pex_path, Some(compression_level))?;
-
-        info!("Booting PEX with {python}.", python = python.display());
-        let exit_code = boot(python, Vec::new(), pex_path, Vec::new(), gc)?;
-        process::exit(exit_code)
-    } else {
-        bail!(
-            "Usage: {} [pex file]",
-            env::args()
-                .next()
-                .map(Cow::Owned)
-                .unwrap_or_else(|| Cow::Borrowed("pexrc"))
-        )
-    }
+    #[command(subcommand)]
+    command: Commands,
 }
 
-#[time("debug", "{}")]
-fn transcode(zip_path: &Path, compression_level: Option<i64>) -> anyhow::Result<()> {
-    let zip_read_fp = File::open(zip_path)?;
+#[derive(Subcommand)]
+enum Commands {
+    /// Inject a traditional PEX with the pexrc runtime.
+    Inject {
+        #[arg(long)]
+        compression_level: Option<i64>,
+
+        #[arg(value_name = "FILE")]
+        pex: PathBuf,
+    },
+}
+
+fn inject(pex: &Path, compression_level: Option<i64>) -> anyhow::Result<()> {
+    let zip_read_fp = File::open(pex)?;
 
     let mut src_zip = ZipArchive::new(&zip_read_fp)?;
     let prefix = {
         let first_entry = src_zip.by_index(0)?;
         let zip_start = first_entry.header_start();
         if zip_start > 0 {
-            let mut prefix_reader = File::open(zip_path)?.take(zip_start);
+            let mut prefix_reader = File::open(pex)?.take(zip_start);
             let mut prefix = Vec::with_capacity(zip_start.try_into().with_context(|| {
                 format!(
                     "The zip prefix is {zip_start} bytes which is bigger than the system pointer \
@@ -113,7 +68,7 @@ fn transcode(zip_path: &Path, compression_level: Option<i64>) -> anyhow::Result<
         }
     };
 
-    let mut dst_zip_fp = if let Some(parent_dir) = zip_path.parent() {
+    let mut dst_zip_fp = if let Some(parent_dir) = pex.parent() {
         NamedTempFile::new_in(parent_dir)?
     } else {
         NamedTempFile::new()?
@@ -129,14 +84,60 @@ fn transcode(zip_path: &Path, compression_level: Option<i64>) -> anyhow::Result<
     let directory_options = SimpleFileOptions::default();
     for index in 0..src_zip.len() {
         let mut src_file = src_zip.by_index(index)?;
+        let entry_name = src_file.name();
+        if [".bootstrap/", "__pex__/"]
+            .into_iter()
+            .any(|prefix| entry_name.starts_with(prefix))
+            || entry_name == "__main__.py"
+        {
+            continue;
+        }
         if src_file.is_dir() {
-            dst_zip.add_directory(src_file.name(), directory_options)?
+            dst_zip.add_directory(entry_name, directory_options)?
         } else {
-            dst_zip.start_file(src_file.name(), file_options)?;
+            dst_zip.start_file(entry_name, file_options)?;
             io::copy(&mut src_file, &mut dst_zip)?;
         }
     }
+    let file_options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+
+    dst_zip.add_directory("__pex__/.lib", directory_options)?;
+    info!("Embedded clibs:");
+    for file in CLIBS_DIR.files() {
+        let dst_path = format!("__pex__/.lib/{clib}", clib = file.path().display());
+        anstream::eprint!(
+            "Writing {entry} {size} bytes to {dst_path}...",
+            entry = file.path().display().blue(),
+            size = file.contents().len()
+        );
+        dst_zip.start_file(dst_path, file_options)?;
+        let mut clib_reader = zstd::Decoder::new(file.contents())?;
+        io::copy(&mut clib_reader, &mut dst_zip)?;
+        anstream::eprintln!("{}.", "done".green())
+    }
+
+    dst_zip.start_file("__pex__/__init__.py", file_options)?;
+    dst_zip.write_all(MAIN)?;
+    dst_zip.start_file("__main__.py", file_options)?;
+    dst_zip.write_all(MAIN)?;
+
     dst_zip.finish()?;
-    dst_zip_fp.persist(zip_path)?;
+    mark_executable(dst_zip_fp.as_file_mut())?;
+    dst_zip_fp.persist(pex.with_extension("pexrc"))?;
+
     Ok(())
+}
+
+fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+    env_logger::Builder::new()
+        .filter_level(cli.verbosity.into())
+        .init();
+    cli.color.write_global();
+
+    let Commands::Inject {
+        pex,
+        compression_level,
+    } = cli.command;
+    inject(&pex, compression_level)
 }

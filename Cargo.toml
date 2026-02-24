@@ -84,9 +84,13 @@ name = "pexrc"
 path = "pexrc.rs"
 
 [workspace.dependencies]
+anstream = "1.0"
 anyhow = "1.0"
 bstr = "1.12"
 build-target = "0.8"
+clap = {  version = "4.5", features = ["derive"] }
+clap-verbosity-flag = "3.0"
+colorchoice-clap = "1.0"
 const_format = "0.2"
 ctor = "0.6"
 dirs = "6.0"
@@ -100,6 +104,7 @@ indexmap = "2.13"
 itertools = "0.14"
 log = "0.4"
 logging_timer = "1.1"
+owo-colors = "4.3"
 pep440_rs = "0.7"
 pep508_rs = "0.9"
 python-pkginfo = "0.6"
@@ -131,13 +136,18 @@ itertools = { workspace = true }
 zstd = { workspace = true }
 
 [dependencies]
+anstream = { workspace = true }
 anyhow = { workspace = true }
+clap = { workspace = true }
+clap-verbosity-flag = { workspace = true }
+colorchoice-clap = { workspace = true }
 env_logger = { workspace = true }
 include_dir = { workspace = true }
 itertools = { workspace = true }
 log = { workspace = true }
 logging_timer = { workspace = true }
-pexrs = { path = "crates/pexrs" }
+owo-colors = { workspace = true }
+platform = { path = "crates/platform" }
 tempfile = { workspace = true }
-which = { workspace = true }
 zip = { workspace = true }
+zstd = { workspace = true }

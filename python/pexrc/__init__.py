@@ -18,6 +18,8 @@ import time
 import warnings
 from ctypes import cdll
 
+_BOOT_START = time.time()
+
 TYPE_CHECKING = False
 if TYPE_CHECKING:
     # Ruff doesn't understand Python 2 and thus the type comment usages.
@@ -548,6 +550,13 @@ def boot(
     pex_file = to_cstr(pex)
     argv = to_array_of_cstr(args)
 
+    if _PEX_VERBOSE:
+        print(
+            "pex: total time to _pexrc.boot {elapsed:.4}{unit}".format(
+                elapsed=MS.elapsed(_BOOT_START), unit=MS
+            ),
+            file=sys.stderr,
+        )
     sys.exit(
         _pexrc.boot(
             python_exe,

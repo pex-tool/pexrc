@@ -230,10 +230,8 @@ fn collect_clibs<'a>(
             clibs_dir.join(format!("{target}.{clib_name}", target = target.as_str())),
         )?;
         if compress {
-            io::copy(
-                &mut File::open(clib_path)?,
-                &mut zstd::Encoder::new(dst, clib.compression_level)?,
-            )?;
+            let encoder = zstd::Encoder::new(dst, clib.compression_level)?;
+            io::copy(&mut File::open(clib_path)?, &mut encoder.auto_finish())?;
         } else {
             io::copy(&mut File::open(clib_path)?, &mut dst)?;
         }

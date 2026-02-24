@@ -48,7 +48,7 @@ fn prepare_boot(
     let venv = Virtualenv::create(&interpreter, dst_dir.as_ref(), false)?;
     populate(&venv, &pex)?;
 
-    let mut command = Command::new(python.as_ref());
+    let mut command = Command::new(venv.interpreter.path);
     command.args(python_args).arg(dst_dir.as_ref()).args(argv);
     Ok(command)
 }
