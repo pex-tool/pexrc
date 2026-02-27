@@ -145,7 +145,6 @@ env_logger = { workspace = true }
 include_dir = { workspace = true }
 itertools = { workspace = true }
 log = { workspace = true }
-logging_timer = { workspace = true }
 owo-colors = { workspace = true }
 platform = { path = "crates/platform" }
 tempfile = { workspace = true }
