@@ -1,0 +1,32 @@
+// Copyright 2026 Pex project contributors.
+// SPDX-License-Identifier: Apache-2.0
+
+use std::fmt::{Display, Formatter};
+use std::fs::File;
+use std::io;
+use std::path::Path;
+
+use base64::Engine;
+use base64::display::Base64Display;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use sha2::{Digest, Sha256};
+
+pub struct Fingerprint(Vec<u8>);
+
+impl Fingerprint {
+    pub fn base64_digest(&self) -> String {
+        URL_SAFE_NO_PAD.encode(&self.0)
+    }
+}
+
+impl Display for Fingerprint {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        Base64Display::new(&self.0, &URL_SAFE_NO_PAD).fmt(f)
+    }
+}
+
+pub fn hash_file(path: &Path) -> anyhow::Result<Fingerprint> {
+    let mut digest = Sha256::new();
+    io::copy(&mut File::open(path)?, &mut digest)?;
+    Ok(Fingerprint(Vec::from(digest.finalize().as_slice())))
+}

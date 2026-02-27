@@ -1,10 +1,12 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use anyhow::anyhow;
+use anyhow::{anyhow, bail};
+use cache::{CacheDir, atomic_file, hash_file};
 use logging_timer::time;
 use pep508_rs::MarkerEnvironment;
 use serde::Deserialize;
@@ -44,8 +46,7 @@ impl Interpreter {
 }
 
 impl Interpreter {
-    #[time("debug", "Interpreter.{}")]
-    pub fn load(python_exe: impl AsRef<Path>) -> anyhow::Result<Interpreter> {
+    fn identify(python_exe: impl AsRef<Path>) -> anyhow::Result<Vec<u8>> {
         let mut command = Command::new(python_exe.as_ref());
         command.arg("-sE").arg("-c").arg(INTERPRETER_PY);
         #[cfg(target_os = "linux")]
@@ -55,8 +56,44 @@ impl Interpreter {
             let json = serde_json::to_string(&linux_info)?;
             command.arg("--linux-info").arg(json);
         }
-        let result = command.stdout(Stdio::piped()).spawn()?.wait_with_output()?;
-        serde_json::from_slice(result.stdout.as_slice()).map_err(|err| {
+        let result = command
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?
+            .wait_with_output()?;
+        if !result.status.success() {
+            bail!(
+                "Failed to identify Python interpreter at {path}.\n\
+                Exit status {status} with STDERR:\n{stderr}",
+                path = python_exe.as_ref().display(),
+                status = result.status,
+                stderr = String::from_utf8_lossy(result.stderr.as_slice())
+            )
+        }
+        Ok(result.stdout)
+    }
+
+    pub fn load_uncached(python_exe: impl AsRef<Path>) -> anyhow::Result<Interpreter> {
+        let json_bytes = Self::identify(python_exe.as_ref())?;
+        serde_json::from_slice(&json_bytes).map_err(|err| {
+            anyhow!(
+                "Failed to identify Python interpreter {exe}: {err}",
+                exe = python_exe.as_ref().display()
+            )
+        })
+    }
+
+    #[time("debug", "Interpreter.{}")]
+    pub fn load(python_exe: impl AsRef<Path>) -> anyhow::Result<Interpreter> {
+        let canonical_path = python_exe.as_ref().canonicalize()?;
+        let hash = hash_file(&canonical_path)?;
+        let interpreter_info = CacheDir::Interpreter.path()?.join(hash.base64_digest());
+        let file = atomic_file(&interpreter_info, |file| {
+            let json_bytes = Self::identify(python_exe.as_ref())?;
+            file.write_all(&json_bytes)?;
+            Ok(())
+        })?;
+        serde_json::from_reader(file).map_err(|err| {
             anyhow!(
                 "Failed to identify Python interpreter {exe}: {err}",
                 exe = python_exe.as_ref().display()
@@ -106,7 +143,7 @@ mod tests {
         let expected_tags: Vec<String> =
             serde_json::from_str(String::from_utf8(tags_output).unwrap().as_str()).unwrap();
 
-        let interpreter = Interpreter::load(venv_python_exe).unwrap();
+        let interpreter = Interpreter::load_uncached(venv_python_exe).unwrap();
         assert_eq!(expected_tags, interpreter.supported_tags);
     }
 }

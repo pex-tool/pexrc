@@ -217,6 +217,14 @@ impl<'a> Pex<'a> {
             }
         }
     }
+
+    pub fn info(&self) -> &PexInfo {
+        match self {
+            Pex::Loose(pex) => &pex.1,
+            Pex::Packed(pex) => &pex.1,
+            Pex::ZipApp(pex) => &pex.1,
+        }
+    }
 }
 
 #[cfg(test)]

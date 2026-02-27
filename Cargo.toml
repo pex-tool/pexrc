@@ -4,6 +4,7 @@
 [workspace]
 members = [
     ".",
+    "crates/cache",
     "crates/clib",
     "crates/interpreter",
     "crates/pex",
@@ -86,6 +87,7 @@ path = "pexrc.rs"
 [workspace.dependencies]
 anstream = "1.0"
 anyhow = "1.0"
+base64 = "0.22"
 bstr = "1.12"
 build-target = "0.8"
 clap = {  version = "4.5", features = ["derive"] }
