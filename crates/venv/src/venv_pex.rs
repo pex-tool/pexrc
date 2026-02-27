@@ -175,7 +175,11 @@ if __name__ == "__main__":
                 .join(","),
             entry_point = as_optional_python_str(pex_info.entry_point.as_deref()),
             script = as_optional_python_str(pex_info.script.as_deref()),
-            hermetic_re_exec = as_python_bool(pex_info.venv_hermetic_scripts)
+            hermetic_re_exec = as_optional_python_str(if pex_info.venv_hermetic_scripts {
+                Some(venv.interpreter.hermetic_args())
+            } else {
+                None
+            })
         )
     )?;
     mark_executable(&mut main_py_fp)?;

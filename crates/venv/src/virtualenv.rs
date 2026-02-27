@@ -108,6 +108,7 @@ fn create_virtualenv_venv<'a>(
 ) -> anyhow::Result<Cow<'a, Path>> {
     let mut command = Command::new(&interpreter.path);
     command
+        .arg(interpreter.hermetic_args())
         .arg("-c")
         .arg(VIRTUALENV_PY)
         .args(["--no-pip", "--no-setuptools", "--no-wheel"]);

@@ -34,6 +34,16 @@ pub struct Interpreter {
 }
 
 impl Interpreter {
+    pub fn hermetic_args(&self) -> &'static str {
+        if self.version.major == 3 && self.version.minor >= 4 {
+            "-I"
+        } else {
+            "-sE"
+        }
+    }
+}
+
+impl Interpreter {
     #[time("debug", "Interpreter.{}")]
     pub fn load(python_exe: impl AsRef<Path>) -> anyhow::Result<Interpreter> {
         let mut command = Command::new(python_exe.as_ref());
