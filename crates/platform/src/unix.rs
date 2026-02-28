@@ -1,9 +1,9 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::fs::{File, Metadata};
+use std::fs::File;
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
+use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::Path;
 
 pub fn link_or_copy(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> anyhow::Result<()> {
@@ -19,8 +19,4 @@ pub fn mark_executable(file: &mut File) -> anyhow::Result<()> {
 
 pub fn path_as_bytes(path: &Path) -> anyhow::Result<&[u8]> {
     Ok(path.as_os_str().as_bytes())
-}
-
-pub fn inode(metadata: &Metadata) -> u64 {
-    metadata.ino()
 }

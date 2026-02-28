@@ -219,7 +219,6 @@ dependencies = [
  "base64",
  "dirs",
  "logging_timer",
- "platform",
  "sha2",
  "tempfile",
 ]

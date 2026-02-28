@@ -31,7 +31,6 @@ impl Display for Fingerprint {
 #[derive(Default)]
 pub struct HashOptions {
     path: bool,
-    inode: bool,
     mtime: bool,
     size: bool,
     contents: bool,
@@ -41,7 +40,6 @@ impl HashOptions {
     pub const fn new() -> Self {
         Self {
             path: false,
-            inode: false,
             mtime: false,
             size: false,
             contents: false,
@@ -50,11 +48,6 @@ impl HashOptions {
 
     pub const fn path(mut self, path: bool) -> Self {
         self.path = path;
-        self
-    }
-
-    pub const fn inode(mut self, inode: bool) -> Self {
-        self.inode = inode;
         self
     }
 
@@ -81,13 +74,8 @@ pub fn hash_file(path: &Path, options: &HashOptions) -> anyhow::Result<Fingerpri
         digest.update(b"path:");
         digest.update(path.as_os_str().as_encoded_bytes());
     }
-    if options.inode || options.mtime || options.size {
+    if options.mtime || options.size {
         let metadata = path.metadata()?;
-        if options.inode {
-            let inode = platform::inode(&metadata, path.display())?;
-            digest.update(b"inode:");
-            digest.update(inode.to_ne_bytes());
-        }
         if options.mtime {
             digest.update(b"mtime:");
             digest.update(
