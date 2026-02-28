@@ -5,8 +5,6 @@ use std::fs;
 use std::fs::File;
 use std::path::Path;
 
-use anyhow::anyhow;
-
 pub fn link_or_copy(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> anyhow::Result<()> {
     fs::hard_link(&src, &dst)
         .or_else(|_| fs::copy(src, dst).map(|_| ()))
