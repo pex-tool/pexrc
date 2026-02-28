@@ -1,19 +1,19 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::io::{BufReader, Write};
+use std::io::{BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use anyhow::{anyhow, bail};
-use cache::{CacheDir, atomic_file, hash_file};
+use cache::{CacheDir, HashOptions, atomic_file, hash_file};
 use logging_timer::time;
 use pep508_rs::MarkerEnvironment;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 const INTERPRETER_PY: &str = include_str!("interpreter.py");
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct PythonVersion {
     pub major: u8,
     pub minor: u8,
@@ -22,7 +22,7 @@ pub struct PythonVersion {
     pub serial: u8,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Interpreter {
     pub path: PathBuf,
     pub realpath: PathBuf,
@@ -83,13 +83,16 @@ impl Interpreter {
         })
     }
 
+    const INTERPRETER_HASH_CONFIG: HashOptions =
+        HashOptions::new().path(true).mtime(true).size(true);
+
     #[time("debug", "Interpreter.{}")]
     pub fn load(python_exe: impl AsRef<Path>) -> anyhow::Result<Self> {
-        let hash = hash_file(python_exe.as_ref(), true)?;
+        let hash = hash_file(python_exe.as_ref(), &Self::INTERPRETER_HASH_CONFIG)?;
         let interpreter_info = CacheDir::Interpreter.path()?.join(hash.base64_digest());
         let file = atomic_file(&interpreter_info, |file| {
             let json_bytes = Self::identify(python_exe.as_ref())?;
-            file.write_all(&json_bytes)?;
+            BufWriter::new(file).write_all(&json_bytes)?;
             Ok(())
         })?;
         serde_json::from_reader(BufReader::new(file)).map_err(|err| {
@@ -98,6 +101,17 @@ impl Interpreter {
                 exe = python_exe.as_ref().display()
             )
         })
+    }
+
+    #[time("debug", "Interpreter.{}")]
+    pub fn store(&self) -> anyhow::Result<()> {
+        let hash = hash_file(&self.path, &Self::INTERPRETER_HASH_CONFIG)?;
+        let interpreter_info = CacheDir::Interpreter.path()?.join(hash.base64_digest());
+        atomic_file(&interpreter_info, |file| {
+            serde_json::to_writer(BufWriter::new(file), self)?;
+            Ok(())
+        })?;
+        Ok(())
     }
 }
 

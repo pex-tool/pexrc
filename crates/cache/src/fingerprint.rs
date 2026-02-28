@@ -5,6 +5,7 @@ use std::fmt::{Display, Formatter};
 use std::fs::File;
 use std::io;
 use std::path::Path;
+use std::time::SystemTime;
 
 use base64::Engine;
 use base64::display::Base64Display;
@@ -27,14 +28,84 @@ impl Display for Fingerprint {
     }
 }
 
+#[derive(Default)]
+pub struct HashOptions {
+    path: bool,
+    inode: bool,
+    mtime: bool,
+    size: bool,
+    contents: bool,
+}
+
+impl HashOptions {
+    pub const fn new() -> Self {
+        Self {
+            path: false,
+            inode: false,
+            mtime: false,
+            size: false,
+            contents: false,
+        }
+    }
+
+    pub const fn path(mut self, path: bool) -> Self {
+        self.path = path;
+        self
+    }
+
+    pub const fn inode(mut self, inode: bool) -> Self {
+        self.inode = inode;
+        self
+    }
+
+    pub const fn mtime(mut self, mtime: bool) -> Self {
+        self.mtime = mtime;
+        self
+    }
+
+    pub const fn size(mut self, size: bool) -> Self {
+        self.size = size;
+        self
+    }
+
+    pub const fn contents(mut self, contents: bool) -> Self {
+        self.contents = contents;
+        self
+    }
+}
+
 #[time("debug", "fingerprint.{}")]
-pub fn hash_file(path: &Path, hash_path: bool) -> anyhow::Result<Fingerprint> {
+pub fn hash_file(path: &Path, options: &HashOptions) -> anyhow::Result<Fingerprint> {
     let mut digest = Sha256::new();
-    if hash_path {
+    if options.path {
         digest.update(b"path:");
         digest.update(path.as_os_str().as_encoded_bytes());
     }
-    digest.update(b"contents:");
-    io::copy(&mut File::open(path)?, &mut digest)?;
+    if options.inode || options.mtime || options.size {
+        let metadata = path.metadata()?;
+        if options.inode {
+            let inode = platform::inode(&metadata, path.display())?;
+            digest.update(b"inode:");
+            digest.update(inode.to_ne_bytes());
+        }
+        if options.mtime {
+            digest.update(b"mtime:");
+            digest.update(
+                metadata
+                    .modified()?
+                    .duration_since(SystemTime::UNIX_EPOCH)?
+                    .as_nanos()
+                    .to_ne_bytes(),
+            )
+        }
+        if options.size {
+            digest.update(b"size:");
+            digest.update(metadata.len().to_ne_bytes())
+        }
+    }
+    if options.contents {
+        digest.update(b"contents:");
+        io::copy(&mut File::open(path)?, &mut digest)?;
+    }
     Ok(Fingerprint(Vec::from(digest.finalize().as_slice())))
 }

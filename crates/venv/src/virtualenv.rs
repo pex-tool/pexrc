@@ -20,7 +20,6 @@ const PYTHON_EXE: &str = concatcp!("python", EXE_SUFFIX);
 const VENV_PYTHON_RELPATH: &str = concatcp!(SCRIPTS_DIR, MAIN_SEPARATOR_STR, PYTHON_EXE);
 
 pub struct Virtualenv<'a> {
-    pub path: Cow<'a, Path>,
     pub interpreter: Interpreter,
     pub bin_dir_relpath: &'a str,
     site_packages_relpath: Cow<'a, Path>,
@@ -28,11 +27,9 @@ pub struct Virtualenv<'a> {
 
 impl<'a> Virtualenv<'a> {
     #[time("debug", "Virtualenv.{}")]
-    pub fn load(path: Cow<'a, Path>) -> anyhow::Result<Self> {
-        let interpreter = Interpreter::load(path.as_ref().join(VENV_PYTHON_RELPATH))?;
+    pub fn enclosing(interpreter: Interpreter) -> anyhow::Result<Self> {
         let site_packages_relpath = site_packages_relpath(&interpreter);
         Ok(Self {
-            path,
             interpreter,
             bin_dir_relpath: SCRIPTS_DIR,
             site_packages_relpath,
@@ -40,54 +37,58 @@ impl<'a> Virtualenv<'a> {
     }
 
     #[time("debug", "Virtualenv.{}")]
-    pub fn create(
-        interpreter: &Interpreter,
-        path: Cow<'a, Path>,
-        resting_path: Option<Cow<'a, Path>>,
-        include_system_site_packages: bool,
-    ) -> anyhow::Result<Self> {
-        let parent_dir = path.parent().ok_or_else(|| anyhow!(""))?;
-        fs::create_dir_all(parent_dir)?;
-        let mut workdir = tempfile::Builder::new()
-            .prefix(".pexrc.")
-            .suffix(".venv")
-            .tempdir_in(parent_dir)?;
-        let site_packages_relpath =
-            if interpreter.version.major == 3 && interpreter.version.minor >= 3 {
-                create_pep_405_venv(interpreter, workdir.path(), include_system_site_packages)?
-            } else {
-                create_virtualenv_venv(interpreter, workdir.path(), include_system_site_packages)?
-            };
-        fs::rename(workdir.path(), &path)?;
-        workdir.disable_cleanup(true);
+    pub fn load(path: Cow<'a, Path>) -> anyhow::Result<Self> {
+        let interpreter = Interpreter::load(path.as_ref().join(VENV_PYTHON_RELPATH))?;
+        Self::enclosing(interpreter)
+    }
 
+    pub fn host_interpreter(venv_dir: &Path, interpreter: &Interpreter) -> Interpreter {
         let mut venv_interpreter = interpreter.clone();
         venv_interpreter.base_prefix = venv_interpreter
             .base_prefix
             .or(Some(venv_interpreter.prefix));
-        let resting_path = resting_path.as_ref().unwrap_or(&path);
-        venv_interpreter.prefix = resting_path.to_path_buf();
-        venv_interpreter.path = resting_path.join(VENV_PYTHON_RELPATH);
+        venv_interpreter.prefix = venv_dir.to_path_buf();
+        venv_interpreter.path = venv_dir.join(VENV_PYTHON_RELPATH);
         if Triple::host().operating_system == OperatingSystem::Windows {
             venv_interpreter.realpath = venv_interpreter.path.clone();
         }
+        venv_interpreter
+    }
+
+    #[time("debug", "Virtualenv.{}")]
+    pub fn create(
+        interpreter: &Interpreter,
+        path: Cow<'a, Path>,
+        include_system_site_packages: bool,
+    ) -> anyhow::Result<Self> {
+        let site_packages_relpath =
+            if interpreter.version.major == 3 && interpreter.version.minor >= 3 {
+                create_pep_405_venv(interpreter, path.as_ref(), include_system_site_packages)?
+            } else {
+                create_virtualenv_venv(interpreter, path.as_ref(), include_system_site_packages)?
+            };
+
+        let venv_interpreter = Self::host_interpreter(path.as_ref(), interpreter);
 
         Ok(Self {
-            path,
             interpreter: venv_interpreter,
             bin_dir_relpath: SCRIPTS_DIR,
             site_packages_relpath,
         })
     }
 
+    pub fn prefix(&self) -> &Path {
+        &self.interpreter.prefix
+    }
+
     pub fn site_packages_path(&self) -> PathBuf {
-        self.path.join(&self.site_packages_relpath)
+        self.interpreter.prefix.join(&self.site_packages_relpath)
     }
 }
 
 fn create_pep_405_venv<'a>(
     interpreter: &Interpreter,
-    workdir: impl AsRef<Path>,
+    path: &Path,
     include_system_site_packages: bool,
 ) -> anyhow::Result<Cow<'a, Path>> {
     // See: https://peps.python.org/pep-0405/
@@ -98,7 +99,7 @@ fn create_pep_405_venv<'a>(
         )
     })?;
     fs::write(
-        workdir.as_ref().join("pyvenv.cfg"),
+        path.join("pyvenv.cfg"),
         format!(
             "\
             home = {home}\n\
@@ -107,8 +108,8 @@ fn create_pep_405_venv<'a>(
             home = home.display()
         ),
     )?;
-    let scripts_dir = workdir.as_ref().join(SCRIPTS_DIR);
-    fs::create_dir(&scripts_dir)?;
+    let scripts_dir = path.join(SCRIPTS_DIR);
+    fs::create_dir_all(&scripts_dir)?;
     link_or_copy(&interpreter.realpath, scripts_dir.join(PYTHON_EXE))?;
     let site_packages_relpath = site_packages_relpath(interpreter);
     fs::create_dir_all(&site_packages_relpath)?;
@@ -117,7 +118,7 @@ fn create_pep_405_venv<'a>(
 
 fn create_virtualenv_venv<'a>(
     interpreter: &Interpreter,
-    workdir: impl AsRef<Path>,
+    path: &Path,
     include_system_site_packages: bool,
 ) -> anyhow::Result<Cow<'a, Path>> {
     let mut command = Command::new(&interpreter.path);
@@ -130,7 +131,7 @@ fn create_virtualenv_venv<'a>(
         command.arg("--system-site-packages");
     }
     let child = command
-        .arg(workdir.as_ref())
+        .arg(path)
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()?;
@@ -139,7 +140,7 @@ fn create_virtualenv_venv<'a>(
         bail!(
             "Failed to create a venv at {workdir} using {python_implementation} {python_version} \
             interpreter {python_exe}:\n{stderr}",
-            workdir = workdir.as_ref().display(),
+            workdir = path.display(),
             python_implementation = interpreter.marker_env.platform_python_implementation(),
             python_version = interpreter.marker_env.platform_version(),
             python_exe = interpreter.path.display(),
@@ -190,8 +191,7 @@ mod tests {
     fn test_create(python_exe: &Path) {
         let interpreter = Interpreter::load(python_exe).unwrap();
         let venv_dir = tempfile::tempdir().unwrap();
-        let venv =
-            Virtualenv::create(&interpreter, Cow::Borrowed(venv_dir.path()), None, false).unwrap();
+        let venv = Virtualenv::create(&interpreter, Cow::Borrowed(venv_dir.path()), false).unwrap();
         assert_eq!(
             interpreter
                 .base_prefix

@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::fs::File;
-use std::io;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::{cmp, io};
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
@@ -43,6 +43,7 @@ enum Commands {
         #[arg(value_name = "FILE")]
         pex: PathBuf,
     },
+    Info,
 }
 
 fn inject(pex: &Path, compression_level: Option<i64>) -> anyhow::Result<()> {
@@ -135,9 +136,35 @@ fn main() -> anyhow::Result<()> {
         .init();
     cli.color.write_global();
 
-    let Commands::Inject {
-        pex,
-        compression_level,
-    } = cli.command;
-    inject(&pex, compression_level)
+    match cli.command {
+        Commands::Inject {
+            pex,
+            compression_level,
+        } => inject(&pex, compression_level),
+        Commands::Info => {
+            let mut paths = Vec::new();
+            let mut max_width = 0;
+            for clib in CLIBS_DIR.files() {
+                let path = clib.path().display().to_string();
+                max_width = cmp::max(max_width, path.len());
+                paths.push(path);
+            }
+            let count = paths.len();
+            anstream::println!(
+                "There are {count} embedded {clibs}:",
+                count = count.yellow(),
+                clibs = if count == 1 { "clib" } else { "clibs" }
+            );
+            for (idx, (clib, path)) in CLIBS_DIR.files().zip(paths).enumerate() {
+                anstream::println!(
+                    "{idx:>3}. {path} {pad}{size} bytes",
+                    idx = (idx + 1).yellow(),
+                    path = path.blue(),
+                    pad = " ".repeat(max_width - path.len()),
+                    size = clib.contents().len().yellow()
+                )
+            }
+            Ok(())
+        }
+    }
 }

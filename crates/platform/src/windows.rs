@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::fs;
-use std::fs::File;
+use std::fs::{File, Metadata};
+use std::os::windows::fs::MetadataExt;
 use std::path::Path;
 
 use anyhow::anyhow;
@@ -19,4 +20,8 @@ pub fn mark_executable(_file: &mut File) -> anyhow::Result<()> {
 
 pub fn path_as_bytes(path: &Path) -> anyhow::Result<&[u8]> {
     crate::path_as_str(path).map(str::as_bytes)
+}
+
+pub fn inode(metadata: &Metadata) -> Option<u64> {
+    metadata.file_index()
 }

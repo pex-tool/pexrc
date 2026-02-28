@@ -39,10 +39,10 @@ fn prepare_boot(
     argv: Vec<String>,
 ) -> anyhow::Result<Command> {
     let venv = prepare_venv(python, pex)?;
-    let mut command = Command::new(venv.interpreter.path);
+    let mut command = Command::new(&venv.interpreter.path);
     command
         .args(python_args)
-        .arg(venv.path.as_os_str())
+        .arg(venv.prefix().as_os_str())
         .args(argv);
     Ok(command)
 }
@@ -87,15 +87,16 @@ fn prepare_venv<'a>(
     // 2. PEX_PYTHON
     // 3. PEX_PYTHON_PATH
     let venv_dir = CacheDir::Venv.path()?.join(&pex.info().pex_hash);
-    atomic_dir(&venv_dir, |work_dir| {
+    if let Some(venv_interpreter) = atomic_dir(&venv_dir, |work_dir| {
         let interpreter = Interpreter::load(&python)?;
-        let venv = Virtualenv::create(
-            &interpreter,
-            Cow::Borrowed(work_dir),
-            Some(Cow::Borrowed(&venv_dir)),
-            false,
-        )?;
-        populate(&venv, &pex)
-    })?;
-    Virtualenv::load(Cow::Owned(venv_dir))
+        let venv = Virtualenv::create(&interpreter, Cow::Borrowed(work_dir), false)?;
+        populate(&venv, &pex)?;
+        Ok(venv.interpreter)
+    })? {
+        let venv_interpreter = Virtualenv::host_interpreter(&venv_dir, &venv_interpreter);
+        venv_interpreter.store()?;
+        Virtualenv::enclosing(venv_interpreter)
+    } else {
+        Virtualenv::load(Cow::Owned(venv_dir))
+    }
 }

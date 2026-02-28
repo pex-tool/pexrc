@@ -38,12 +38,12 @@ pub fn atomic_file(
 }
 
 #[time("debug", "atomic.{}")]
-pub fn atomic_dir(
+pub fn atomic_dir<T>(
     path: &Path,
-    func: impl FnOnce(&Path) -> anyhow::Result<()>,
-) -> anyhow::Result<()> {
+    func: impl FnOnce(&Path) -> anyhow::Result<T>,
+) -> anyhow::Result<Option<T>> {
     if path.is_dir() {
-        return Ok(());
+        return Ok(None);
     }
 
     let parent_dir = path.parent().ok_or_else(|| {
@@ -58,12 +58,12 @@ pub fn atomic_dir(
     let lock_file = File::create(&lock_file_path)?;
     lock_file.lock()?;
     if path.is_dir() {
-        return Ok(());
+        return Ok(None);
     }
 
     let mut temp_dir = tempfile::tempdir_in(parent_dir)?;
-    func(temp_dir.path())?;
+    let result = func(temp_dir.path())?;
     fs::rename(temp_dir.path(), path)?;
     temp_dir.disable_cleanup(true);
-    Ok(())
+    Ok(Some(result))
 }

@@ -67,7 +67,7 @@ pub fn populate(venv: &Virtualenv, pex: &Pex) -> anyhow::Result<()> {
                     Ok(())
                 })?;
             let mut pex_info_src_fp = pex_zip.by_name("PEX-INFO")?;
-            let mut pex_info_dst_fp = File::create_new(venv.path.join("PEX-INFO"))?;
+            let mut pex_info_dst_fp = File::create_new(venv.prefix().join("PEX-INFO"))?;
             io::copy(&mut pex_info_src_fp, &mut pex_info_dst_fp)?;
             (zip_app_pex.0, &zip_app_pex.1)
         }
@@ -132,7 +132,7 @@ fn as_optional_python_str(value: Option<&str>) -> Cow<'_, str> {
 }
 
 fn write_main(venv: &&Virtualenv, pex_info: &PexInfo) -> anyhow::Result<()> {
-    let mut main_py_fp = File::create_new(venv.path.join("__main__.py"))?;
+    let mut main_py_fp = File::create_new(venv.prefix().join("__main__.py"))?;
 
     write_shebang_bytes(&mut main_py_fp, venv)?;
     main_py_fp.write_all(VENV_PEX_PY)?;
@@ -183,11 +183,11 @@ if __name__ == "__main__":
         )
     )?;
     mark_executable(&mut main_py_fp)?;
-    link_or_copy(Path::new("__main__.py"), venv.path.join("pex"))
+    link_or_copy(Path::new("__main__.py"), venv.prefix().join("pex"))
 }
 
 fn write_repl(venv: &Virtualenv, pex: &Path, pex_info: &PexInfo) -> anyhow::Result<()> {
-    let mut pex_repl_py_fp = File::create_new(venv.path.join("pex-repl"))?;
+    let mut pex_repl_py_fp = File::create_new(venv.prefix().join("pex-repl"))?;
     write_shebang_bytes(&mut pex_repl_py_fp, venv)?;
     pex_repl_py_fp.write_all(VENV_PEX_REPL_PY)?;
     // TODO: XXX: Need to append a if __name__ == "__main__" that calls _create_pex_repl(...)

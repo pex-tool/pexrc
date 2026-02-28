@@ -11,7 +11,7 @@ use std::sync::LazyLock;
 
 use anyhow::anyhow;
 pub use atomic::{atomic_dir, atomic_file};
-pub use fingerprint::{Fingerprint, hash_file};
+pub use fingerprint::{Fingerprint, HashOptions, hash_file};
 use logging_timer::time;
 
 static PEXRC_ROOT: LazyLock<Result<PathBuf, Cow<'static, str>>> = LazyLock::new(|| {

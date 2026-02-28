@@ -7,6 +7,8 @@ mod unix;
 #[cfg(windows)]
 mod windows;
 
+use std::fmt::Display;
+use std::fs::Metadata;
 use std::path::Path;
 
 use anyhow::anyhow;
@@ -22,4 +24,14 @@ pub fn path_as_str(path: &Path) -> anyhow::Result<&str> {
             path = path.display()
         )
     })
+}
+
+#[cfg(unix)]
+pub fn inode(metadata: &Metadata, _source: impl Display) -> anyhow::Result<u64> {
+    Ok(unix::inode(metadata))
+}
+
+#[cfg(windows)]
+pub fn inode(metadata: &Metadata, source: impl Display) -> anyhow::Result<u64> {
+    windows::inode(metadata).ok_or_else(|| anyhow!("No file id available for {source}."))
 }
