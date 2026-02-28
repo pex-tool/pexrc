@@ -1,12 +1,16 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::borrow::Cow;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{anyhow, bail};
+use anyhow::anyhow;
+use cache::{CacheDir, atomic_dir};
 use interpreter::Interpreter;
-use log::info;
+use itertools::Itertools;
+use log::debug;
 use logging_timer::time;
 use pex::Pex;
 use venv::{Virtualenv, populate};
@@ -17,39 +21,29 @@ pub fn boot(
     python_args: Vec<String>,
     pex: impl AsRef<Path> + Sync + Send,
     argv: Vec<String>,
-    gc: bool,
 ) -> anyhow::Result<i32> {
-    let dst_dir = tempfile::Builder::new().disable_cleanup(!gc).tempdir()?;
-    if !gc {
-        info!("Will not gc: {path}", path = dst_dir.path().display())
-    }
-    let mut command = prepare_boot(dst_dir, python, python_args, pex, argv)?;
+    let mut command = prepare_boot(python, python_args, pex, argv)?;
+    debug!(
+        "Booting with {exe} {args}",
+        exe = command.get_program().to_string_lossy(),
+        args = command.get_args().map(OsStr::to_string_lossy).join(" ")
+    );
     exec(&mut command)
 }
 
 #[time("debug", "{}")]
 fn prepare_boot(
-    dst_dir: impl AsRef<Path>,
     python: impl AsRef<Path>,
     python_args: Vec<String>,
     pex: impl AsRef<Path> + Sync + Send,
     argv: Vec<String>,
 ) -> anyhow::Result<Command> {
-    info!(
-        "boot({python}, {pex}, {argv:?})",
-        python = python.as_ref().display(),
-        pex = pex.as_ref().display(),
-        argv = argv
-    );
-
-    let interpreter = Interpreter::load(&python)?;
-    let pex = Pex::load(pex.as_ref())?;
-
-    let venv = Virtualenv::create(&interpreter, dst_dir.as_ref(), false)?;
-    populate(&venv, &pex)?;
-
+    let venv = prepare_venv(python, pex)?;
     let mut command = Command::new(venv.interpreter.path);
-    command.args(python_args).arg(dst_dir.as_ref()).args(argv);
+    command
+        .args(python_args)
+        .arg(venv.path.as_os_str())
+        .args(argv);
     Ok(command)
 }
 
@@ -76,8 +70,32 @@ fn exec(command: &mut Command) -> anyhow::Result<i32> {
 
 #[time("debug", "{}")]
 pub fn mount(
-    _python: impl AsRef<Path>,
-    _pex: impl AsRef<Path> + Sync + Send,
+    python: impl AsRef<Path>,
+    pex: impl AsRef<Path> + Sync + Send,
 ) -> anyhow::Result<PathBuf> {
-    bail!("TODO: XXX")
+    prepare_venv(python, pex).map(|venv| venv.site_packages_path())
+}
+
+#[time("debug", "{}")]
+fn prepare_venv<'a>(
+    python: impl AsRef<Path>,
+    pex: impl AsRef<Path> + Sync + Send,
+) -> anyhow::Result<Virtualenv<'a>> {
+    let pex = Pex::load(pex.as_ref())?;
+    // TODO: XXX: Account for:
+    // 1. PEX_PATH
+    // 2. PEX_PYTHON
+    // 3. PEX_PYTHON_PATH
+    let venv_dir = CacheDir::Venv.path()?.join(&pex.info().pex_hash);
+    atomic_dir(&venv_dir, |work_dir| {
+        let interpreter = Interpreter::load(&python)?;
+        let venv = Virtualenv::create(
+            &interpreter,
+            Cow::Borrowed(work_dir),
+            Some(Cow::Borrowed(&venv_dir)),
+            false,
+        )?;
+        populate(&venv, &pex)
+    })?;
+    Virtualenv::load(Cow::Owned(venv_dir))
 }

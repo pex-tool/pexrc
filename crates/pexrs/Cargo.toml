@@ -8,7 +8,9 @@ publish = false
 
 [dependencies]
 anyhow = { workspace = true }
+cache = { path = "../cache" }
 interpreter = { path = "../interpreter" }
+itertools = { workspace = true }
 log = { workspace = true }
 logging_timer = { workspace = true }
 pex = { path = "../pex" }

@@ -5,6 +5,10 @@ use std::fs;
 use std::fs::File;
 use std::path::Path;
 
+use anyhow::anyhow;
+use logging_timer::time;
+
+#[time("debug", "atomic.{}")]
 pub fn atomic_file(
     path: &Path,
     func: impl FnOnce(&mut File) -> anyhow::Result<()>,
@@ -18,18 +22,48 @@ pub fn atomic_file(
         fs::create_dir_all(parent)?;
     }
     let lock_file_path = path.with_added_extension("lck");
-    {
-        let mut lock_file = File::options()
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(&lock_file_path)?;
-        lock_file.lock()?;
-        if path.is_file() {
-            return Ok(File::open(path)?);
-        }
-        func(&mut lock_file)?;
+    let mut lock_file = File::options()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_file_path)?;
+    lock_file.lock()?;
+    if path.is_file() {
+        return Ok(File::open(path)?);
     }
+
+    func(&mut lock_file)?;
     fs::rename(lock_file_path, path)?;
     Ok(File::open(path)?)
+}
+
+#[time("debug", "atomic.{}")]
+pub fn atomic_dir(
+    path: &Path,
+    func: impl FnOnce(&Path) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    if path.is_dir() {
+        return Ok(());
+    }
+
+    let parent_dir = path.parent().ok_or_else(|| {
+        anyhow!(
+            "Cannot create an atomic directory at the root of the file-system.\n\
+            Asked to create atomic dir at: {path}",
+            path = path.display()
+        )
+    })?;
+    fs::create_dir_all(parent_dir)?;
+    let lock_file_path = path.with_added_extension("lck");
+    let lock_file = File::create(&lock_file_path)?;
+    lock_file.lock()?;
+    if path.is_dir() {
+        return Ok(());
+    }
+
+    let mut temp_dir = tempfile::tempdir_in(parent_dir)?;
+    func(temp_dir.path())?;
+    fs::rename(temp_dir.path(), path)?;
+    temp_dir.disable_cleanup(true);
+    Ok(())
 }

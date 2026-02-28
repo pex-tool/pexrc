@@ -20,7 +20,7 @@ const PYTHON_EXE: &str = concatcp!("python", EXE_SUFFIX);
 const VENV_PYTHON_RELPATH: &str = concatcp!(SCRIPTS_DIR, MAIN_SEPARATOR_STR, PYTHON_EXE);
 
 pub struct Virtualenv<'a> {
-    pub path: &'a Path,
+    pub path: Cow<'a, Path>,
     pub interpreter: Interpreter,
     pub bin_dir_relpath: &'a str,
     site_packages_relpath: Cow<'a, Path>,
@@ -28,9 +28,22 @@ pub struct Virtualenv<'a> {
 
 impl<'a> Virtualenv<'a> {
     #[time("debug", "Virtualenv.{}")]
+    pub fn load(path: Cow<'a, Path>) -> anyhow::Result<Self> {
+        let interpreter = Interpreter::load(path.as_ref().join(VENV_PYTHON_RELPATH))?;
+        let site_packages_relpath = site_packages_relpath(&interpreter);
+        Ok(Self {
+            path,
+            interpreter,
+            bin_dir_relpath: SCRIPTS_DIR,
+            site_packages_relpath,
+        })
+    }
+
+    #[time("debug", "Virtualenv.{}")]
     pub fn create(
         interpreter: &Interpreter,
-        path: &'a Path,
+        path: Cow<'a, Path>,
+        resting_path: Option<Cow<'a, Path>>,
         include_system_site_packages: bool,
     ) -> anyhow::Result<Self> {
         let parent_dir = path.parent().ok_or_else(|| anyhow!(""))?;
@@ -45,15 +58,16 @@ impl<'a> Virtualenv<'a> {
             } else {
                 create_virtualenv_venv(interpreter, workdir.path(), include_system_site_packages)?
             };
-        fs::rename(workdir.path(), path)?;
+        fs::rename(workdir.path(), &path)?;
         workdir.disable_cleanup(true);
 
         let mut venv_interpreter = interpreter.clone();
         venv_interpreter.base_prefix = venv_interpreter
             .base_prefix
             .or(Some(venv_interpreter.prefix));
-        venv_interpreter.prefix = path.to_path_buf();
-        venv_interpreter.path = path.join(VENV_PYTHON_RELPATH);
+        let resting_path = resting_path.as_ref().unwrap_or(&path);
+        venv_interpreter.prefix = resting_path.to_path_buf();
+        venv_interpreter.path = resting_path.join(VENV_PYTHON_RELPATH);
         if Triple::host().operating_system == OperatingSystem::Windows {
             venv_interpreter.realpath = venv_interpreter.path.clone();
         }
@@ -136,7 +150,10 @@ fn create_virtualenv_venv<'a>(
 }
 
 fn site_packages_relpath<'a>(interpreter: &Interpreter) -> Cow<'a, Path> {
-    if interpreter.marker_env.platform_python_implementation() == "PyPy"
+    if Triple::host().operating_system == OperatingSystem::Windows {
+        // TODO: XXX: Confirm venv layouts for PyPy under Windows.
+        Cow::Borrowed(Path::new("Lib\\site-packages"))
+    } else if interpreter.marker_env.platform_python_implementation() == "PyPy"
         && (interpreter.version.major, interpreter.version.minor) < (3, 8)
     {
         Cow::Borrowed(Path::new("site-packages"))
@@ -161,6 +178,8 @@ fn site_packages_relpath<'a>(interpreter: &Interpreter) -> Cow<'a, Path> {
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::Cow;
+
     use interpreter::Interpreter;
     use rstest::rstest;
     use testing::python_exe;
@@ -171,7 +190,8 @@ mod tests {
     fn test_create(python_exe: &Path) {
         let interpreter = Interpreter::load(python_exe).unwrap();
         let venv_dir = tempfile::tempdir().unwrap();
-        let venv = Virtualenv::create(&interpreter, venv_dir.path(), false).unwrap();
+        let venv =
+            Virtualenv::create(&interpreter, Cow::Borrowed(venv_dir.path()), None, false).unwrap();
         assert_eq!(
             interpreter
                 .base_prefix

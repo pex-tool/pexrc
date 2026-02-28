@@ -10,8 +10,9 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use anyhow::anyhow;
-pub use atomic::atomic_file;
+pub use atomic::{atomic_dir, atomic_file};
 pub use fingerprint::{Fingerprint, hash_file};
+use logging_timer::time;
 
 static PEXRC_ROOT: LazyLock<Result<PathBuf, Cow<'static, str>>> = LazyLock::new(|| {
     if let Some(pexrc_root) = env::var_os("PEXRC_ROOT") {
@@ -58,6 +59,7 @@ impl CacheDir {
         }
     }
 
+    #[time("debug", "CacheDir.{}")]
     pub fn path(&self) -> anyhow::Result<PathBuf> {
         PEXRC_ROOT
             .as_ref()

@@ -1,7 +1,7 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::io::Write;
+use std::io::{BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -73,7 +73,7 @@ impl Interpreter {
         Ok(result.stdout)
     }
 
-    pub fn load_uncached(python_exe: impl AsRef<Path>) -> anyhow::Result<Interpreter> {
+    pub fn load_uncached(python_exe: impl AsRef<Path>) -> anyhow::Result<Self> {
         let json_bytes = Self::identify(python_exe.as_ref())?;
         serde_json::from_slice(&json_bytes).map_err(|err| {
             anyhow!(
@@ -84,16 +84,15 @@ impl Interpreter {
     }
 
     #[time("debug", "Interpreter.{}")]
-    pub fn load(python_exe: impl AsRef<Path>) -> anyhow::Result<Interpreter> {
-        let canonical_path = python_exe.as_ref().canonicalize()?;
-        let hash = hash_file(&canonical_path)?;
+    pub fn load(python_exe: impl AsRef<Path>) -> anyhow::Result<Self> {
+        let hash = hash_file(python_exe.as_ref(), true)?;
         let interpreter_info = CacheDir::Interpreter.path()?.join(hash.base64_digest());
         let file = atomic_file(&interpreter_info, |file| {
             let json_bytes = Self::identify(python_exe.as_ref())?;
             file.write_all(&json_bytes)?;
             Ok(())
         })?;
-        serde_json::from_reader(file).map_err(|err| {
+        serde_json::from_reader(BufReader::new(file)).map_err(|err| {
             anyhow!(
                 "Failed to identify Python interpreter {exe}: {err}",
                 exe = python_exe.as_ref().display()

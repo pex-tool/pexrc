@@ -218,7 +218,9 @@ dependencies = [
  "anyhow",
  "base64",
  "dirs",
+ "logging_timer",
  "sha2",
+ "tempfile",
 ]
 
 [[package]]
@@ -1519,7 +1521,9 @@ name = "pexrs"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "cache",
  "interpreter",
+ "itertools 0.14.0",
  "log",
  "logging_timer",
  "pex",

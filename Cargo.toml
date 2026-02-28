@@ -78,7 +78,7 @@ strip = "symbols"
 
 [profile.release-clib]
 inherits = "release"
-opt-level = "s"
+opt-level = "z"
 
 [[bin]]
 name = "pexrc"

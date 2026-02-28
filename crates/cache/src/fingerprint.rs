@@ -9,11 +9,13 @@ use std::path::Path;
 use base64::Engine;
 use base64::display::Base64Display;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use logging_timer::time;
 use sha2::{Digest, Sha256};
 
 pub struct Fingerprint(Vec<u8>);
 
 impl Fingerprint {
+    #[time("debug", "Fingerprint.{}")]
     pub fn base64_digest(&self) -> String {
         URL_SAFE_NO_PAD.encode(&self.0)
     }
@@ -25,8 +27,14 @@ impl Display for Fingerprint {
     }
 }
 
-pub fn hash_file(path: &Path) -> anyhow::Result<Fingerprint> {
+#[time("debug", "fingerprint.{}")]
+pub fn hash_file(path: &Path, hash_path: bool) -> anyhow::Result<Fingerprint> {
     let mut digest = Sha256::new();
+    if hash_path {
+        digest.update(b"path:");
+        digest.update(path.as_os_str().as_encoded_bytes());
+    }
+    digest.update(b"contents:");
     io::copy(&mut File::open(path)?, &mut digest)?;
     Ok(Fingerprint(Vec::from(digest.finalize().as_slice())))
 }

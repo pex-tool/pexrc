@@ -107,7 +107,7 @@ pub unsafe extern "C" fn boot(
         }
     };
 
-    match rust_boot(python_exe_path, python_argv, pex_path, argv, false) {
+    match rust_boot(python_exe_path, python_argv, pex_path, argv) {
         Ok(code) => code,
         Err(err) => {
             eprintln!(
