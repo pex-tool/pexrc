@@ -7,6 +7,7 @@ use std::io;
 use std::io::Read;
 
 use anyhow::anyhow;
+use interpreter::SelectionStrategy;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -39,12 +40,21 @@ pub enum InheritPath {
     Fallback,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize)]
 pub enum InterpreterSelectionStrategy {
     #[serde(rename = "oldest")]
     Oldest,
     #[serde(rename = "newest")]
     Newest,
+}
+
+impl From<InterpreterSelectionStrategy> for SelectionStrategy {
+    fn from(value: InterpreterSelectionStrategy) -> Self {
+        match value {
+            InterpreterSelectionStrategy::Oldest => SelectionStrategy::Oldest,
+            InterpreterSelectionStrategy::Newest => SelectionStrategy::Newest,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]

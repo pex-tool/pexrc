@@ -1120,7 +1120,11 @@ dependencies = [
  "anyhow",
  "cache",
  "elf",
+ "indexmap",
+ "itertools 0.14.0",
+ "log",
  "logging_timer",
+ "pep440_rs",
  "pep508_rs",
  "rstest",
  "serde",
@@ -1129,6 +1133,8 @@ dependencies = [
  "tempfile",
  "testing",
  "textwrap",
+ "url",
+ "which",
 ]
 
 [[package]]
@@ -1457,6 +1463,7 @@ dependencies = [
  "indexmap",
  "interpreter",
  "itertools 0.14.0",
+ "log",
  "logging_timer",
  "pep440_rs",
  "pep508_rs",
@@ -1522,6 +1529,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "cache",
+ "indexmap",
  "interpreter",
  "itertools 0.14.0",
  "log",
@@ -2701,6 +2709,7 @@ dependencies = [
  "build-target",
  "const_format",
  "env_logger",
+ "indexmap",
  "interpreter",
  "itertools 0.14.0",
  "log",

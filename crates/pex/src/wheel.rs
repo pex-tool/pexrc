@@ -26,11 +26,11 @@ pub struct Tag<'a> {
 impl<'a> Tag<'a> {
     pub(crate) fn parse(tag: &'a str) -> anyhow::Result<Self> {
         let mut tags = tag.split("-");
-        let python = tags.next().ok_or_else(|| anyhow!("XXX"))?;
-        let abi = tags.next().ok_or_else(|| anyhow!("XXX"))?;
-        let platform = tags.next().ok_or_else(|| anyhow!("XXX"))?;
+        let python = tags.next().ok_or_else(|| anyhow!("333"))?;
+        let abi = tags.next().ok_or_else(|| anyhow!("334"))?;
+        let platform = tags.next().ok_or_else(|| anyhow!("335"))?;
         if tags.next().is_some() {
-            bail!("XXX")
+            bail!("336")
         }
         Ok(Self {
             python,
@@ -63,19 +63,19 @@ impl<'a> WheelFile<'a> {
         // See: https://packaging.python.org/en/latest/specifications/binary-distribution-format/#file-name-convention
         // {distribution}-{version}(-{build tag})?-{python tag}-{abi tag}-{platform tag}.whl
         if !file_name.ends_with(".whl") {
-            bail!("XXX")
+            bail!("337")
         }
 
         let (raw_project_name, raw_version, python_tag, abi_tag, platform_tag) = {
             let mut trailing_components = file_name[0..file_name.len() - 4].rsplitn(4, "-");
-            let platform_tag = trailing_components.next().ok_or_else(|| anyhow!("XXX"))?;
-            let abi_tag = trailing_components.next().ok_or_else(|| anyhow!("XXX"))?;
-            let python_tag = trailing_components.next().ok_or_else(|| anyhow!("XXX"))?;
-            let rest = trailing_components.next().ok_or_else(|| anyhow!("XXX"))?;
+            let platform_tag = trailing_components.next().ok_or_else(|| anyhow!("338"))?;
+            let abi_tag = trailing_components.next().ok_or_else(|| anyhow!("339"))?;
+            let python_tag = trailing_components.next().ok_or_else(|| anyhow!("340"))?;
+            let rest = trailing_components.next().ok_or_else(|| anyhow!("341"))?;
 
             let mut leading_components = rest.splitn(2, "-");
-            let project_name = leading_components.next().ok_or_else(|| anyhow!("XXX"))?;
-            let version = leading_components.next().ok_or_else(|| anyhow!("XXX"))?;
+            let project_name = leading_components.next().ok_or_else(|| anyhow!("342"))?;
+            let version = leading_components.next().ok_or_else(|| anyhow!("343"))?;
 
             (project_name, version, python_tag, abi_tag, platform_tag)
         };
@@ -105,7 +105,7 @@ impl<'a> WheelFile<'a> {
     }
 }
 
-pub struct Wheel<'a> {
+pub struct WheelMetadata<'a> {
     pub(crate) wheel_file: WheelFile<'a>,
     pub(crate) requires_dists: Vec<Requirement<Url>>,
     pub(crate) requires_python: Option<VersionSpecifiers>,
@@ -143,7 +143,7 @@ impl<R: Read + Seek> MetadataReader for WhlMetadataReader<R> {
     }
 }
 
-impl<'a> Wheel<'a> {
+impl<'a> WheelMetadata<'a> {
     pub fn try_from_path(path: &'a Path) -> anyhow::Result<Self> {
         let file_name = path.file_name().and_then(OsStr::to_str).ok_or_else(|| {
             anyhow!(
@@ -204,7 +204,7 @@ mod tests {
     use testing::{tmp_dir, venv_python_exe};
     use zip::ZipArchive;
 
-    use crate::wheel::{Tag, Wheel, WheelFile};
+    use crate::wheel::{Tag, WheelFile, WheelMetadata};
 
     #[test]
     fn test_parse_wheel_file_name_simple() {
@@ -308,7 +308,7 @@ mod tests {
     }
 
     fn assert_requests_2_32_5_whl(wheel: &Path) {
-        let wheel = Wheel::try_from_path(wheel).unwrap();
+        let wheel = WheelMetadata::try_from_path(wheel).unwrap();
         assert_eq!("requests", wheel.wheel_file.raw_project_name);
         assert_eq!("2.32.5", wheel.wheel_file.raw_version);
         assert_eq!(

@@ -23,16 +23,21 @@ pub struct PythonVersion {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct PyPyVersion(u8, u8, u8);
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Interpreter {
     pub path: PathBuf,
     pub realpath: PathBuf,
     pub prefix: PathBuf,
     pub base_prefix: Option<PathBuf>,
     pub version: PythonVersion,
+    pub pypy_version: Option<PyPyVersion>,
     pub marker_env: MarkerEnvironment,
     pub macos_framework_build: bool,
     pub supported_tags: Vec<String>,
     pub has_ensurepip: bool,
+    pub free_threaded: Option<bool>,
 }
 
 impl Interpreter {

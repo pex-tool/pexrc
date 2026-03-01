@@ -29,8 +29,17 @@ if TYPE_CHECKING:
         Sequence,
         TextIO,
         Tuple,
+        Type,
         Union,
+        cast,
     )
+else:
+
+    def cast(
+        _type,  # type: Union[str, Type]
+        value,  # type: Any
+    ):
+        return value
 
 
 def implementation_name_and_version():
@@ -57,6 +66,21 @@ def identify(supported_tags):
     except ImportError:
         has_ensurepip = False
 
+    pypy_version = cast(
+        "Optional[Tuple[int, int, int]]",
+        tuple(getattr(sys, "pypy_version_info", ())[:3]) or None,
+    )
+
+    sys_config_vars = sysconfig.get_config_vars()
+
+    macos_framework_build = bool(sys_config_vars.get("PYTHONFRAMEWORK"))
+
+    free_threaded = None  # type: Optional[bool]
+    if pypy_version is None:
+        free_threaded = (
+            sys.version_info[:2] >= (3, 13) and sys_config_vars.get("Py_GIL_DISABLED", 0) == 1
+        )
+
     return {
         "path": sys.executable,
         "realpath": os.path.realpath(sys.executable),
@@ -69,6 +93,7 @@ def identify(supported_tags):
             "releaselevel": sys.version_info.releaselevel,
             "serial": sys.version_info.serial,
         },
+        "pypy_version": pypy_version,
         # See: https://packaging.python.org/en/latest/specifications/dependency-specifiers/#environment-markers
         "marker_env": {
             "os_name": os.name,
@@ -83,9 +108,10 @@ def identify(supported_tags):
             "implementation_name": implementation_name,
             "implementation_version": implementation_version,
         },
-        "macos_framework_build": bool(sysconfig.get_config_vars().get("PYTHONFRAMEWORK")),
         "supported_tags": ["-".join(tag) for tag in supported_tags],
+        "macos_framework_build": macos_framework_build,
         "has_ensurepip": has_ensurepip,
+        "free_threaded": free_threaded,
     }
 
 

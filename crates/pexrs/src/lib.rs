@@ -8,7 +8,6 @@ use std::process::Command;
 
 use anyhow::anyhow;
 use cache::{CacheDir, atomic_dir};
-use interpreter::Interpreter;
 use itertools::Itertools;
 use log::debug;
 use logging_timer::time;
@@ -19,7 +18,7 @@ use venv::{Virtualenv, populate};
 pub fn boot(
     python: impl AsRef<Path>,
     python_args: Vec<String>,
-    pex: impl AsRef<Path> + Sync + Send,
+    pex: impl AsRef<Path>,
     argv: Vec<String>,
 ) -> anyhow::Result<i32> {
     let mut command = prepare_boot(python, python_args, pex, argv)?;
@@ -35,7 +34,7 @@ pub fn boot(
 fn prepare_boot(
     python: impl AsRef<Path>,
     python_args: Vec<String>,
-    pex: impl AsRef<Path> + Sync + Send,
+    pex: impl AsRef<Path>,
     argv: Vec<String>,
 ) -> anyhow::Result<Command> {
     let venv = prepare_venv(python, pex)?;
@@ -69,28 +68,27 @@ fn exec(command: &mut Command) -> anyhow::Result<i32> {
 }
 
 #[time("debug", "{}")]
-pub fn mount(
-    python: impl AsRef<Path>,
-    pex: impl AsRef<Path> + Sync + Send,
-) -> anyhow::Result<PathBuf> {
+pub fn mount(python: impl AsRef<Path>, pex: impl AsRef<Path>) -> anyhow::Result<PathBuf> {
     prepare_venv(python, pex).map(|venv| venv.site_packages_path())
 }
 
 #[time("debug", "{}")]
 fn prepare_venv<'a>(
     python: impl AsRef<Path>,
-    pex: impl AsRef<Path> + Sync + Send,
+    pex: impl AsRef<Path>,
 ) -> anyhow::Result<Virtualenv<'a>> {
     let pex = Pex::load(pex.as_ref())?;
-    // TODO: XXX: Account for:
-    // 1. PEX_PATH
-    // 2. PEX_PYTHON
-    // 3. PEX_PYTHON_PATH
-    let venv_dir = CacheDir::Venv.path()?.join(&pex.info().pex_hash);
+    let pex_info = pex.info();
+    let venv_dir = CacheDir::Venv.path()?.join(&pex_info.pex_hash);
     if let Some(venv_interpreter) = atomic_dir(&venv_dir, |work_dir| {
-        let interpreter = Interpreter::load(&python)?;
-        let venv = Virtualenv::create(&interpreter, Cow::Borrowed(work_dir), false)?;
-        populate(&venv, &pex)?;
+        // TODO: XXX: Account for PEX_PATH
+        let (interpreter, selected_wheels) = pex.resolve(Some(python.as_ref()))?;
+        let venv = Virtualenv::create(
+            &interpreter,
+            Cow::Borrowed(work_dir),
+            pex_info.venv_system_site_packages,
+        )?;
+        populate(&venv, &pex, &selected_wheels)?;
         Ok(venv.interpreter)
     })? {
         let venv_interpreter = Virtualenv::host_interpreter(&venv_dir, &venv_interpreter);

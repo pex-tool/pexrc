@@ -8,11 +8,17 @@ edition = "2024"
 [dependencies]
 anyhow = { workspace = true }
 cache = { path = "../cache" }
+indexmap = { workspace = true }
+itertools = { workspace = true }
+pep440_rs = { workspace = true }
 pep508_rs = { workspace = true }
 elf = { workspace = true }
+log = { workspace = true }
 logging_timer = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+url = { workspace = true }
+which = { workspace = true }
 
 [dev-dependencies]
 rstest = { workspace = true }

@@ -9,9 +9,10 @@ use std::path::Path;
 use std::str::FromStr;
 
 use anyhow::{anyhow, bail};
-use indexmap::IndexMap;
-use interpreter::Interpreter;
+use indexmap::{IndexMap, IndexSet};
+use interpreter::{Interpreter, InterpreterConstraints};
 use itertools::Itertools;
+use log::debug;
 use logging_timer::time;
 use pep440_rs::Version;
 use pep508_rs::{ExtraName, PackageName, Requirement, VersionOrUrl};
@@ -19,10 +20,10 @@ use url::Url;
 use zip::ZipArchive;
 
 use crate::PexInfo;
-use crate::wheel::{MetadataReader, Tag, Wheel, WheelFile};
+use crate::wheel::{MetadataReader, Tag, WheelFile, WheelMetadata};
 
 pub trait WheelResolver {
-    fn resolve(&self, interpreter: &Interpreter) -> anyhow::Result<Vec<&str>>;
+    fn resolve(&self, interpreter: &Interpreter) -> anyhow::Result<IndexSet<&str>>;
 }
 
 pub struct LoosePex<'a>(pub &'a Path, pub PexInfo);
@@ -48,7 +49,7 @@ impl<'a> MetadataReader for ZipAppPexMetadataReader<'a> {
 // TODO: XXX: This just uses PEX-INFO to resolve wheel file names, it is not ZipAppPex-specific.
 impl<'a> WheelResolver for ZipAppPex<'a> {
     #[time("debug", "WheelResolver.{}")]
-    fn resolve(&self, interpreter: &Interpreter) -> anyhow::Result<Vec<&str>> {
+    fn resolve(&self, interpreter: &Interpreter) -> anyhow::Result<IndexSet<&str>> {
         let python_version = Version::new([
             u64::from(interpreter.version.major),
             u64::from(interpreter.version.minor),
@@ -87,7 +88,7 @@ impl<'a> WheelResolver for ZipAppPex<'a> {
         let mut wheels = Vec::with_capacity(wheel_files.len());
         let mut zip = ZipArchive::new(File::open(self.0)?)?;
         for (file_name, wheel_file, rank) in wheel_files {
-            let wheel = Wheel::parse(
+            let wheel = WheelMetadata::parse(
                 wheel_file,
                 ZipAppPexMetadataReader {
                     zip: &mut zip,
@@ -181,7 +182,7 @@ impl<'a> WheelResolver for ZipAppPex<'a> {
                 break;
             }
         }
-        Ok(resolved_by_project_name.into_values().collect::<Vec<_>>())
+        Ok(resolved_by_project_name.into_values().collect())
     }
 }
 
@@ -225,16 +226,69 @@ impl<'a> Pex<'a> {
             Pex::ZipApp(pex) => &pex.1,
         }
     }
+
+    pub fn resolve(
+        &self,
+        python_exe: Option<&Path>,
+    ) -> anyhow::Result<(Interpreter, IndexSet<&str>)> {
+        let pex_info = self.info();
+        let interpreter_constraints =
+            InterpreterConstraints::try_from(&pex_info.interpreter_constraints)?;
+        let interpreters_to_try = python_exe
+            .map(Interpreter::load)
+            .into_iter()
+            .filter_map(|result| {
+                if let Some(interpreter) = result.ok()
+                    && interpreter_constraints.contains(&interpreter)
+                {
+                    Some(interpreter)
+                } else {
+                    None
+                }
+            })
+            .chain(
+                interpreter_constraints
+                    .iter_compatible_interpreters(pex_info.interpreter_selection_strategy.into()),
+            );
+        let mut errors: Vec<(Interpreter, anyhow::Error)> = Vec::new();
+        for interpreter in interpreters_to_try {
+            debug!(
+                "Trying to resolve from PEX using {path}...",
+                path = interpreter.path.display()
+            );
+            match self {
+                Pex::Loose(_) => todo!("XXX: Implement loose PEX wheel resolution."),
+                Pex::Packed(_) => todo!("XXX: Implement packed PEX wheel resolution."),
+                Pex::ZipApp(zip) => match zip.resolve(&interpreter) {
+                    Ok(selected_wheels) => return Ok((interpreter, selected_wheels)),
+                    Err(err) => {
+                        debug!(
+                            "{implementation} {major}.{minor}.{patch} at {path} failed to resolve all needed wheels: {err}",
+                            implementation =
+                                interpreter.marker_env.platform_python_implementation(),
+                            major = interpreter.version.major,
+                            minor = interpreter.version.minor,
+                            patch = interpreter.version.micro,
+                            path = interpreter.path.display()
+                        );
+                        errors.push((interpreter, err))
+                    }
+                },
+            }
+        }
+        bail!("222")
+    }
 }
 
 #[cfg(test)]
 mod tests {
-
+    use std::collections::HashSet;
     use std::path::{Path, PathBuf};
     use std::process::Command;
     use std::str::FromStr;
 
     use ::interpreter::Interpreter;
+    use indexmap::IndexSet;
     use pep508_rs::{Requirement, VersionOrUrl};
     use rstest::{fixture, rstest};
     use testing::{python_exe, tmp_dir};
@@ -271,7 +325,7 @@ mod tests {
                 WheelFile::parse_file_name(wheel_file_name)
                     .map(|wheel_file| (wheel_file.project_name, wheel_file.version))
             })
-            .collect::<Result<Vec<_>, _>>()
+            .collect::<Result<IndexSet<_>, _>>()
             .unwrap();
 
         let expected_requirements: Vec<Requirement<Url>> = vec![

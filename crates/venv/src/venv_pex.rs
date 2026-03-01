@@ -2,17 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::borrow::Cow;
-use std::collections::HashSet;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 use std::{fs, io};
 
 use anyhow::anyhow;
+use indexmap::IndexSet;
 use itertools::Itertools;
 use log::warn;
 use logging_timer::time;
-use pex::{BinPath, Pex, PexInfo, WheelResolver};
+use pex::{BinPath, Pex, PexInfo};
 use platform::{link_or_copy, mark_executable, path_as_bytes, path_as_str};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use zip::ZipArchive;
@@ -23,16 +23,16 @@ const VENV_PEX_PY: &[u8] = include_bytes!("venv_pex.py");
 const VENV_PEX_REPL_PY: &[u8] = include_bytes!("venv_pex_repl.py");
 
 #[time("debug", "venv_pex.{}")]
-pub fn populate(venv: &Virtualenv, pex: &Pex) -> anyhow::Result<()> {
+pub fn populate(
+    venv: &Virtualenv,
+    pex: &Pex,
+    selected_wheels: &IndexSet<&str>,
+) -> anyhow::Result<()> {
     let site_packages_path = venv.site_packages_path();
     let (path, pex_info) = match pex {
         Pex::Loose(_) => todo!("XXX: Implement loose PEX venv population."),
         Pex::Packed(_) => todo!("XXX: Implement packed PEX venv population."),
         Pex::ZipApp(zip_app_pex) => {
-            let selected_wheels = zip_app_pex
-                .resolve(&venv.interpreter)?
-                .into_iter()
-                .collect::<HashSet<_>>();
             let mut pex_zip = ZipArchive::new(File::open(zip_app_pex.0)?)?;
             let metadata = pex_zip.metadata();
             let extract_indexes = pex_zip

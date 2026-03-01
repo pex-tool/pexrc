@@ -9,6 +9,7 @@ publish = false
 [dependencies]
 anyhow = { workspace = true }
 cache = { path = "../cache" }
+indexmap = { workspace = true }
 interpreter = { path = "../interpreter" }
 itertools = { workspace = true }
 log = { workspace = true }
