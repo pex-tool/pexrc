@@ -5,14 +5,16 @@ use std::env;
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::LazyLock;
 
 use anyhow::bail;
 use indexmap::IndexSet;
 use indexmap::set::IntoIter;
 use itertools::Itertools;
-use log::debug;
+use log::{debug, warn};
 use pep440_rs::{Version, VersionSpecifiers};
 use pep508_rs::{ExtraName, MarkerTree, PackageName, Requirement, VersionOrUrl};
+use time::Month;
 use url::Url;
 use which::which_in_global;
 
@@ -222,15 +224,42 @@ impl<'a> VersionIter<'a> {
     }
 }
 
-// TODO: XXX: This should be date-based.
-const MAX_MINOR: u8 = 16;
+static MAX_MINOR: LazyLock<u8> = LazyLock::new(|| {
+    // N.B.: This computes the maximum CPython minor version assuming CPython sticks to ~semver and
+    // does not switch to calver.
+    // + Release Schedule: https://peps.python.org/pep-0602/
+    // + Rejected calver proposal: https://peps.python.org/pep-2026/
+    //
+    // Given PyPy history and the structure of the project, this max should always be greater than
+    // the PyPy max minor.
+    //
+    // The calibration point: 3.14.0 was released on 2025-10-07 and there are yearly releases.
+    let today = time::UtcDateTime::now().date();
+    let years_since_pi_release = today.year() - 2025;
+    let max_minor = 14 + years_since_pi_release;
+    let mut max_minor = u8::try_from(max_minor).unwrap_or_else(|err| {
+        warn!(
+            "Failed to guess the current production release of CPython using the baseline release \
+            of 3.14 ion 2025-10-07.\n\
+            At a yearly release cadence incrementing the minor version number, \
+            {max_minor} has overflowed a u8: {err}\n\
+            Continuing with assumed max CPython production release of 3.255"
+        );
+        u8::MAX
+    });
+    if today.month() < Month::October {
+        max_minor -= 1;
+    }
+    // Give a 1-year buffer to account for testing the next release.
+    max_minor + 1
+});
 
 impl<'a> Iterator for VersionIter<'a> {
     type Item = (u8, u8);
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if self.major == 3 && self.minor == MAX_MINOR {
+            if self.major == 3 && self.minor == *MAX_MINOR {
                 return None;
             }
             if (2, 7) == (self.major, self.minor) {
@@ -305,10 +334,7 @@ impl<'a> Iterator for InterpreterIter<'a> {
                             }
                         }
                         Err(err) => {
-                            debug!(
-                                "... Failed to load {path}: {err}",
-                                path = binary_path.display()
-                            )
+                            debug!("Failed to load {path}: {err}", path = binary_path.display())
                         }
                     }
                 } else {
