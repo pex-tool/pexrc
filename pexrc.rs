@@ -157,7 +157,7 @@ fn main() -> anyhow::Result<()> {
             );
             for (idx, (clib, path)) in CLIBS_DIR.files().zip(paths).enumerate() {
                 anstream::println!(
-                    "{idx:>3}. {path} {pad}{size} bytes",
+                    "{idx:>3}. {path} {pad}{size:<7} bytes",
                     idx = (idx + 1).yellow(),
                     path = path.blue(),
                     pad = " ".repeat(max_width - path.len()),
