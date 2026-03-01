@@ -282,7 +282,6 @@ impl<'a> Pex<'a> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
     use std::path::{Path, PathBuf};
     use std::process::Command;
     use std::str::FromStr;

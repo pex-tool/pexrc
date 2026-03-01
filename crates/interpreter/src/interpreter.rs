@@ -4,9 +4,11 @@
 use std::io::{BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Mutex;
 
 use anyhow::{anyhow, bail};
 use cache::{CacheDir, HashOptions, atomic_file, hash_file};
+use log::debug;
 use logging_timer::time;
 use pep508_rs::MarkerEnvironment;
 use serde::{Deserialize, Serialize};
@@ -50,15 +52,30 @@ impl Interpreter {
     }
 }
 
+#[cfg(target_os = "linux")]
+static LINUX_INFO: Mutex<Option<String>> = Mutex::new(None);
+
 impl Interpreter {
     fn identify(python_exe: impl AsRef<Path>) -> anyhow::Result<Vec<u8>> {
         let mut command = Command::new(python_exe.as_ref());
         command.arg("-sE").arg("-c").arg(INTERPRETER_PY);
         #[cfg(target_os = "linux")]
         {
-            use crate::linux::LinuxInfo;
-            let linux_info = LinuxInfo::parse(python_exe.as_ref())?;
-            let json = serde_json::to_string(&linux_info)?;
+            let mut linux_info = LINUX_INFO
+                .lock()
+                .map_err(|err| anyhow!("Failed to obtain lock on Linux platform info: {err}"))?;
+            let json = if let Some(json) = linux_info.as_ref() {
+                debug!("Using cached Linux info.");
+                json
+            } else {
+                let info = crate::linux::LinuxInfo::parse(python_exe.as_ref())?;
+                let json = serde_json::to_string(&info)?;
+                debug!(
+                    "Caching Linux info derived from {path}.",
+                    path = python_exe.as_ref().display()
+                );
+                linux_info.insert(json)
+            };
             command.arg("--linux-info").arg(json);
         }
         let result = command
