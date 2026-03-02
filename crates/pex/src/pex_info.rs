@@ -10,6 +10,8 @@ use anyhow::anyhow;
 use interpreter::SelectionStrategy;
 use serde::Deserialize;
 
+use crate::wheel::WheelFile;
+
 #[derive(Debug, Deserialize)]
 pub enum BinPath {
     #[serde(rename = "false")]
@@ -95,6 +97,14 @@ impl PexInfo {
                 "Failed to parse PEX-INFO from {source}: {err}",
                 source = source.map(|f| f()).unwrap_or(Cow::Borrowed("<string>"))
             )
+        })
+    }
+
+    pub(crate) fn parse_distributions(
+        &self,
+    ) -> impl Iterator<Item = anyhow::Result<(&str, WheelFile<'_>)>> {
+        self.distributions.keys().map(|file_name| {
+            WheelFile::parse_file_name(file_name).map(|wheel_file| (file_name.as_str(), wheel_file))
         })
     }
 }

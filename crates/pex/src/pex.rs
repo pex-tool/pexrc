@@ -65,12 +65,7 @@ impl<'a> WheelResolver for ZipAppPex<'a> {
 
         let wheel_files = self
             .1
-            .distributions
-            .keys()
-            .map(|file_name| {
-                WheelFile::parse_file_name(file_name)
-                    .map(|wheel_file| (file_name.as_str(), wheel_file))
-            })
+            .parse_distributions()
             .collect::<Result<Vec<(&str, WheelFile)>, _>>()?;
 
         let wheel_files = wheel_files
@@ -146,11 +141,41 @@ impl<'a> WheelResolver for ZipAppPex<'a> {
             let wheels = wheels_by_project_name
                 .remove(&requirement.name)
                 .ok_or_else(|| {
+                    let inapplicable_wheels = self
+                        .1
+                        .parse_distributions()
+                        .filter_map(|result| match result {
+                            Ok((file_name, wheel_file))
+                                if wheel_file.project_name == requirement.name =>
+                            {
+                                Some(file_name)
+                            }
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>();
+                    let count = inapplicable_wheels.len();
+                    let wheels = if count == 1 { "wheel" } else { "wheels" };
+                    let reason = if inapplicable_wheels.is_empty() {
+                        format_args!(
+                            "The PEX contains {count} embedded {wheels} for project: {project}",
+                            project = requirement.name
+                        )
+                    } else {
+                        format_args!(
+                            "The PEX contains {count} inapplicable {wheels} for project: \
+                            {project}\n\
+                            {inapplicable_wheels}",
+                            project = requirement.name,
+                            inapplicable_wheels = inapplicable_wheels.join("\n")
+                        )
+                    };
                     anyhow!(
                         "The PEX at {path} has requirement {requirement} that cannot be satisfied \
-                        for the interpreter at {python_exe}.",
+                        for the interpreter at {python_exe}.\n\
+                        {reason}",
                         path = self.0.display(),
-                        python_exe = interpreter.path.display()
+                        python_exe = interpreter.path.display(),
+                        reason = reason,
                     )
                 })?;
             for WheelInfo(file_name, version, requirements, _) in wheels {
@@ -219,6 +244,14 @@ impl<'a> Pex<'a> {
         }
     }
 
+    pub fn path(&self) -> &Path {
+        match self {
+            Pex::Loose(pex) => pex.0,
+            Pex::Packed(pex) => pex.0,
+            Pex::ZipApp(pex) => pex.0,
+        }
+    }
+
     pub fn info(&self) -> &PexInfo {
         match self {
             Pex::Loose(pex) => &pex.1,
@@ -276,7 +309,42 @@ impl<'a> Pex<'a> {
                 },
             }
         }
-        bail!("222")
+
+        let reqs = &self.info().requirements;
+        let requirement_count = reqs.len();
+        let requirements = if requirement_count == 1 {
+            "requirement"
+        } else {
+            "requirements"
+        };
+
+        let interpreter_count = errors.len();
+        let interpreters = if interpreter_count == 1 {
+            "interpreter"
+        } else {
+            "interpreters"
+        };
+
+        bail!(
+            "Failed to resolve dependencies of PEX {path}.\n\
+            \n\
+            There are {requirement_count} root {requirements}:\n\
+            {reqs}\n\
+            \n\
+            Tried resolving using {interpreter_count} {interpreters}:\n\
+            {errors}",
+            path = self.path().display(),
+            reqs = reqs.iter().map(|req| format!("+ {req}")).join("\n"),
+            errors = errors
+                .iter()
+                .enumerate()
+                .map(|(idx, (interpreter, err))| format!(
+                    "{idx:>2} {path}: {err}",
+                    idx = idx + 1,
+                    path = interpreter.path.display()
+                ))
+                .join("\n")
+        )
     }
 }
 
