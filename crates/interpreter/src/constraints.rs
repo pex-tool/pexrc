@@ -130,14 +130,21 @@ impl InterpreterConstraint {
 
         let requirement: Requirement<Url> = Requirement::from_str(constraint)?;
         if requirement.marker != MarkerTree::default() {
-            bail!("000")
+            bail!(
+                "Marker expressions are not supported in interpreter constraints; \
+                given: {constraint}"
+            );
         }
 
         let implementation =
             InterpreterImplementation::parse(&requirement.name, &requirement.extras, constraint)?;
         if let Some(version_or_url) = requirement.version_or_url {
             match version_or_url {
-                VersionOrUrl::Url(_url) => bail!("111"),
+                VersionOrUrl::Url(_url) => bail!(
+                    "Direct reference URLs are not supported for interpreter constraints, \
+                    version specifiers can be used to restrict interpreter versions instead; \
+                    given: {constraint}"
+                ),
                 VersionOrUrl::VersionSpecifier(version_specifiers) => Ok(Self {
                     implementation: Some(implementation),
                     version_specifiers: Some(version_specifiers),
@@ -194,13 +201,13 @@ impl Display for InterpreterConstraint {
 
 static SUPPORTED_VERSIONS: LazyLock<Vec<(u8, u8)>> = LazyLock::new(|| {
     let max_minor = {
-        // N.B.: This computes the maximum CPython minor version assuming CPython sticks to ~semver and
-        // does not switch to calver.
+        // N.B.: This computes the maximum CPython minor version assuming CPython sticks to ~semver
+        // and does not switch to calver.
         // + Release Schedule: https://peps.python.org/pep-0602/
         // + Rejected calver proposal: https://peps.python.org/pep-2026/
         //
-        // Given PyPy history and the structure of the project, this max should always be greater than
-        // the PyPy max minor.
+        // Given PyPy history and the structure of the project, this max should always be greater
+        // than the PyPy max minor.
         //
         // The calibration point: 3.14.0 was released on 2025-10-07 and there are yearly releases.
         let today = time::UtcDateTime::now().date();
