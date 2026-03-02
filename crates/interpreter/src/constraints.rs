@@ -79,10 +79,6 @@ impl InterpreterImplementation {
             } else if extras.len() == 1 && extras[0].as_ref() == "gil" {
                 return Ok(Self::CPythonGil);
             }
-        } else if name.as_ref() == "cpython+t" && extras.is_empty() {
-            return Ok(Self::CPythonFreeThreaded);
-        } else if name.as_ref() == "cpython-t" && extras.is_empty() {
-            return Ok(Self::CPythonGil);
         }
         bail!(
             "Invalid interpreter implementation in: {source}\n\
@@ -112,6 +108,23 @@ impl InterpreterConstraint {
                 implementation: None,
                 version_specifiers: Some(version_specifiers),
             });
+        }
+
+        for (prefix, implementation) in [
+            ("CPython+t", InterpreterImplementation::CPythonFreeThreaded),
+            ("CPython-t", InterpreterImplementation::CPythonGil),
+        ] {
+            if let Some(suffix) = constraint.strip_prefix(prefix) {
+                let version_specifiers = if suffix.is_empty() {
+                    None
+                } else {
+                    Some(VersionSpecifiers::from_str(suffix)?)
+                };
+                return Ok(Self {
+                    implementation: Some(implementation),
+                    version_specifiers,
+                });
+            }
         }
 
         let requirement: Requirement<Url> = Requirement::from_str(constraint)?;
@@ -491,16 +504,20 @@ mod tests {
     #[test]
     fn test_interpreter_constraints_complex() {
         let ics = InterpreterConstraints::try_from::<&str>(&[
+            "CPython+t==3.15.*",
             "CPython[free-threaded]==3.14.*",
             "CPython-t==3.13.*",
+            "CPython[gil]==3.12.*",
             "PyPy>=3.9,<3.12",
         ])
         .unwrap();
 
         assert_eq!(
             &[
+                "python3.15t",
                 "python3.14t",
                 "python3.13",
+                "python3.12",
                 "pypy3.11",
                 "pypy3.10",
                 "pypy3.9",
@@ -517,8 +534,10 @@ mod tests {
                 "pypy3.9",
                 "pypy3.10",
                 "pypy3.11",
+                "python3.12",
                 "python3.13",
                 "python3.14t",
+                "python3.15t",
                 "pypy3",
                 "python3",
                 "pypy",
