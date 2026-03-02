@@ -3,6 +3,7 @@
 
 use std::env;
 use std::ffi::OsString;
+use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::LazyLock;
@@ -20,7 +21,7 @@ use which::which_in_global;
 
 use crate::Interpreter;
 
-#[derive(Eq, PartialEq)]
+#[derive(Hash, Eq, PartialEq)]
 enum InterpreterImplementation {
     CPython,
     CPythonFreeThreaded,
@@ -154,6 +155,70 @@ impl InterpreterConstraint {
     }
 }
 
+impl Display for InterpreterConstraint {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if let Some(implementation) = self.implementation.as_ref() {
+            match implementation {
+                InterpreterImplementation::CPython => f.write_str("CPython")?,
+                InterpreterImplementation::CPythonFreeThreaded => {
+                    f.write_str("CPython[free-threaded]")?
+                }
+                InterpreterImplementation::CPythonGil => f.write_str("CPython[gil]")?,
+                InterpreterImplementation::PyPy => f.write_str("PyPy")?,
+            }
+        }
+        if let Some(version_specifiers) = self.version_specifiers.as_ref() {
+            f.write_fmt(format_args!("{}", version_specifiers))?;
+        }
+        Ok(())
+    }
+}
+
+static SUPPORTED_VERSIONS: LazyLock<Vec<(u8, u8)>> = LazyLock::new(|| {
+    let max_minor = {
+        // N.B.: This computes the maximum CPython minor version assuming CPython sticks to ~semver and
+        // does not switch to calver.
+        // + Release Schedule: https://peps.python.org/pep-0602/
+        // + Rejected calver proposal: https://peps.python.org/pep-2026/
+        //
+        // Given PyPy history and the structure of the project, this max should always be greater than
+        // the PyPy max minor.
+        //
+        // The calibration point: 3.14.0 was released on 2025-10-07 and there are yearly releases.
+        let today = time::UtcDateTime::now().date();
+        let years_since_pi_release = today.year() - 2025;
+        let max_minor = 14 + years_since_pi_release;
+        let mut max_minor = u8::try_from(max_minor).unwrap_or_else(|err| {
+            warn!(
+            "Failed to guess the current production release of CPython using the baseline release \
+            of 3.14 ion 2025-10-07.\n\
+            At a yearly release cadence incrementing the minor version number, \
+            {max_minor} has overflowed a u8: {err}\n\
+            Continuing with assumed max CPython production release of 3.255"
+        );
+            u8::MAX
+        });
+        if today.month() < Month::October {
+            max_minor -= 1;
+        }
+        // Give a 1-year buffer to account for testing the next release.
+        max_minor + 1
+    };
+    [(2, 7)]
+        .into_iter()
+        .chain((5..=max_minor).map(|minor| (3, minor)))
+        .collect()
+});
+
+static SUPPORTED_VERSIONS_NEWEST_FIRST: LazyLock<Vec<(u8, u8)>> = LazyLock::new(|| {
+    SUPPORTED_VERSIONS
+        .iter()
+        .map(|(major, minor)| (*major, *minor))
+        .sorted_by_key(|(major, minor)| (-i16::from(*major), -i16::from(*minor)))
+        .collect::<Vec<_>>()
+});
+
+#[derive(Eq, PartialEq)]
 pub enum SelectionStrategy {
     Oldest,
     Newest,
@@ -179,104 +244,26 @@ impl InterpreterConstraints {
                 .any(|constraint| constraint.contains(interpreter))
     }
 
-    fn iter_compatible_versions(&self) -> impl Iterator<Item = (u8, u8)> {
-        VersionIter::new(&self.0)
-    }
-
     pub fn iter_compatible_interpreters(
         &self,
         selection_strategy: SelectionStrategy,
     ) -> impl Iterator<Item = Interpreter> {
         // TODO: XXX: Account for PEX_PYTHON
-        let mut versions: Vec<(u8, u8)> = self.iter_compatible_versions().collect();
-        debug!(
-            "Collected versions:\n{versions}",
-            versions = versions
-                .iter()
-                .map(|(major, minor)| format!("{major}.{minor}"))
-                .join("\n")
-        );
-        versions.sort_by_key(|(major, minor)| match selection_strategy {
-            SelectionStrategy::Oldest => (i16::from(*major), i16::from(*minor)),
-            SelectionStrategy::Newest => (-i16::from(*major), -i16::from(*minor)),
-        });
-        InterpreterIter::new(
-            self.0.as_slice(),
-            env::var_os("PEX_PYTHON_PATH").or_else(|| env::var_os("PATH")),
-            versions.into_iter(),
-        )
+        let search_path = env::var_os("PEX_PYTHON_PATH").or_else(|| env::var_os("PATH"));
+        let versions = match selection_strategy {
+            SelectionStrategy::Oldest => &SUPPORTED_VERSIONS,
+            SelectionStrategy::Newest => &SUPPORTED_VERSIONS_NEWEST_FIRST,
+        };
+        InterpreterIter::new(self.0.as_slice(), search_path, versions.as_slice())
     }
 }
 
-struct VersionIter<'a> {
-    constraints: &'a [InterpreterConstraint],
+#[derive(Hash, Eq, PartialEq)]
+struct PythonBinarySpec {
+    name: &'static str,
     major: u8,
     minor: u8,
-}
-
-impl<'a> VersionIter<'a> {
-    fn new(constraints: &'a [InterpreterConstraint]) -> Self {
-        Self {
-            constraints,
-            major: 2,
-            minor: 6,
-        }
-    }
-}
-
-static MAX_MINOR: LazyLock<u8> = LazyLock::new(|| {
-    // N.B.: This computes the maximum CPython minor version assuming CPython sticks to ~semver and
-    // does not switch to calver.
-    // + Release Schedule: https://peps.python.org/pep-0602/
-    // + Rejected calver proposal: https://peps.python.org/pep-2026/
-    //
-    // Given PyPy history and the structure of the project, this max should always be greater than
-    // the PyPy max minor.
-    //
-    // The calibration point: 3.14.0 was released on 2025-10-07 and there are yearly releases.
-    let today = time::UtcDateTime::now().date();
-    let years_since_pi_release = today.year() - 2025;
-    let max_minor = 14 + years_since_pi_release;
-    let mut max_minor = u8::try_from(max_minor).unwrap_or_else(|err| {
-        warn!(
-            "Failed to guess the current production release of CPython using the baseline release \
-            of 3.14 ion 2025-10-07.\n\
-            At a yearly release cadence incrementing the minor version number, \
-            {max_minor} has overflowed a u8: {err}\n\
-            Continuing with assumed max CPython production release of 3.255"
-        );
-        u8::MAX
-    });
-    if today.month() < Month::October {
-        max_minor -= 1;
-    }
-    // Give a 1-year buffer to account for testing the next release.
-    max_minor + 1
-});
-
-impl<'a> Iterator for VersionIter<'a> {
-    type Item = (u8, u8);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            if self.major == 3 && self.minor == *MAX_MINOR {
-                return None;
-            }
-            if (2, 7) == (self.major, self.minor) {
-                self.major = 3;
-                self.minor = 5;
-            } else {
-                self.minor += 1;
-            }
-            if self
-                .constraints
-                .iter()
-                .any(|constraint| constraint.contains_version(self.major, self.minor))
-            {
-                return Some((self.major, self.minor));
-            }
-        }
-    }
+    suffix: Option<&'static str>,
 }
 
 struct InterpreterIter<'a> {
@@ -290,20 +277,92 @@ impl<'a> InterpreterIter<'a> {
     fn new(
         constraints: &'a [InterpreterConstraint],
         search_path: Option<OsString>,
-        versions: impl Iterator<Item = (u8, u8)>,
+        versions: &'a [(u8, u8)],
     ) -> Self {
-        let mut binary_names: IndexSet<String> = IndexSet::new();
+        let mut binary_specs: IndexSet<PythonBinarySpec> = IndexSet::new();
         for (major, minor) in versions {
-            binary_names.insert(format!("python{major}.{minor}"));
-            binary_names.insert(format!("pypy{major}.{minor}"));
-            binary_names.insert(format!("python{major}"));
-            binary_names.insert(format!("pypy{major}"));
-            if !binary_names.contains("python") {
-                binary_names.insert("python".to_string());
+            for constraint in constraints {
+                if constraint.contains_version(*major, *minor) {
+                    match constraint.implementation.as_ref() {
+                        None => {
+                            binary_specs.insert(PythonBinarySpec {
+                                name: "python",
+                                major: *major,
+                                minor: *minor,
+                                suffix: None,
+                            });
+                            if (*major, *minor) >= (3, 13) {
+                                binary_specs.insert(PythonBinarySpec {
+                                    name: "python",
+                                    major: *major,
+                                    minor: *minor,
+                                    suffix: Some("t"),
+                                });
+                            }
+                            binary_specs.insert(PythonBinarySpec {
+                                name: "pypy",
+                                major: *major,
+                                minor: *minor,
+                                suffix: None,
+                            });
+                        }
+                        Some(implementation) => match implementation {
+                            InterpreterImplementation::CPython
+                            | InterpreterImplementation::CPythonGil => {
+                                binary_specs.insert(PythonBinarySpec {
+                                    name: "python",
+                                    major: *major,
+                                    minor: *minor,
+                                    suffix: None,
+                                });
+                            }
+                            InterpreterImplementation::CPythonFreeThreaded => {
+                                if (*major, *minor) >= (3, 13) {
+                                    binary_specs.insert(PythonBinarySpec {
+                                        name: "python",
+                                        major: *major,
+                                        minor: *minor,
+                                        suffix: Some("t"),
+                                    });
+                                } else {
+                                    debug!(
+                                        "Ignoring {constraint} for CPython {major}.{minor} since \
+                                        free-threaded CPython only exists for >=3.13."
+                                    );
+                                }
+                            }
+                            InterpreterImplementation::PyPy => {
+                                binary_specs.insert(PythonBinarySpec {
+                                    name: "pypy",
+                                    major: *major,
+                                    minor: *minor,
+                                    suffix: None,
+                                });
+                            }
+                        },
+                    }
+                }
             }
-            if !binary_names.contains("pypy") {
-                binary_names.insert("pypy".to_string());
-            }
+        }
+        let mut binary_names: IndexSet<String> = IndexSet::new();
+        for binary_spec in &binary_specs {
+            binary_names.insert(format!(
+                "{name}{major}.{minor}{suffix}",
+                name = binary_spec.name,
+                major = binary_spec.major,
+                minor = binary_spec.minor,
+                suffix = binary_spec.suffix.unwrap_or("")
+            ));
+        }
+        for binary_spec in &binary_specs {
+            binary_names.insert(format!(
+                "{name}{major}",
+                name = binary_spec.name,
+                major = binary_spec.major
+            ));
+        }
+        for binary_spec in &binary_specs {
+            binary_names.insert(binary_spec.name.to_string());
         }
         let binary_names_iter = binary_names.into_iter();
         Self {
