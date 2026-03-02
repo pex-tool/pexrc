@@ -20,7 +20,7 @@ use which::which_in_global;
 
 use crate::Interpreter;
 
-#[derive(Hash, Eq, PartialEq)]
+#[derive(Debug, Hash, Eq, PartialEq)]
 enum InterpreterImplementation {
     CPython,
     CPythonFreeThreaded,
@@ -91,6 +91,7 @@ impl InterpreterImplementation {
     }
 }
 
+#[derive(Debug, Eq, PartialEq)]
 struct InterpreterConstraint {
     implementation: Option<InterpreterImplementation>,
     version_specifiers: Option<VersionSpecifiers>,
@@ -441,9 +442,79 @@ impl<'a, BinaryNamesIter: Iterator<Item = String>> Iterator
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Index;
+    use std::str::FromStr;
 
+    use pep440_rs::VersionSpecifiers;
+
+    use crate::constraints::{InterpreterConstraint, InterpreterImplementation};
     use crate::{InterpreterConstraints, SelectionStrategy};
+
+    #[test]
+    fn test_parse_interpreter_constraint() {
+        assert_eq!(
+            InterpreterConstraint {
+                implementation: None,
+                version_specifiers: Some(VersionSpecifiers::from_str(">=3.14").unwrap())
+            },
+            InterpreterConstraint::parse(">=3.14").unwrap()
+        );
+        assert_eq!(
+            InterpreterConstraint {
+                implementation: Some(InterpreterImplementation::CPython),
+                version_specifiers: None
+            },
+            InterpreterConstraint::parse("CPython").unwrap()
+        );
+        assert_eq!(
+            InterpreterConstraint {
+                implementation: Some(InterpreterImplementation::CPythonFreeThreaded),
+                version_specifiers: None
+            },
+            InterpreterConstraint::parse("CPython+t").unwrap()
+        );
+        assert_eq!(
+            InterpreterConstraint {
+                implementation: Some(InterpreterImplementation::CPythonFreeThreaded),
+                version_specifiers: Some(VersionSpecifiers::from_str("==3.15.*").unwrap())
+            },
+            InterpreterConstraint::parse("CPython+t==3.15.*").unwrap()
+        );
+        assert_eq!(
+            InterpreterConstraint {
+                implementation: Some(InterpreterImplementation::CPythonGil),
+                version_specifiers: None
+            },
+            InterpreterConstraint::parse("CPython-t").unwrap()
+        );
+        assert_eq!(
+            InterpreterConstraint {
+                implementation: Some(InterpreterImplementation::CPythonGil),
+                version_specifiers: Some(VersionSpecifiers::from_str("==3.13.*").unwrap())
+            },
+            InterpreterConstraint::parse("CPython-t==3.13.*").unwrap()
+        );
+        assert_eq!(
+            InterpreterConstraint {
+                implementation: Some(InterpreterImplementation::CPythonFreeThreaded),
+                version_specifiers: None
+            },
+            InterpreterConstraint::parse("CPython[free-threaded]").unwrap()
+        );
+        assert_eq!(
+            InterpreterConstraint {
+                implementation: Some(InterpreterImplementation::CPythonGil),
+                version_specifiers: None
+            },
+            InterpreterConstraint::parse("CPython[gil]").unwrap()
+        );
+        assert_eq!(
+            InterpreterConstraint {
+                implementation: Some(InterpreterImplementation::PyPy),
+                version_specifiers: None
+            },
+            InterpreterConstraint::parse("PyPy").unwrap()
+        );
+    }
 
     #[test]
     fn test_interpreter_constraints_binary_names_all_default_order() {
