@@ -10,7 +10,6 @@ use std::sync::LazyLock;
 
 use anyhow::bail;
 use indexmap::IndexSet;
-use indexmap::set::IntoIter;
 use itertools::Itertools;
 use log::{debug, warn};
 use pep440_rs::{Version, VersionSpecifiers};
@@ -70,9 +69,9 @@ impl InterpreterImplementation {
 
 impl InterpreterImplementation {
     fn parse(name: &PackageName, extras: &[ExtraName], source: &str) -> anyhow::Result<Self> {
-        if name.as_ref() == "PyPy" && extras.is_empty() {
+        if name.as_ref() == "pypy" && extras.is_empty() {
             return Ok(Self::PyPy);
-        } else if name.as_ref() == "CPython" {
+        } else if name.as_ref() == "cpython" {
             if extras.is_empty() {
                 return Ok(Self::CPython);
             } else if extras.len() == 1 && extras[0].as_ref() == "free-threaded" {
@@ -80,9 +79,9 @@ impl InterpreterImplementation {
             } else if extras.len() == 1 && extras[0].as_ref() == "gil" {
                 return Ok(Self::CPythonGil);
             }
-        } else if name.as_ref() == "CPython+t" && extras.is_empty() {
+        } else if name.as_ref() == "cpython+t" && extras.is_empty() {
             return Ok(Self::CPythonFreeThreaded);
-        } else if name.as_ref() == "CPython-t" && extras.is_empty() {
+        } else if name.as_ref() == "cpython-t" && extras.is_empty() {
             return Ok(Self::CPythonGil);
         }
         bail!(
@@ -102,6 +101,11 @@ struct InterpreterConstraint {
 }
 
 impl InterpreterConstraint {
+    const ANY: Self = Self {
+        implementation: None,
+        version_specifiers: None,
+    };
+
     fn parse(constraint: &str) -> anyhow::Result<Self> {
         if let Ok(version_specifiers) = VersionSpecifiers::from_str(constraint) {
             return Ok(Self {
@@ -244,43 +248,21 @@ impl InterpreterConstraints {
                 .any(|constraint| constraint.contains(interpreter))
     }
 
-    pub fn iter_compatible_interpreters(
+    fn calculate_compatible_binary_specs(
         &self,
         selection_strategy: SelectionStrategy,
-    ) -> impl Iterator<Item = Interpreter> {
-        // TODO: XXX: Account for PEX_PYTHON
-        let search_path = env::var_os("PEX_PYTHON_PATH").or_else(|| env::var_os("PATH"));
+    ) -> IndexSet<PythonBinarySpec> {
         let versions = match selection_strategy {
             SelectionStrategy::Oldest => &SUPPORTED_VERSIONS,
             SelectionStrategy::Newest => &SUPPORTED_VERSIONS_NEWEST_FIRST,
         };
-        InterpreterIter::new(self.0.as_slice(), search_path, versions.as_slice())
-    }
-}
-
-#[derive(Hash, Eq, PartialEq)]
-struct PythonBinarySpec {
-    name: &'static str,
-    major: u8,
-    minor: u8,
-    suffix: Option<&'static str>,
-}
-
-struct InterpreterIter<'a> {
-    constraints: &'a [InterpreterConstraint],
-    search_path: Option<OsString>,
-    binary_names: IntoIter<String>,
-    binary_paths: Option<Box<dyn Iterator<Item = PathBuf>>>,
-}
-
-impl<'a> InterpreterIter<'a> {
-    fn new(
-        constraints: &'a [InterpreterConstraint],
-        search_path: Option<OsString>,
-        versions: &'a [(u8, u8)],
-    ) -> Self {
+        let constraints = if self.0.is_empty() {
+            &[InterpreterConstraint::ANY]
+        } else {
+            self.0.as_slice()
+        };
         let mut binary_specs: IndexSet<PythonBinarySpec> = IndexSet::new();
-        for (major, minor) in versions {
+        for (major, minor) in versions.iter() {
             for constraint in constraints {
                 if constraint.contains_version(*major, *minor) {
                     match constraint.implementation.as_ref() {
@@ -344,6 +326,14 @@ impl<'a> InterpreterIter<'a> {
                 }
             }
         }
+        binary_specs
+    }
+
+    fn calculate_compatible_binary_names(
+        &self,
+        selection_strategy: SelectionStrategy,
+    ) -> IndexSet<String> {
+        let binary_specs = self.calculate_compatible_binary_specs(selection_strategy);
         let mut binary_names: IndexSet<String> = IndexSet::new();
         for binary_spec in &binary_specs {
             binary_names.insert(format!(
@@ -364,17 +354,43 @@ impl<'a> InterpreterIter<'a> {
         for binary_spec in &binary_specs {
             binary_names.insert(binary_spec.name.to_string());
         }
-        let binary_names_iter = binary_names.into_iter();
-        Self {
-            constraints,
+        binary_names
+    }
+
+    pub fn iter_compatible_interpreters(
+        &self,
+        selection_strategy: SelectionStrategy,
+    ) -> impl Iterator<Item = Interpreter> {
+        // TODO: XXX: Account for PEX_PYTHON
+        let search_path = env::var_os("PEX_PYTHON_PATH").or_else(|| env::var_os("PATH"));
+        let binary_names = self.calculate_compatible_binary_names(selection_strategy);
+        InterpreterIter {
+            constraints: self.0.as_slice(),
             search_path,
-            binary_names: binary_names_iter,
+            binary_names: binary_names.into_iter(),
             binary_paths: None,
         }
     }
 }
 
-impl<'a> Iterator for InterpreterIter<'a> {
+#[derive(Hash, Eq, PartialEq)]
+struct PythonBinarySpec {
+    name: &'static str,
+    major: u8,
+    minor: u8,
+    suffix: Option<&'static str>,
+}
+
+struct InterpreterIter<'a, BinaryNamesIter> {
+    constraints: &'a [InterpreterConstraint],
+    search_path: Option<OsString>,
+    binary_names: BinaryNamesIter,
+    binary_paths: Option<Box<dyn Iterator<Item = PathBuf>>>,
+}
+
+impl<'a, BinaryNamesIter: Iterator<Item = String>> Iterator
+    for InterpreterIter<'a, BinaryNamesIter>
+{
     type Item = Interpreter;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -407,5 +423,109 @@ impl<'a> Iterator for InterpreterIter<'a> {
                 return None;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ops::Index;
+
+    use crate::{InterpreterConstraints, SelectionStrategy};
+
+    #[test]
+    fn test_interpreter_constraints_binary_names_all_default_order() {
+        let ics = InterpreterConstraints::try_from::<&str>(&[]).unwrap();
+        let binary_names = ics.calculate_compatible_binary_names(SelectionStrategy::Oldest);
+
+        assert_eq!(&["python2.7", "pypy2.7"], &binary_names[0..2]);
+
+        assert!(binary_names.get_index_of("pypy2.7") < binary_names.get_index_of("python3.14"));
+        assert!(binary_names.get_index_of("python3.14") < binary_names.get_index_of("pypy3.14"));
+        assert!(binary_names.get_index_of("pypy3.14") < binary_names.get_index_of("python3.15"));
+        assert!(binary_names.get_index_of("python3.15") < binary_names.get_index_of("pypy3.15"));
+        assert_eq!(
+            &["python2", "pypy2", "python3", "pypy3", "python", "pypy"],
+            &binary_names[binary_names.len() - 6..]
+        );
+
+        assert!(!binary_names.contains("python2.6"));
+        assert!(!binary_names.contains("python2.8"));
+        assert!(!binary_names.contains("python3.0"));
+        assert!(!binary_names.contains("python3.1"));
+        assert!(!binary_names.contains("python3.2"));
+        assert!(!binary_names.contains("python3.3"));
+        assert!(!binary_names.contains("python3.4"));
+        assert!(binary_names.contains("python3.5"));
+        assert!(binary_names.contains("python3.6"));
+
+        assert!(!binary_names.contains("python3.12t"));
+        assert!(binary_names.contains("python3.13t"));
+        assert!(binary_names.contains("python3.14t"));
+        assert!(binary_names.contains("python3.15t"));
+    }
+
+    #[test]
+    fn test_interpreter_constraints_binary_names_all_newest_first() {
+        let ics = InterpreterConstraints::try_from::<&str>(&[]).unwrap();
+        let binary_names = ics.calculate_compatible_binary_names(SelectionStrategy::Newest);
+
+        assert!(binary_names.get_index_of("python3.15") < binary_names.get_index_of("pypy3.15"));
+        assert!(binary_names.get_index_of("pypy3.15") < binary_names.get_index_of("python3.14"));
+        assert!(binary_names.get_index_of("python3.14") < binary_names.get_index_of("pypy3.14"));
+        assert!(binary_names.get_index_of("pypy3.14") < binary_names.get_index_of("python2.7"));
+        assert_eq!(
+            &[
+                "python2.7",
+                "pypy2.7",
+                "python3",
+                "pypy3",
+                "python2",
+                "pypy2",
+                "python",
+                "pypy"
+            ],
+            &binary_names[binary_names.len() - 8..]
+        );
+    }
+
+    #[test]
+    fn test_interpreter_constraints_complex() {
+        let ics = InterpreterConstraints::try_from::<&str>(&[
+            "CPython[free-threaded]==3.14.*",
+            "CPython-t==3.13.*",
+            "PyPy>=3.9,<3.12",
+        ])
+        .unwrap();
+
+        assert_eq!(
+            &[
+                "python3.14t",
+                "python3.13",
+                "pypy3.11",
+                "pypy3.10",
+                "pypy3.9",
+                "python3",
+                "pypy3",
+                "python",
+                "pypy",
+            ],
+            ics.calculate_compatible_binary_names(SelectionStrategy::Newest)
+                .as_slice()
+        );
+        assert_eq!(
+            &[
+                "pypy3.9",
+                "pypy3.10",
+                "pypy3.11",
+                "python3.13",
+                "python3.14t",
+                "pypy3",
+                "python3",
+                "pypy",
+                "python",
+            ],
+            ics.calculate_compatible_binary_names(SelectionStrategy::Oldest)
+                .as_slice()
+        );
     }
 }
