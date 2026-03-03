@@ -280,18 +280,20 @@ impl<'a> Pex<'a> {
         let pex_info = self.info();
         let interpreter_constraints =
             InterpreterConstraints::try_from(&pex_info.interpreter_constraints)?;
-        let interpreters_to_try = python_exe
-            .map(Cow::Borrowed)
-            .into_iter()
-            .chain(
-                interpreter_constraints
-                    .iter_possibly_compatible_python_exes(
-                        pex_info.interpreter_selection_strategy.into(),
-                    )
-                    .map(Cow::Owned),
-            )
-            .collect::<Vec<_>>();
+        let mut errors = Vec::new();
+        if let Some(python_exe) = python_exe
+            && let Ok(interpreter) = Interpreter::load(python_exe)
+            && interpreter_constraints.contains(&interpreter)
+        {
+            match zip_app_pex.resolve(&interpreter) {
+                Ok(selected_wheels) => return Ok((interpreter, selected_wheels)),
+                Err(err) => errors.push((interpreter, err)),
+            }
+        }
 
+        let interpreters_to_try = interpreter_constraints
+            .iter_possibly_compatible_python_exes(pex_info.interpreter_selection_strategy.into())
+            .collect::<Vec<_>>();
         let resolve_results_iter = interpreters_to_try
             .into_par_iter()
             .filter_map(|python_exe| Interpreter::load(python_exe).ok())
@@ -301,8 +303,7 @@ impl<'a> Pex<'a> {
                 Err(err) => Err((interpreter, err)),
             });
 
-        let errors: Arc<Mutex<Vec<(Interpreter, anyhow::Error)>>> =
-            Arc::new(Mutex::new(Vec::new()));
+        let errors: Arc<Mutex<Vec<(Interpreter, anyhow::Error)>>> = Arc::new(Mutex::new(errors));
         if let Some((interpreter, selected_wheels)) =
             resolve_results_iter.find_map_first(|result| match result {
                 Ok((interpreter, selected_wheels)) => Some((interpreter, selected_wheels)),
@@ -331,7 +332,13 @@ impl<'a> Pex<'a> {
             "requirements"
         };
 
-        let errors = errors.lock().map_err(|err| anyhow!("{err}"))?;
+        let errors = errors.lock().map_err(|err| {
+            anyhow!(
+                "Failed to resolve requirements for PEX {path} and resolve errors were obfuscated \
+                by a poisoned lock: {err}",
+                path = zip_app_pex.0.display()
+            )
+        })?;
         let error_count = errors.len();
         let interpreters = if error_count == 1 {
             "interpreter"
