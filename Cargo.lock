@@ -1465,6 +1465,7 @@ dependencies = [
  "pep440_rs",
  "pep508_rs",
  "python-pkginfo",
+ "rayon",
  "rstest",
  "serde",
  "serde_json",

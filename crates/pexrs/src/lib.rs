@@ -88,13 +88,15 @@ fn prepare_venv<'a>(
             Cow::Borrowed(work_dir),
             pex_info.venv_system_site_packages,
         )?;
-        populate(&venv, &pex, &selected_wheels)?;
+        populate(&venv, &venv_dir, &pex, &selected_wheels)?;
         Ok(venv.interpreter)
     })? {
+        debug!("Built venv at {path}", path = venv_dir.display());
         let venv_interpreter = Virtualenv::host_interpreter(&venv_dir, &venv_interpreter);
         venv_interpreter.store()?;
         Virtualenv::enclosing(venv_interpreter)
     } else {
+        debug!("Loading cached venv at {path}", path = venv_dir.display());
         Virtualenv::load(Cow::Owned(venv_dir))
     }
 }

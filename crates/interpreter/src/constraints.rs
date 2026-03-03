@@ -1,6 +1,7 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::collections::HashSet;
 use std::env;
 use std::ffi::OsString;
 use std::fmt::{Display, Formatter};
@@ -249,6 +250,14 @@ pub enum SelectionStrategy {
     Newest,
 }
 
+#[derive(Hash, Eq, PartialEq)]
+struct PythonBinarySpec {
+    name: &'static str,
+    major: u8,
+    minor: u8,
+    suffix: Option<&'static str>,
+}
+
 pub struct InterpreterConstraints(Vec<InterpreterConstraint>);
 
 impl InterpreterConstraints {
@@ -378,60 +387,45 @@ impl InterpreterConstraints {
         binary_names
     }
 
-    pub fn iter_compatible_interpreters(
+    pub fn iter_possibly_compatible_python_exes(
         &self,
         selection_strategy: SelectionStrategy,
-    ) -> impl Iterator<Item = Interpreter> {
+    ) -> impl Iterator<Item = PathBuf> {
         // TODO: XXX: Account for PEX_PYTHON
         let search_path = env::var_os("PEX_PYTHON_PATH").or_else(|| env::var_os("PATH"));
         let binary_names = self.calculate_compatible_binary_names(selection_strategy);
-        InterpreterIter {
-            constraints: self.0.as_slice(),
+        PythonExeIter {
             search_path,
             binary_names: binary_names.into_iter(),
             binary_paths: None,
+            seen: HashSet::new(),
         }
     }
 }
 
-#[derive(Hash, Eq, PartialEq)]
-struct PythonBinarySpec {
-    name: &'static str,
-    major: u8,
-    minor: u8,
-    suffix: Option<&'static str>,
-}
-
-struct InterpreterIter<'a, BinaryNamesIter> {
-    constraints: &'a [InterpreterConstraint],
+struct PythonExeIter<BinaryNames> {
     search_path: Option<OsString>,
-    binary_names: BinaryNamesIter,
+    binary_names: BinaryNames,
     binary_paths: Option<Box<dyn Iterator<Item = PathBuf>>>,
+    seen: HashSet<PathBuf>,
 }
 
-impl<'a, BinaryNamesIter: Iterator<Item = String>> Iterator
-    for InterpreterIter<'a, BinaryNamesIter>
-{
-    type Item = Interpreter;
+impl<BinaryNames: Iterator<Item = String>> Iterator for PythonExeIter<BinaryNames> {
+    type Item = PathBuf;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             if let Some(binary_paths) = self.binary_paths.as_mut() {
                 if let Some(binary_path) = binary_paths.next() {
-                    match Interpreter::load(&binary_path) {
-                        Ok(interpreter) => {
-                            if self.constraints.is_empty()
-                                || self
-                                    .constraints
-                                    .iter()
-                                    .any(|constraint| constraint.contains(&interpreter))
-                            {
-                                return Some(interpreter);
-                            }
+                    if let Ok(real_binary_path) = binary_path.canonicalize() {
+                        if self.seen.contains(real_binary_path.as_path()) {
+                            continue;
                         }
-                        Err(err) => {
-                            debug!("Failed to load {path}: {err}", path = binary_path.display())
-                        }
+                        self.seen.insert(real_binary_path.clone());
+                        return Some(real_binary_path);
+                    } else {
+                        // E.G: A broken symbolic link.
+                        continue;
                     }
                 } else {
                     self.binary_paths = None;

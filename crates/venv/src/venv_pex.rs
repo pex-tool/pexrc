@@ -25,6 +25,7 @@ const VENV_PEX_REPL_PY: &[u8] = include_bytes!("venv_pex_repl.py");
 #[time("debug", "venv_pex.{}")]
 pub fn populate(
     venv: &Virtualenv,
+    resting_venv_dir: &Path,
     pex: &Pex,
     selected_wheels: &IndexSet<&str>,
 ) -> anyhow::Result<()> {
@@ -73,8 +74,8 @@ pub fn populate(
         }
     };
 
-    write_main(&venv, pex_info)?;
-    write_repl(venv, path, pex_info)
+    write_main(venv, resting_venv_dir, pex_info)?;
+    write_repl(venv, resting_venv_dir, path, pex_info)
 }
 
 fn extract_idx(
@@ -112,8 +113,20 @@ fn extract_idx(
     Ok(())
 }
 
-fn write_shebang_bytes(file: &mut File, venv: &Virtualenv) -> anyhow::Result<()> {
-    for chunk in [b"#!", path_as_bytes(&venv.interpreter.path)?, b"\n"] {
+fn write_shebang_bytes(
+    file: &mut File,
+    venv: &Virtualenv,
+    resting_venv_dir: &Path,
+) -> anyhow::Result<()> {
+    let interpreter_relpath = venv
+        .interpreter
+        .path
+        .strip_prefix(&venv.interpreter.prefix)?;
+    for chunk in [
+        b"#!",
+        path_as_bytes(&resting_venv_dir.join(interpreter_relpath))?,
+        b"\n",
+    ] {
         file.write_all(chunk)?;
     }
     Ok(())
@@ -131,10 +144,14 @@ fn as_optional_python_str(value: Option<&str>) -> Cow<'_, str> {
     }
 }
 
-fn write_main(venv: &&Virtualenv, pex_info: &PexInfo) -> anyhow::Result<()> {
+fn write_main(
+    venv: &Virtualenv,
+    resting_venv_dir: &Path,
+    pex_info: &PexInfo,
+) -> anyhow::Result<()> {
     let mut main_py_fp = File::create_new(venv.prefix().join("__main__.py"))?;
 
-    write_shebang_bytes(&mut main_py_fp, venv)?;
+    write_shebang_bytes(&mut main_py_fp, venv, resting_venv_dir)?;
     main_py_fp.write_all(VENV_PEX_PY)?;
     write!(
         main_py_fp,
@@ -186,9 +203,14 @@ if __name__ == "__main__":
     link_or_copy(Path::new("__main__.py"), venv.prefix().join("pex"))
 }
 
-fn write_repl(venv: &Virtualenv, pex: &Path, pex_info: &PexInfo) -> anyhow::Result<()> {
+fn write_repl(
+    venv: &Virtualenv,
+    resting_venv_dir: &Path,
+    pex: &Path,
+    pex_info: &PexInfo,
+) -> anyhow::Result<()> {
     let mut pex_repl_py_fp = File::create_new(venv.prefix().join("pex-repl"))?;
-    write_shebang_bytes(&mut pex_repl_py_fp, venv)?;
+    write_shebang_bytes(&mut pex_repl_py_fp, venv, resting_venv_dir)?;
     pex_repl_py_fp.write_all(VENV_PEX_REPL_PY)?;
     // TODO: XXX: Need to append a if __name__ == "__main__" that calls _create_pex_repl(...)
     // const activation_summary, const activation_details = res: {

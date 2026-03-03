@@ -8,6 +8,7 @@ use std::io::Read;
 
 use anyhow::anyhow;
 use interpreter::SelectionStrategy;
+use logging_timer::time;
 use serde::Deserialize;
 
 use crate::wheel::WheelFile;
@@ -87,6 +88,7 @@ pub struct PexInfo {
 }
 
 impl PexInfo {
+    #[time("debug", "PexInfo.{}")]
     pub fn parse<'a>(
         data: impl Read,
         source: Option<impl FnOnce() -> Cow<'a, str>>,

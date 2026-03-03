@@ -4,18 +4,20 @@
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
 use std::fs::File;
-use std::io::Read;
+use std::io::{BufReader, Read};
 use std::path::Path;
 use std::str::FromStr;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, bail};
 use indexmap::{IndexMap, IndexSet};
 use interpreter::{Interpreter, InterpreterConstraints};
 use itertools::Itertools;
-use log::debug;
-use logging_timer::time;
+use log::{Level, debug};
+use logging_timer::{time, timer};
 use pep440_rs::Version;
 use pep508_rs::{ExtraName, PackageName, Requirement, VersionOrUrl};
+use rayon::prelude::*;
 use url::Url;
 use zip::ZipArchive;
 
@@ -218,10 +220,14 @@ pub enum Pex<'a> {
 }
 
 impl<'a> Pex<'a> {
+    #[time("debug", "Pex.{}")]
     pub fn load(path: &'a Path) -> anyhow::Result<Self> {
         if path.is_file() {
             let zip_fp = File::open(path)?;
-            let mut zip = ZipArchive::new(zip_fp)?;
+            let mut zip = {
+                let _timer = timer!(Level::Debug; "Open PEX zip", "{}", path.display());
+                ZipArchive::new(BufReader::new(zip_fp))?
+            };
             let pex_info =
                 PexInfo::parse(zip.by_name("PEX-INFO")?, Some(|| Cow::Borrowed("PEX-INFO")))?;
             Ok(Pex::ZipApp(ZipAppPex(path, pex_info)))
@@ -260,54 +266,60 @@ impl<'a> Pex<'a> {
         }
     }
 
+    #[time("debug", "Pex.{}")]
     pub fn resolve(
         &self,
         python_exe: Option<&Path>,
     ) -> anyhow::Result<(Interpreter, IndexSet<&str>)> {
+        let zip_app_pex = match self {
+            Pex::Loose(_) => todo!("XXX: Implement loose PEX wheel resolution."),
+            Pex::Packed(_) => todo!("XXX: Implement packed PEX wheel resolution."),
+            Pex::ZipApp(zip_app) => zip_app,
+        };
+
         let pex_info = self.info();
         let interpreter_constraints =
             InterpreterConstraints::try_from(&pex_info.interpreter_constraints)?;
         let interpreters_to_try = python_exe
-            .map(Interpreter::load)
+            .map(Cow::Borrowed)
             .into_iter()
-            .filter_map(|result| {
-                if let Some(interpreter) = result.ok()
-                    && interpreter_constraints.contains(&interpreter)
-                {
-                    Some(interpreter)
-                } else {
+            .chain(
+                interpreter_constraints
+                    .iter_possibly_compatible_python_exes(
+                        pex_info.interpreter_selection_strategy.into(),
+                    )
+                    .map(Cow::Owned),
+            )
+            .collect::<Vec<_>>();
+
+        let resolve_results_iter = interpreters_to_try
+            .into_par_iter()
+            .filter_map(|python_exe| Interpreter::load(python_exe).ok())
+            .map(|interpreter| match zip_app_pex.resolve(&interpreter) {
+                Ok(selected_wheels) => Ok((interpreter, selected_wheels)),
+                Err(err) => Err((interpreter, err)),
+            });
+
+        let errors: Arc<Mutex<Vec<(Interpreter, anyhow::Error)>>> =
+            Arc::new(Mutex::new(Vec::new()));
+        if let Some((interpreter, selected_wheels)) =
+            resolve_results_iter.find_map_first(|result| match result {
+                Ok((interpreter, selected_wheels)) => Some((interpreter, selected_wheels)),
+                Err((interpreter, resolve_err)) => {
+                    if let Err(lock_err) = errors.lock().map(|mut errors| {
+                        debug!(
+                            "Failed to resolve for {python_exe}: {resolve_err}",
+                            python_exe = interpreter.path.display()
+                        );
+                        errors.push((interpreter, resolve_err))
+                    }) {
+                        debug!("Failed to record resolve error due to lock poisoning: {lock_err}");
+                    }
                     None
                 }
             })
-            .chain(
-                interpreter_constraints
-                    .iter_compatible_interpreters(pex_info.interpreter_selection_strategy.into()),
-            );
-        let mut errors: Vec<(Interpreter, anyhow::Error)> = Vec::new();
-        for interpreter in interpreters_to_try {
-            debug!(
-                "Trying to resolve from PEX using {path}...",
-                path = interpreter.path.display()
-            );
-            match self {
-                Pex::Loose(_) => todo!("XXX: Implement loose PEX wheel resolution."),
-                Pex::Packed(_) => todo!("XXX: Implement packed PEX wheel resolution."),
-                Pex::ZipApp(zip) => match zip.resolve(&interpreter) {
-                    Ok(selected_wheels) => return Ok((interpreter, selected_wheels)),
-                    Err(err) => {
-                        debug!(
-                            "{implementation} {major}.{minor}.{patch} at {path} failed to resolve all needed wheels: {err}",
-                            implementation =
-                                interpreter.marker_env.platform_python_implementation(),
-                            major = interpreter.version.major,
-                            minor = interpreter.version.minor,
-                            patch = interpreter.version.micro,
-                            path = interpreter.path.display()
-                        );
-                        errors.push((interpreter, err))
-                    }
-                },
-            }
+        {
+            return Ok((interpreter, selected_wheels));
         }
 
         let reqs = &self.info().requirements;
@@ -318,8 +330,9 @@ impl<'a> Pex<'a> {
             "requirements"
         };
 
-        let interpreter_count = errors.len();
-        let interpreters = if interpreter_count == 1 {
+        let errors = errors.lock().map_err(|err| anyhow!("{err}"))?;
+        let error_count = errors.len();
+        let interpreters = if error_count == 1 {
             "interpreter"
         } else {
             "interpreters"
@@ -331,7 +344,7 @@ impl<'a> Pex<'a> {
             There are {requirement_count} root {requirements}:\n\
             {reqs}\n\
             \n\
-            Tried resolving using {interpreter_count} {interpreters}:\n\
+            Tried resolving using {error_count} {interpreters}:\n\
             {errors}",
             path = self.path().display(),
             reqs = reqs.iter().map(|req| format!("+ {req}")).join("\n"),
