@@ -295,6 +295,7 @@ impl<'a> Pex<'a> {
         let resolve_results_iter = interpreters_to_try
             .into_par_iter()
             .filter_map(|python_exe| Interpreter::load(python_exe).ok())
+            .filter(|interpreter| interpreter_constraints.contains(interpreter))
             .map(|interpreter| match zip_app_pex.resolve(&interpreter) {
                 Ok(selected_wheels) => Ok((interpreter, selected_wheels)),
                 Err(err) => Err((interpreter, err)),
