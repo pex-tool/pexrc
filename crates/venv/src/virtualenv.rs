@@ -112,7 +112,7 @@ fn create_pep_405_venv<'a>(
     fs::create_dir_all(&scripts_dir)?;
     link_or_copy(&interpreter.realpath, scripts_dir.join(PYTHON_EXE))?;
     let site_packages_relpath = site_packages_relpath(interpreter);
-    fs::create_dir_all(&site_packages_relpath)?;
+    fs::create_dir_all(path.join(site_packages_relpath.as_ref()))?;
     Ok(site_packages_relpath)
 }
 
@@ -180,18 +180,18 @@ fn site_packages_relpath<'a>(interpreter: &Interpreter) -> Cow<'a, Path> {
 #[cfg(test)]
 mod tests {
     use std::borrow::Cow;
+    use std::path::PathBuf;
 
     use interpreter::Interpreter;
     use rstest::rstest;
-    use testing::python_exe;
+    use testing::{python_exe, tmp_dir};
 
     use crate::virtualenv::{Path, Virtualenv};
 
     #[rstest]
-    fn test_create(python_exe: &Path) {
+    fn test_create(python_exe: &Path, tmp_dir: PathBuf) {
         let interpreter = Interpreter::load(python_exe).unwrap();
-        let venv_dir = tempfile::tempdir().unwrap();
-        let venv = Virtualenv::create(&interpreter, Cow::Borrowed(venv_dir.path()), false).unwrap();
+        let venv = Virtualenv::create(&interpreter, Cow::Owned(tmp_dir), false).unwrap();
         assert_eq!(
             interpreter
                 .base_prefix

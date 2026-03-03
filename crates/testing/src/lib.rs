@@ -17,6 +17,7 @@ pub fn create_tmp_dir() -> PathBuf {
     let tmp_dir = tempfile::tempdir().unwrap().keep();
     let mut tmp_dirs = TMP_DIRS.lock().unwrap();
     let chroot = tmp_dir.join("chroot");
+    fs::create_dir(&chroot).unwrap();
     tmp_dirs.push(tmp_dir);
     chroot
 }
