@@ -10,7 +10,9 @@ members = [
     "crates/pex",
     "crates/pexrc-build-system",
     "crates/pexrs",
-    "crates/platform", "crates/python", "crates/testing",
+    "crates/platform",
+    "crates/python",
+    "crates/testing",
     "crates/venv",
 ]
 
