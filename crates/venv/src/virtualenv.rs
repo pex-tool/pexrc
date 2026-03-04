@@ -12,9 +12,9 @@ use const_format::concatcp;
 use interpreter::Interpreter;
 use logging_timer::time;
 use platform::link_or_copy;
-use target_lexicon::{OperatingSystem, Triple};
+use python::{InterpreterIdentificationScript, Resources, VendoredVirtualenvScript};
+use target_lexicon::{HOST, OperatingSystem};
 
-const VIRTUALENV_PY: &str = include_str!(env!("VIRTUALENV_PY"));
 const SCRIPTS_DIR: &str = env!("SCRIPTS_DIR");
 const PYTHON_EXE: &str = concatcp!("python", EXE_SUFFIX);
 const VENV_PYTHON_RELPATH: &str = concatcp!(SCRIPTS_DIR, MAIN_SEPARATOR_STR, PYTHON_EXE);
@@ -37,8 +37,12 @@ impl<'a> Virtualenv<'a> {
     }
 
     #[time("debug", "Virtualenv.{}")]
-    pub fn load(path: Cow<'a, Path>) -> anyhow::Result<Self> {
-        let interpreter = Interpreter::load(path.as_ref().join(VENV_PYTHON_RELPATH))?;
+    pub fn load(path: Cow<'a, Path>, resources: &mut impl Resources<'a>) -> anyhow::Result<Self> {
+        let identification_script = InterpreterIdentificationScript::read(resources)?;
+        let interpreter = Interpreter::load(
+            path.as_ref().join(VENV_PYTHON_RELPATH),
+            &identification_script,
+        )?;
         Self::enclosing(interpreter)
     }
 
@@ -49,7 +53,7 @@ impl<'a> Virtualenv<'a> {
             .or(Some(venv_interpreter.prefix));
         venv_interpreter.prefix = venv_dir.to_path_buf();
         venv_interpreter.path = venv_dir.join(VENV_PYTHON_RELPATH);
-        if Triple::host().operating_system == OperatingSystem::Windows {
+        if HOST.operating_system == OperatingSystem::Windows {
             venv_interpreter.realpath = venv_interpreter.path.clone();
         }
         venv_interpreter
@@ -59,13 +63,20 @@ impl<'a> Virtualenv<'a> {
     pub fn create(
         interpreter: &Interpreter,
         path: Cow<'a, Path>,
+        resources: &mut impl Resources<'a>,
         include_system_site_packages: bool,
     ) -> anyhow::Result<Self> {
         let site_packages_relpath =
             if interpreter.version.major == 3 && interpreter.version.minor >= 3 {
                 create_pep_405_venv(interpreter, path.as_ref(), include_system_site_packages)?
             } else {
-                create_virtualenv_venv(interpreter, path.as_ref(), include_system_site_packages)?
+                let virtualenv_script = VendoredVirtualenvScript::read(resources)?;
+                create_virtualenv_venv(
+                    interpreter,
+                    path.as_ref(),
+                    virtualenv_script,
+                    include_system_site_packages,
+                )?
             };
 
         let venv_interpreter = Self::host_interpreter(path.as_ref(), interpreter);
@@ -119,13 +130,14 @@ fn create_pep_405_venv<'a>(
 fn create_virtualenv_venv<'a>(
     interpreter: &Interpreter,
     path: &Path,
+    virtualenv_script: VendoredVirtualenvScript<'a>,
     include_system_site_packages: bool,
 ) -> anyhow::Result<Cow<'a, Path>> {
     let mut command = Command::new(&interpreter.path);
     command
         .arg(interpreter.hermetic_args())
         .arg("-c")
-        .arg(VIRTUALENV_PY)
+        .arg(virtualenv_script.contents())
         .args(["--no-pip", "--no-setuptools", "--no-wheel"]);
     if include_system_site_packages {
         command.arg("--system-site-packages");
@@ -151,7 +163,7 @@ fn create_virtualenv_venv<'a>(
 }
 
 fn site_packages_relpath<'a>(interpreter: &Interpreter) -> Cow<'a, Path> {
-    if Triple::host().operating_system == OperatingSystem::Windows {
+    if HOST.operating_system == OperatingSystem::Windows {
         // TODO: XXX: Confirm venv layouts for PyPy under Windows.
         Cow::Borrowed(Path::new("Lib\\site-packages"))
     } else if interpreter.marker_env.platform_python_implementation() == "PyPy"
@@ -183,15 +195,18 @@ mod tests {
     use std::path::PathBuf;
 
     use interpreter::Interpreter;
+    use python::{InterpreterIdentificationScript, Resources};
     use rstest::rstest;
-    use testing::{python_exe, tmp_dir};
+    use testing::{python_exe, resources, tmp_dir};
 
     use crate::virtualenv::{Path, Virtualenv};
 
     #[rstest]
-    fn test_create(python_exe: &Path, tmp_dir: PathBuf) {
-        let interpreter = Interpreter::load(python_exe).unwrap();
-        let venv = Virtualenv::create(&interpreter, Cow::Owned(tmp_dir), false).unwrap();
+    fn test_create(python_exe: &Path, tmp_dir: PathBuf, mut resources: impl Resources<'static>) {
+        let identification_script = InterpreterIdentificationScript::read(&mut resources).unwrap();
+        let interpreter = Interpreter::load(python_exe, &identification_script).unwrap();
+        let venv =
+            Virtualenv::create(&interpreter, Cow::Owned(tmp_dir), &mut resources, false).unwrap();
         assert_eq!(
             interpreter
                 .base_prefix

@@ -4,11 +4,10 @@
 from __future__ import absolute_import, print_function
 
 import os.path
+import platform
 import subprocess
 import sys
 import time
-
-import pexrc
 
 TYPE_CHECKING = False
 if TYPE_CHECKING:
@@ -16,11 +15,14 @@ if TYPE_CHECKING:
     from typing import Any  # noqa: F401
 
 
-def test_boot(tmpdir):
-    # type: (Any) -> None
+def test_boot(
+    tmpdir,  # type: Any
+    pexrc,  # type: str
+):
+    # type: (...) -> None
 
     pex = os.path.join(str(tmpdir), "cowsay.pex")
-    pex_root = os.path.join(str(tmpdir), "pex_root")
+    pex_root = os.path.join(str(tmpdir), "pex-root")
     subprocess.check_call(
         args=[
             "pex",
@@ -39,7 +41,7 @@ def test_boot(tmpdir):
     try:
         subprocess.check_call(args=[sys.executable, pex, "Moo!"])
     except subprocess.CalledProcessError as e:
-        if pexrc.CURRENT_OS != pexrc.WINDOWS:
+        if platform.system() != "Windows":
             raise e
         # TODO: XXX: Get rid of this once Pex fixes cross-drive commonpath issues.
         print("Expected failure from Pex PEX on Windows: {err}".format(err=e))
@@ -49,19 +51,14 @@ def test_boot(tmpdir):
         file=sys.stderr,
     )
 
-    python_source_root = os.path.abspath(os.path.join(pexrc.__file__, "..", ".."))
+    subprocess.check_call(args=[pexrc, "inject", pex])
+
+    pexrc_root = os.path.join(str(tmpdir), "pexrc-root")
+    env = os.environ.copy()
+    env.update(PEXRC_ROOT=pexrc_root)
 
     start = time.time()
-    subprocess.check_call(
-        args=[
-            sys.executable,
-            "-c",
-            "import sys, pexrc; pexrc.boot(r'{pex}', python_args=[], args=['Moo!'])".format(
-                pex=pex
-            ),
-        ],
-        cwd=python_source_root,
-    )
+    subprocess.check_call(args=[sys.executable, pex + "rc", "Moo!"], env=env)
     print(
         "pexrc.boot import and run took {elapsed:.5}ms".format(
             elapsed=(time.time() - start) * 1000

@@ -189,18 +189,17 @@ mod tests {
     use std::path::Path;
 
     use rstest::rstest;
-    use target_lexicon::{Architecture, Endianness, Environment, PointerWidth, Triple};
+    use target_lexicon::{Architecture, Endianness, Environment, HOST, PointerWidth};
     use testing::python_exe;
 
     use crate::linux::LinuxInfo;
 
     #[rstest]
     fn test_parse(python_exe: &Path) {
-        let assert_linux_info = if matches!(Triple::host().environment, Environment::Musl) {
+        let assert_linux_info = if matches!(HOST.environment, Environment::Musl) {
             |linux_info: LinuxInfo| assert!(matches!(linux_info, LinuxInfo::MuslLinux(_)))
         } else {
             |linux_info: LinuxInfo| {
-                let target = Triple::host();
                 let manylinux = match linux_info {
                     LinuxInfo::ManyLinux(manylinux) => manylinux,
                     LinuxInfo::MuslLinux(libc_version) => {
@@ -208,31 +207,25 @@ mod tests {
                     }
                 };
                 assert_eq!(
-                    matches!(target.environment, Environment::Gnu),
+                    matches!(HOST.environment, Environment::Gnu),
                     manylinux.glibc.is_some(),
-                    "The build target is {target:#?}",
+                    "The build target is {HOST:#?}",
                 );
                 if manylinux.armhf {
                     assert_eq!(
                         PointerWidth::U32,
-                        target.architecture.pointer_width().unwrap()
+                        HOST.architecture.pointer_width().unwrap()
                     );
-                    assert_eq!(
-                        Endianness::Little,
-                        target.architecture.endianness().unwrap()
-                    );
-                    assert!(matches!(target.architecture, Architecture::Arm(_)));
+                    assert_eq!(Endianness::Little, HOST.architecture.endianness().unwrap());
+                    assert!(matches!(HOST.architecture, Architecture::Arm(_)));
                 }
                 if manylinux.i686 {
                     assert_eq!(
                         PointerWidth::U32,
-                        target.architecture.pointer_width().unwrap()
+                        HOST.architecture.pointer_width().unwrap()
                     );
-                    assert_eq!(
-                        Endianness::Little,
-                        target.architecture.endianness().unwrap()
-                    );
-                    assert!(matches!(target.architecture, Architecture::X86_32(_)));
+                    assert_eq!(Endianness::Little, HOST.architecture.endianness().unwrap());
+                    assert!(matches!(HOST.architecture, Architecture::X86_32(_)));
                 }
             }
         };

@@ -12,6 +12,8 @@ use include_dir::{Dir, include_dir};
 use log::info;
 use owo_colors::OwoColorize as _;
 use platform::mark_executable;
+use python::{ResourcePath, Resources, embedded};
+use strum::IntoEnumIterator;
 use tempfile::NamedTempFile;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
@@ -100,12 +102,27 @@ fn inject(pex: &Path, compression_level: Option<i64>) -> anyhow::Result<()> {
             io::copy(&mut src_file, &mut dst_zip)?;
         }
     }
+
+    let mut resources = embedded::RESOURCES;
+    dst_zip.add_directory("__pex__/.scripts", directory_options)?;
+    for resource_path in ResourcePath::iter() {
+        let text = resources.read(resource_path)?;
+        dst_zip.start_file(
+            format!(
+                "__pex__/.scripts/{script}",
+                script = resource_path.script_name()
+            ),
+            file_options,
+        )?;
+        dst_zip.write_all(text.as_bytes())?;
+    }
+
     let file_options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
 
-    dst_zip.add_directory("__pex__/.lib", directory_options)?;
+    dst_zip.add_directory("__pex__/.clib", directory_options)?;
     info!("Embedded clibs:");
     for file in CLIBS_DIR.files() {
-        let dst_path = format!("__pex__/.lib/{clib}", clib = file.path().display());
+        let dst_path = format!("__pex__/.clib/{clib}", clib = file.path().display());
         anstream::eprint!(
             "Writing {entry} {size} bytes to {dst_path}...",
             entry = file.path().display().blue(),

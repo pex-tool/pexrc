@@ -11,9 +11,8 @@ use cache::{CacheDir, HashOptions, atomic_file, hash_file};
 use log::debug;
 use logging_timer::time;
 use pep508_rs::MarkerEnvironment;
+use python::InterpreterIdentificationScript;
 use serde::{Deserialize, Serialize};
-
-const INTERPRETER_PY: &str = include_str!("interpreter.py");
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct PythonVersion {
@@ -56,9 +55,15 @@ impl Interpreter {
 static LINUX_INFO: Mutex<Option<String>> = Mutex::new(None);
 
 impl Interpreter {
-    fn identify(python_exe: impl AsRef<Path>) -> anyhow::Result<Vec<u8>> {
+    fn identify(
+        python_exe: impl AsRef<Path>,
+        identification_script: &InterpreterIdentificationScript,
+    ) -> anyhow::Result<Vec<u8>> {
         let mut command = Command::new(python_exe.as_ref());
-        command.arg("-sE").arg("-c").arg(INTERPRETER_PY);
+        command
+            .arg("-sE")
+            .arg("-c")
+            .arg(identification_script.contents());
         #[cfg(target_os = "linux")]
         {
             let mut linux_info = LINUX_INFO
@@ -95,8 +100,11 @@ impl Interpreter {
         Ok(result.stdout)
     }
 
-    pub fn load_uncached(python_exe: impl AsRef<Path>) -> anyhow::Result<Self> {
-        let json_bytes = Self::identify(python_exe.as_ref())?;
+    pub fn load_uncached(
+        python_exe: impl AsRef<Path>,
+        identification_script: &InterpreterIdentificationScript,
+    ) -> anyhow::Result<Self> {
+        let json_bytes = Self::identify(python_exe.as_ref(), identification_script)?;
         serde_json::from_slice(&json_bytes).map_err(|err| {
             anyhow!(
                 "Failed to identify Python interpreter {exe}: {err}",
@@ -109,11 +117,14 @@ impl Interpreter {
         HashOptions::new().path(true).mtime(true).size(true);
 
     #[time("debug", "Interpreter.{}")]
-    pub fn load(python_exe: impl AsRef<Path>) -> anyhow::Result<Self> {
+    pub fn load<'a>(
+        python_exe: impl AsRef<Path>,
+        identification_script: &InterpreterIdentificationScript,
+    ) -> anyhow::Result<Self> {
         let hash = hash_file(python_exe.as_ref(), &Self::INTERPRETER_HASH_CONFIG)?;
         let interpreter_info = CacheDir::Interpreter.path()?.join(hash.base64_digest());
         let file = atomic_file(&interpreter_info, |file| {
-            let json_bytes = Self::identify(python_exe.as_ref())?;
+            let json_bytes = Self::identify(python_exe.as_ref(), identification_script)?;
             BufWriter::new(file).write_all(&json_bytes)?;
             Ok(())
         })?;
@@ -143,14 +154,18 @@ mod tests {
     use std::path::PathBuf;
     use std::process::{Command, Stdio};
 
+    use python::InterpreterIdentificationScript;
     use rstest::rstest;
-    use testing::venv_python_exe;
+    use testing::{interpreter_identification_script, venv_python_exe};
     use textwrap::dedent;
 
     use crate::Interpreter;
 
     #[rstest]
-    fn test_tags_same_as_packaging(venv_python_exe: PathBuf) {
+    fn test_tags_same_as_packaging(
+        venv_python_exe: PathBuf,
+        interpreter_identification_script: InterpreterIdentificationScript,
+    ) {
         Command::new(&venv_python_exe)
             .args(["-m", "pip", "install", "packaging"])
             .spawn()
@@ -178,7 +193,9 @@ mod tests {
         let expected_tags: Vec<String> =
             serde_json::from_str(String::from_utf8(tags_output).unwrap().as_str()).unwrap();
 
-        let interpreter = Interpreter::load_uncached(venv_python_exe).unwrap();
+        let interpreter =
+            Interpreter::load_uncached(venv_python_exe, &interpreter_identification_script)
+                .unwrap();
         assert_eq!(expected_tags, interpreter.supported_tags);
     }
 }

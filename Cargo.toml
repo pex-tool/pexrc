@@ -10,7 +10,7 @@ members = [
     "crates/pex",
     "crates/pexrc-build-system",
     "crates/pexrs",
-    "crates/platform", "crates/testing",
+    "crates/platform", "crates/python", "crates/testing",
     "crates/venv",
 ]
 
@@ -150,6 +150,8 @@ itertools = { workspace = true }
 log = { workspace = true }
 owo-colors = { workspace = true }
 platform = { path = "crates/platform" }
+python = { path = "crates/python", features = ["embedded_resources"] }
+strum = { workspace = true }
 tempfile = { workspace = true }
 zip = { workspace = true }
 zstd = { workspace = true }

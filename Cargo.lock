@@ -1115,6 +1115,7 @@ dependencies = [
  "logging_timer",
  "pep440_rs",
  "pep508_rs",
+ "python",
  "rstest",
  "serde",
  "serde_json",
@@ -1464,6 +1465,7 @@ dependencies = [
  "logging_timer",
  "pep440_rs",
  "pep508_rs",
+ "python",
  "python-pkginfo",
  "rayon",
  "rstest",
@@ -1493,6 +1495,8 @@ dependencies = [
  "owo-colors",
  "pexrc-build-system",
  "platform",
+ "python",
+ "strum",
  "tempfile",
  "zip",
  "zstd",
@@ -1645,6 +1649,17 @@ checksum = "3852766467df634d74f0b2d7819bf8dc483a0eb2e3b0f50f756f9cfe8b0d18d8"
 dependencies = [
  "ar_archive_writer",
  "cc",
+]
+
+[[package]]
+name = "python"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "env_logger",
+ "pexrc-build-system",
+ "strum",
+ "strum_macros",
 ]
 
 [[package]]
@@ -2366,6 +2381,7 @@ name = "testing"
 version = "0.0.0"
 dependencies = [
  "ctor",
+ "python",
  "rstest",
  "target-lexicon",
  "tempfile",
@@ -2725,15 +2741,14 @@ dependencies = [
  "anyhow",
  "build-target",
  "const_format",
- "env_logger",
  "indexmap",
  "interpreter",
  "itertools 0.14.0",
  "log",
  "logging_timer",
  "pex",
- "pexrc-build-system",
  "platform",
+ "python",
  "rayon",
  "rstest",
  "target-lexicon",

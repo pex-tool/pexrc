@@ -15,6 +15,7 @@ interpreter = { path = "../interpreter" }
 itertools = { workspace = true }
 log = { workspace = true }
 logging_timer = { workspace = true }
+python = { path = "../python" }
 rayon = { workspace = true }
 target-lexicon = { workspace = true }
 tempfile = { workspace = true }
@@ -25,7 +26,4 @@ rstest = { workspace = true}
 testing = { path = "../testing" }
 
 [build-dependencies]
-anyhow = { workspace = true }
 build-target = { workspace = true }
-env_logger = { workspace = true }
-pexrc-build-system = { path = "../pexrc-build-system" }

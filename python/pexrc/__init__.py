@@ -451,7 +451,7 @@ def _load_pexrc():
     tmp_dir = tempfile.mkdtemp()
     library_file_path = os.path.join(tmp_dir, os.path.basename(library_file_name))
     try:
-        prefix = ".lib" if __name__ == "__pex__" else os.path.join("__pex__", ".lib")
+        prefix = ".clib" if __name__ == "__pex__" else os.path.join("__pex__", ".clib")
         pexrc_data = pkgutil.get_data(
             __name__,
             os.path.join(

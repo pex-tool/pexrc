@@ -97,18 +97,13 @@ fn main() -> anyhow::Result<()> {
         None => false,
     };
 
-    let (clibs_dir, compress) = {
-        println!("cargo::rerun-if-env-changed=PEXRC_LIB_DIR");
-        if let Some(lib_dir) = env::var_os("PEXRC_LIB_DIR") {
-            (PathBuf::from(lib_dir), false)
+    let clibs_dir = {
+        let out_dir = env::var_os("OUT_DIR").unwrap();
+        let clibs_dir = PathBuf::from(out_dir).join("clibs");
+        if all_targets {
+            clibs_dir.join("all")
         } else {
-            let out_dir = env::var_os("OUT_DIR").unwrap();
-            let clibs_dir = PathBuf::from(out_dir).join("clibs");
-            if all_targets {
-                (clibs_dir.join("all"), true)
-            } else {
-                (clibs_dir.join("current"), true)
-            }
+            clibs_dir.join("current")
         }
     };
     fs::create_dir_all(&clibs_dir)?;
@@ -146,7 +141,7 @@ fn main() -> anyhow::Result<()> {
             &found_tools,
             targets.iter_xwin_targets(),
         )?;
-        collect_clibs(&targets, &tgt_path, clib, &clibs_dir, compress)
+        collect_clibs(&targets, &tgt_path, clib, &clibs_dir, true)
     } else {
         let target = env::var("TARGET")?;
         let targets = ClassifiedTargets::parse([target.as_str()].into_iter(), &glibc);
@@ -157,7 +152,7 @@ fn main() -> anyhow::Result<()> {
             &found_tools,
             iter::empty(),
         )?;
-        collect_clibs(&targets, &tgt_path, clib, &clibs_dir, compress)
+        collect_clibs(&targets, &tgt_path, clib, &clibs_dir, true)
     }
 }
 

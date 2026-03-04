@@ -4,7 +4,8 @@
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
 use std::fs::File;
-use std::io::{BufReader, Read};
+use std::io;
+use std::io::{BufReader, Read, Seek};
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
@@ -17,6 +18,7 @@ use log::{Level, debug};
 use logging_timer::{time, timer};
 use pep440_rs::Version;
 use pep508_rs::{ExtraName, PackageName, Requirement, VersionOrUrl};
+use python::{InterpreterIdentificationScript, ResourcePath, Resources};
 use rayon::prelude::*;
 use url::Url;
 use zip::ZipArchive;
@@ -31,6 +33,12 @@ pub trait WheelResolver {
 pub struct LoosePex<'a>(pub &'a Path, pub PexInfo);
 pub struct PackedPex<'a>(pub &'a Path, pub PexInfo);
 pub struct ZipAppPex<'a>(pub &'a Path, pub PexInfo);
+
+impl<'a> ZipAppPex<'a> {
+    pub(crate) fn resources(&self) -> anyhow::Result<impl Resources<'a>> {
+        ZipResources::new(self.0)
+    }
+}
 
 struct ZipAppPexMetadataReader<'a> {
     zip: &'a mut ZipArchive<File>,
@@ -213,10 +221,41 @@ impl<'a> WheelResolver for ZipAppPex<'a> {
     }
 }
 
+struct ZipResources<R> {
+    zip: ZipArchive<R>,
+}
+
+impl ZipResources<BufReader<File>> {
+    fn new(path: &Path) -> anyhow::Result<Self> {
+        let zip = ZipArchive::new(BufReader::new(File::open(path)?))?;
+        Ok(Self { zip })
+    }
+}
+
+impl<'a, R: Read + Seek> Resources<'a> for ZipResources<R> {
+    fn read(&mut self, path: ResourcePath) -> anyhow::Result<Cow<'a, str>> {
+        // TODO: XXX: The entry name logic here is shared with pexrc - centralize.
+        let entry = self
+            .zip
+            .by_name(format!("__pex__/.scripts/{script}", script = path.script_name()).as_str())?;
+        Ok(Cow::Owned(io::read_to_string(entry)?))
+    }
+}
+
 pub enum Pex<'a> {
     Loose(LoosePex<'a>),
     Packed(PackedPex<'a>),
     ZipApp(ZipAppPex<'a>),
+}
+
+impl<'a> Pex<'a> {
+    pub fn resources(&self) -> anyhow::Result<impl Resources<'a>> {
+        match self {
+            Pex::Loose(_) => todo!("XXX: Implement loose PEX resource resolution."),
+            Pex::Packed(_) => todo!("XXX: Implement packed PEX resource resolution."),
+            Pex::ZipApp(zip_app) => zip_app.resources(),
+        }
+    }
 }
 
 impl<'a> Pex<'a> {
@@ -270,23 +309,26 @@ impl<'a> Pex<'a> {
     pub fn resolve(
         &self,
         python_exe: Option<&Path>,
-    ) -> anyhow::Result<(Interpreter, IndexSet<&str>)> {
+    ) -> anyhow::Result<(Interpreter, IndexSet<&str>, impl Resources<'_>)> {
         let zip_app_pex = match self {
             Pex::Loose(_) => todo!("XXX: Implement loose PEX wheel resolution."),
             Pex::Packed(_) => todo!("XXX: Implement packed PEX wheel resolution."),
             Pex::ZipApp(zip_app) => zip_app,
         };
 
+        let mut resources = zip_app_pex.resources()?;
+        let identification_script = InterpreterIdentificationScript::read(&mut resources)?;
+
         let pex_info = self.info();
         let interpreter_constraints =
             InterpreterConstraints::try_from(&pex_info.interpreter_constraints)?;
         let mut errors = Vec::new();
         if let Some(python_exe) = python_exe
-            && let Ok(interpreter) = Interpreter::load(python_exe)
+            && let Ok(interpreter) = Interpreter::load(python_exe, &identification_script)
             && interpreter_constraints.contains(&interpreter)
         {
             match zip_app_pex.resolve(&interpreter) {
-                Ok(selected_wheels) => return Ok((interpreter, selected_wheels)),
+                Ok(selected_wheels) => return Ok((interpreter, selected_wheels, resources)),
                 Err(err) => errors.push((interpreter, err)),
             }
         }
@@ -296,7 +338,7 @@ impl<'a> Pex<'a> {
             .collect::<Vec<_>>();
         let resolve_results_iter = interpreters_to_try
             .into_par_iter()
-            .filter_map(|python_exe| Interpreter::load(python_exe).ok())
+            .filter_map(|python_exe| Interpreter::load(python_exe, &identification_script).ok())
             .filter(|interpreter| interpreter_constraints.contains(interpreter))
             .map(|interpreter| match zip_app_pex.resolve(&interpreter) {
                 Ok(selected_wheels) => Ok((interpreter, selected_wheels)),
@@ -321,7 +363,7 @@ impl<'a> Pex<'a> {
                 }
             })
         {
-            return Ok((interpreter, selected_wheels));
+            return Ok((interpreter, selected_wheels, resources));
         }
 
         let reqs = &self.info().requirements;
@@ -378,8 +420,9 @@ mod tests {
     use ::interpreter::Interpreter;
     use indexmap::IndexSet;
     use pep508_rs::{Requirement, VersionOrUrl};
+    use python::InterpreterIdentificationScript;
     use rstest::{fixture, rstest};
-    use testing::{python_exe, tmp_dir};
+    use testing::{interpreter_identification_script, python_exe, tmp_dir};
     use url::Url;
 
     use crate::wheel::WheelFile;
@@ -399,12 +442,17 @@ mod tests {
     }
 
     #[rstest]
-    fn test_resolve(pex: PathBuf, python_exe: &Path) {
+    fn test_resolve(
+        pex: PathBuf,
+        python_exe: &Path,
+        interpreter_identification_script: InterpreterIdentificationScript,
+    ) {
         let pex = match Pex::load(&pex).unwrap() {
             Pex::ZipApp(zip_app_pex) => zip_app_pex,
             _ => panic!("Unexpected pex type"),
         };
-        let interpreter = Interpreter::load(python_exe).unwrap();
+        let interpreter =
+            Interpreter::load(python_exe, &interpreter_identification_script).unwrap();
         let resolved = pex
             .resolve(&interpreter)
             .unwrap()

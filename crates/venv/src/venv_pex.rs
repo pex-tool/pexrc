@@ -14,20 +14,19 @@ use log::warn;
 use logging_timer::time;
 use pex::{BinPath, Pex, PexInfo};
 use platform::{link_or_copy, mark_executable, path_as_bytes, path_as_str};
+use python::{Resources, VenvPexReplScript, VenvPexScript};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use zip::ZipArchive;
 
 use crate::virtualenv::Virtualenv;
 
-const VENV_PEX_PY: &[u8] = include_bytes!("venv_pex.py");
-const VENV_PEX_REPL_PY: &[u8] = include_bytes!("venv_pex_repl.py");
-
 #[time("debug", "venv_pex.{}")]
-pub fn populate(
+pub fn populate<'a>(
     venv: &Virtualenv,
     resting_venv_dir: &Path,
     pex: &Pex,
     selected_wheels: &IndexSet<&str>,
+    resources: &mut impl Resources<'a>,
 ) -> anyhow::Result<()> {
     let site_packages_path = venv.site_packages_path();
     let (path, pex_info) = match pex {
@@ -79,8 +78,8 @@ pub fn populate(
         .path
         .strip_prefix(&venv.interpreter.prefix)?;
     let shebang_interpreter = resting_venv_dir.join(interpreter_relpath);
-    write_main(venv, &shebang_interpreter, pex_info)?;
-    write_repl(venv, &shebang_interpreter, path, pex_info)
+    write_main(venv, &shebang_interpreter, pex_info, resources)?;
+    write_repl(venv, &shebang_interpreter, path, pex_info, resources)
 }
 
 fn extract_idx(
@@ -137,15 +136,17 @@ fn as_optional_python_str(value: Option<&str>) -> Cow<'_, str> {
     }
 }
 
-fn write_main(
+fn write_main<'a>(
     venv: &Virtualenv,
     shebang_interpreter: &Path,
     pex_info: &PexInfo,
+    resources: &mut impl Resources<'a>,
 ) -> anyhow::Result<()> {
     let mut main_py_fp = File::create_new(venv.prefix().join("__main__.py"))?;
 
     write_shebang_bytes(&mut main_py_fp, shebang_interpreter)?;
-    main_py_fp.write_all(VENV_PEX_PY)?;
+    let venv_pex_script = VenvPexScript::read(resources)?;
+    main_py_fp.write_all(venv_pex_script.contents().as_bytes())?;
     write!(
         main_py_fp,
         "{}",
@@ -196,15 +197,17 @@ if __name__ == "__main__":
     link_or_copy(Path::new("__main__.py"), venv.prefix().join("pex"))
 }
 
-fn write_repl(
+fn write_repl<'a>(
     venv: &Virtualenv,
     shebang_interpreter: &Path,
     pex: &Path,
     pex_info: &PexInfo,
+    resources: &mut impl Resources<'a>,
 ) -> anyhow::Result<()> {
     let mut pex_repl_py_fp = File::create_new(venv.prefix().join("pex-repl"))?;
     write_shebang_bytes(&mut pex_repl_py_fp, shebang_interpreter)?;
-    pex_repl_py_fp.write_all(VENV_PEX_REPL_PY)?;
+    let venv_pex_repl_script = VenvPexReplScript::read(resources)?;
+    pex_repl_py_fp.write_all(venv_pex_repl_script.contents().as_bytes())?;
     // TODO: XXX: Need to append a if __name__ == "__main__" that calls _create_pex_repl(...)
     // const activation_summary, const activation_details = res: {
     //         if (wheels_to_install.*) |wheels| {

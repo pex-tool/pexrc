@@ -37,7 +37,7 @@ fn prepare_boot(
     pex: impl AsRef<Path>,
     argv: Vec<String>,
 ) -> anyhow::Result<Command> {
-    let venv = prepare_venv(python, pex)?;
+    let venv = prepare_venv(python, pex.as_ref())?;
     let mut command = Command::new(&venv.interpreter.path);
     command
         .args(python_args)
@@ -69,26 +69,24 @@ fn exec(command: &mut Command) -> anyhow::Result<i32> {
 
 #[time("debug", "{}")]
 pub fn mount(python: impl AsRef<Path>, pex: impl AsRef<Path>) -> anyhow::Result<PathBuf> {
-    prepare_venv(python, pex).map(|venv| venv.site_packages_path())
+    prepare_venv(python, pex.as_ref()).map(|venv| venv.site_packages_path())
 }
 
 #[time("debug", "{}")]
-fn prepare_venv<'a>(
-    python: impl AsRef<Path>,
-    pex: impl AsRef<Path>,
-) -> anyhow::Result<Virtualenv<'a>> {
-    let pex = Pex::load(pex.as_ref())?;
+fn prepare_venv<'a>(python: impl AsRef<Path>, pex: &'a Path) -> anyhow::Result<Virtualenv<'a>> {
+    let pex = Pex::load(pex)?;
     let pex_info = pex.info();
     let venv_dir = CacheDir::Venv.path()?.join(&pex_info.pex_hash);
     if let Some(venv_interpreter) = atomic_dir(&venv_dir, |work_dir| {
         // TODO: XXX: Account for PEX_PATH
-        let (interpreter, selected_wheels) = pex.resolve(Some(python.as_ref()))?;
+        let (interpreter, selected_wheels, mut resources) = pex.resolve(Some(python.as_ref()))?;
         let venv = Virtualenv::create(
             &interpreter,
             Cow::Borrowed(work_dir),
+            &mut resources,
             pex_info.venv_system_site_packages,
         )?;
-        populate(&venv, &venv_dir, &pex, &selected_wheels)?;
+        populate(&venv, &venv_dir, &pex, &selected_wheels, &mut resources)?;
         Ok(venv.interpreter)
     })? {
         debug!("Built venv at {path}", path = venv_dir.display());
@@ -97,6 +95,7 @@ fn prepare_venv<'a>(
         Virtualenv::enclosing(venv_interpreter)
     } else {
         debug!("Loading cached venv at {path}", path = venv_dir.display());
-        Virtualenv::load(Cow::Owned(venv_dir))
+        let mut resources = pex.resources()?;
+        Virtualenv::load(Cow::Owned(venv_dir), &mut resources)
     }
 }

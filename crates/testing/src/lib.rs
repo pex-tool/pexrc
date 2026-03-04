@@ -8,8 +8,9 @@ use std::process::{Command, Stdio};
 use std::sync::Mutex;
 
 use ctor::dtor;
+use python::{InterpreterIdentificationScript, Resources, embedded};
 use rstest::fixture;
-use target_lexicon::{OperatingSystem, Triple};
+use target_lexicon::{HOST, OperatingSystem};
 
 static TMP_DIRS: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 
@@ -64,10 +65,22 @@ pub fn venv_python_exe(python_exe: &Path) -> PathBuf {
         OsString::from(python_exe.file_name().unwrap())
     };
 
-    if Triple::host().operating_system == OperatingSystem::Windows {
+    if HOST.operating_system == OperatingSystem::Windows {
         venv_dir.join("Scripts")
     } else {
         venv_dir.join("bin")
     }
     .join(python_exe_basename)
+}
+
+#[fixture]
+pub fn resources() -> impl Resources<'static> {
+    embedded::RESOURCES
+}
+
+#[fixture]
+pub fn interpreter_identification_script(
+    mut resources: impl Resources<'static>,
+) -> InterpreterIdentificationScript<'static> {
+    InterpreterIdentificationScript::read(&mut resources).unwrap()
 }

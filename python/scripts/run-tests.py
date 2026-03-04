@@ -4,6 +4,7 @@
 import os.path
 import subprocess
 import sys
+import sysconfig
 
 TYPE_CHECKING = False
 if TYPE_CHECKING:
@@ -11,22 +12,27 @@ if TYPE_CHECKING:
     from typing import Any  # noqa: F401
 
 
-def ensure_clib():
-    # type: () -> None
+def ensure_pexrc():
+    # type: () -> str
 
-    env = os.environ.copy()
-    env.update(PEXRC_LIB_DIR=os.path.abspath(os.path.join("python", "pexrc", "__pex__", ".lib")))
-    subprocess.check_call(
-        args=["cargo", "build", "--profile", env.get("PEXRC_PROFILE", "dev")], env=env
+    profile = os.environ.get("PEXRC_PROFILE", "dev")
+    subprocess.check_call(args=["cargo", "build", "--profile", profile])
+    profile_dir = "debug" if profile == "dev" else profile
+    return os.path.abspath(
+        os.path.join("target", profile_dir, "pexrc" + sysconfig.get_config_vars()["EXE"])
     )
 
 
 def run_tests():
     # type: () -> Any
 
-    ensure_clib()
+    pexrc = ensure_pexrc()
+    env = os.environ.copy()
+    env.update(_PEXRC_TEST_PEXRC_BINARY=pexrc)
     return subprocess.call(
-        args=["pytest"] + sys.argv[1:], cwd=os.path.abspath(os.path.join("python", "tests"))
+        args=["pytest"] + sys.argv[1:],
+        cwd=os.path.abspath(os.path.join("python", "tests")),
+        env=env,
     )
 
 

@@ -14,6 +14,7 @@ log = { workspace = true }
 logging_timer = { workspace = true }
 pep440_rs = { workspace = true }
 pep508_rs = { workspace = true }
+python = { path = "../python" }
 python-pkginfo = { workspace = true }
 rayon = { workspace = true }
 serde = { workspace = true }
