@@ -397,20 +397,34 @@ impl InterpreterConstraints {
         PythonExeIter {
             search_path,
             binary_names: binary_names.into_iter(),
+            which_fn: which_in_global,
             binary_paths: None,
             seen: HashSet::new(),
         }
     }
 }
 
-struct PythonExeIter<BinaryNames> {
+struct PythonExeIter<
+    Name,
+    BinaryNames: Iterator<Item = Name>,
+    BinaryPaths: Iterator<Item = PathBuf>,
+    WhichError,
+    WhichFunction: Fn(Name, Option<OsString>) -> Result<BinaryPaths, WhichError>,
+> {
     search_path: Option<OsString>,
     binary_names: BinaryNames,
-    binary_paths: Option<Box<dyn Iterator<Item = PathBuf>>>,
+    which_fn: WhichFunction,
+    binary_paths: Option<BinaryPaths>,
     seen: HashSet<PathBuf>,
 }
 
-impl<BinaryNames: Iterator<Item = String>> Iterator for PythonExeIter<BinaryNames> {
+impl<
+    BinaryNames: Iterator<Item = String>,
+    BinaryPaths: Iterator<Item = PathBuf>,
+    WhichError,
+    WhichFunction: Fn(String, Option<OsString>) -> Result<BinaryPaths, WhichError>,
+> Iterator for PythonExeIter<String, BinaryNames, BinaryPaths, WhichError, WhichFunction>
+{
     type Item = PathBuf;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -431,9 +445,9 @@ impl<BinaryNames: Iterator<Item = String>> Iterator for PythonExeIter<BinaryName
                     self.binary_paths = None;
                 }
             } else if let Some(binary_name) = self.binary_names.next()
-                && let Ok(binary_paths) = which_in_global(binary_name, self.search_path.clone())
+                && let Ok(binary_paths) = (self.which_fn)(binary_name, self.search_path.clone())
             {
-                self.binary_paths = Some(Box::new(binary_paths));
+                self.binary_paths = Some(binary_paths);
             } else {
                 return None;
             }
