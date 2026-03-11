@@ -3,6 +3,7 @@
 
 use std::borrow::Cow;
 use std::fmt::{Display, Formatter};
+use std::fs;
 use std::io::{BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -140,10 +141,10 @@ impl Interpreter {
     }
 
     #[cfg(unix)]
-    fn iter_candidate_rel_paths<'a>(
+    fn candidate_rel_paths<'a>(
         version: &PythonVersion,
         pypy_version: Option<&PyPyVersion>,
-    ) -> impl IntoIterator<Item = Cow<'a, Path>> {
+    ) -> Vec<Cow<'a, Path>> {
         let mut candidates: Vec<Cow<'_, Path>> =
             Vec::with_capacity(if pypy_version.is_some() { 6 } else { 3 });
         if let Some(pypy_version) = pypy_version {
@@ -214,23 +215,44 @@ impl Interpreter {
         version: PythonVersion,
         pypy_version: Option<PyPyVersion>,
         resources: &mut impl Resources<'a>,
+        re_cache_version_mismatch: bool,
     ) -> anyhow::Result<Self> {
+        let check_pypy_version = |interpreter: &Interpreter| match (
+            pypy_version.as_ref(),
+            interpreter.pypy_version.as_ref(),
+        ) {
+            (Some(expected_pypy_version), Some(actual_pypy_version))
+                if expected_pypy_version == actual_pypy_version =>
+            {
+                true
+            }
+            (None, None) => true,
+            _ => false,
+        };
         let identification_script = InterpreterIdentificationScript::read(resources)?;
-        for rel_path in Self::iter_candidate_rel_paths(&version, pypy_version.as_ref()) {
+        let candidate_rel_paths = Self::candidate_rel_paths(&version, pypy_version.as_ref());
+        let mut re_cache_candidates: Vec<Self> = Vec::with_capacity(candidate_rel_paths.len());
+        for rel_path in candidate_rel_paths {
             let candidate_path = prefix.as_ref().join(rel_path);
             if let Ok(interpreter) = Self::load(candidate_path, &identification_script) {
                 if interpreter.version != version {
+                    if re_cache_version_mismatch
+                        && (interpreter.version.major, interpreter.version.minor)
+                            == (version.major, version.minor)
+                    {
+                        re_cache_candidates.push(interpreter)
+                    }
                     continue;
                 }
-                match (pypy_version.as_ref(), interpreter.pypy_version.as_ref()) {
-                    (Some(expected_pypy_version), Some(actual_pypy_version))
-                        if expected_pypy_version == actual_pypy_version =>
-                    {
-                        return Ok(interpreter);
-                    }
-                    (None, None) => return Ok(interpreter),
-                    _ => continue,
+                if check_pypy_version(&interpreter) {
+                    return Ok(interpreter);
                 }
+            }
+        }
+        for interpreter in re_cache_candidates {
+            let interpreter = interpreter.reload(&identification_script)?;
+            if interpreter.version == version && check_pypy_version(&interpreter) {
+                return Ok(interpreter);
             }
         }
         if let Some(pypy_version) = pypy_version {
@@ -246,14 +268,26 @@ impl Interpreter {
     const INTERPRETER_HASH_CONFIG: HashOptions =
         HashOptions::new().path(true).mtime(true).size(true);
 
+    fn interpreter_info(python_exe: impl AsRef<Path>) -> anyhow::Result<PathBuf> {
+        let hash = hash_file(python_exe.as_ref(), &Self::INTERPRETER_HASH_CONFIG)?;
+        Ok(CacheDir::Interpreter.path()?.join(hash.base64_digest()))
+    }
+
     #[time("debug", "Interpreter.{}")]
     pub fn load(
         python_exe: impl AsRef<Path>,
         identification_script: &InterpreterIdentificationScript,
     ) -> anyhow::Result<Self> {
-        let hash = hash_file(python_exe.as_ref(), &Self::INTERPRETER_HASH_CONFIG)?;
-        let interpreter_info = CacheDir::Interpreter.path()?.join(hash.base64_digest());
-        let file = atomic_file(&interpreter_info, |file| {
+        let interpreter_info = Self::interpreter_info(python_exe.as_ref())?;
+        Self::load_internal(interpreter_info, python_exe, identification_script)
+    }
+
+    fn load_internal(
+        interpreter_info: impl AsRef<Path>,
+        python_exe: impl AsRef<Path>,
+        identification_script: &InterpreterIdentificationScript,
+    ) -> anyhow::Result<Self> {
+        let file = atomic_file(interpreter_info.as_ref(), |file| {
             let json_bytes = Self::identify(python_exe.as_ref(), identification_script)?;
             BufWriter::new(file).write_all(&json_bytes)?;
             Ok(())
@@ -264,6 +298,15 @@ impl Interpreter {
                 exe = python_exe.as_ref().display()
             )
         })
+    }
+
+    fn reload(
+        self,
+        identification_script: &InterpreterIdentificationScript,
+    ) -> anyhow::Result<Self> {
+        let interpreter_info = Self::interpreter_info(self.path.as_path())?;
+        fs::remove_file(&interpreter_info)?;
+        Self::load_internal(&interpreter_info, self.path, identification_script)
     }
 
     #[time("debug", "Interpreter.{}")]
@@ -285,6 +328,7 @@ impl Interpreter {
         }
     }
 
+    #[time("debug", "Interpreter.{}")]
     pub fn resolve_base_interpreter<'a>(
         self,
         resources: &mut impl Resources<'a>,
@@ -292,8 +336,13 @@ impl Interpreter {
         if let Some(base_prefix) = self.base_prefix.as_ref()
             && base_prefix != &self.prefix
         {
-            let resolved =
-                Self::at_prefix(base_prefix, self.version, self.pypy_version, resources)?;
+            let resolved = Self::at_prefix(
+                base_prefix,
+                self.version,
+                self.pypy_version,
+                resources,
+                true,
+            )?;
             return resolved.resolve_base_interpreter(resources);
         }
         Ok(self)
