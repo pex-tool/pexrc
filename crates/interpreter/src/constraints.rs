@@ -237,11 +237,9 @@ static SUPPORTED_VERSIONS: LazyLock<Vec<(u8, u8)>> = LazyLock::new(|| {
 });
 
 static SUPPORTED_VERSIONS_NEWEST_FIRST: LazyLock<Vec<(u8, u8)>> = LazyLock::new(|| {
-    SUPPORTED_VERSIONS
-        .iter()
-        .map(|(major, minor)| (*major, *minor))
-        .sorted_by_key(|(major, minor)| (-i16::from(*major), -i16::from(*minor)))
-        .collect::<Vec<_>>()
+    let mut supported_versions = SUPPORTED_VERSIONS.clone();
+    supported_versions.reverse();
+    supported_versions
 });
 
 #[derive(Eq, PartialEq)]
