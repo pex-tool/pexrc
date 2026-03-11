@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, bail};
 use indexmap::{IndexMap, IndexSet};
-use interpreter::{Interpreter, InterpreterConstraints};
+use interpreter::{Interpreter, InterpreterConstraints, SearchPath};
 use itertools::Itertools;
 use log::{Level, debug};
 use logging_timer::{time, timer};
@@ -309,6 +309,7 @@ impl<'a> Pex<'a> {
     pub fn resolve(
         &self,
         python_exe: Option<&Path>,
+        search_path: SearchPath,
     ) -> anyhow::Result<(Interpreter, IndexSet<&str>, impl Resources<'_>)> {
         let zip_app_pex = match self {
             Pex::Loose(_) => todo!("XXX: Implement loose PEX wheel resolution."),
@@ -334,7 +335,10 @@ impl<'a> Pex<'a> {
         }
 
         let interpreters_to_try = interpreter_constraints
-            .iter_possibly_compatible_python_exes(pex_info.interpreter_selection_strategy.into())
+            .iter_possibly_compatible_python_exes(
+                pex_info.interpreter_selection_strategy.into(),
+                search_path,
+            )
             .collect::<Vec<_>>();
         let resolve_results_iter = interpreters_to_try
             .into_par_iter()

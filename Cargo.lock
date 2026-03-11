@@ -1104,7 +1104,6 @@ dependencies = [
  "cache",
  "elf",
  "indexmap",
- "itertools 0.14.0",
  "log",
  "logging_timer",
  "pep440_rs",

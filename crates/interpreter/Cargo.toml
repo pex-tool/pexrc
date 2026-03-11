@@ -9,7 +9,6 @@ edition = "2024"
 anyhow = { workspace = true }
 cache = { path = "../cache" }
 indexmap = { workspace = true }
-itertools = { workspace = true }
 pep440_rs = { workspace = true }
 pep508_rs = { workspace = true }
 elf = { workspace = true }

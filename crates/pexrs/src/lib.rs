@@ -8,6 +8,7 @@ use std::process::Command;
 
 use anyhow::anyhow;
 use cache::{CacheDir, atomic_dir};
+use interpreter::SearchPath;
 use itertools::Itertools;
 use log::debug;
 use logging_timer::time;
@@ -76,10 +77,11 @@ pub fn mount(python: impl AsRef<Path>, pex: impl AsRef<Path>) -> anyhow::Result<
 fn prepare_venv<'a>(python: impl AsRef<Path>, pex: &'a Path) -> anyhow::Result<Virtualenv<'a>> {
     let pex = Pex::load(pex)?;
     let pex_info = pex.info();
+    let search_path = SearchPath::from_env()?;
     let venv_dir = CacheDir::Venv.path()?.join(&pex_info.pex_hash);
     if let Some(venv_interpreter) = atomic_dir(&venv_dir, |work_dir| {
-        // TODO: XXX: Account for PEX_PATH
-        let (interpreter, selected_wheels, mut resources) = pex.resolve(Some(python.as_ref()))?;
+        let (interpreter, selected_wheels, mut resources) =
+            pex.resolve(Some(python.as_ref()), search_path)?;
         let venv = Virtualenv::create(
             interpreter,
             Cow::Borrowed(work_dir),

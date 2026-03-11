@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::collections::HashSet;
-use std::env;
 use std::ffi::OsString;
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
@@ -10,8 +9,7 @@ use std::str::FromStr;
 use std::sync::LazyLock;
 
 use anyhow::bail;
-use indexmap::IndexSet;
-use itertools::Itertools;
+use indexmap::{IndexSet, indexset};
 use log::{debug, warn};
 use pep440_rs::{Version, VersionSpecifiers};
 use pep508_rs::{ExtraName, MarkerTree, PackageName, Requirement, VersionOrUrl};
@@ -19,7 +17,7 @@ use time::Month;
 use url::Url;
 use which::which_in_global;
 
-use crate::Interpreter;
+use crate::{Interpreter, SearchPath};
 
 #[derive(Debug, Hash, Eq, PartialEq)]
 enum InterpreterImplementation {
@@ -360,27 +358,33 @@ impl InterpreterConstraints {
     fn calculate_compatible_binary_names(
         &self,
         selection_strategy: SelectionStrategy,
-    ) -> IndexSet<String> {
+    ) -> IndexSet<OsString> {
         let binary_specs = self.calculate_compatible_binary_specs(selection_strategy);
-        let mut binary_names: IndexSet<String> = IndexSet::new();
+        let mut binary_names: IndexSet<OsString> = IndexSet::new();
         for binary_spec in &binary_specs {
-            binary_names.insert(format!(
-                "{name}{major}.{minor}{suffix}",
-                name = binary_spec.name,
-                major = binary_spec.major,
-                minor = binary_spec.minor,
-                suffix = binary_spec.suffix.unwrap_or("")
-            ));
+            binary_names.insert(
+                format!(
+                    "{name}{major}.{minor}{suffix}",
+                    name = binary_spec.name,
+                    major = binary_spec.major,
+                    minor = binary_spec.minor,
+                    suffix = binary_spec.suffix.unwrap_or("")
+                )
+                .into(),
+            );
         }
         for binary_spec in &binary_specs {
-            binary_names.insert(format!(
-                "{name}{major}",
-                name = binary_spec.name,
-                major = binary_spec.major
-            ));
+            binary_names.insert(
+                format!(
+                    "{name}{major}",
+                    name = binary_spec.name,
+                    major = binary_spec.major
+                )
+                .into(),
+            );
         }
         for binary_spec in &binary_specs {
-            binary_names.insert(binary_spec.name.to_string());
+            binary_names.insert(binary_spec.name.into());
         }
         binary_names
     }
@@ -388,12 +392,17 @@ impl InterpreterConstraints {
     pub fn iter_possibly_compatible_python_exes(
         &self,
         selection_strategy: SelectionStrategy,
+        search_path: SearchPath,
     ) -> impl Iterator<Item = PathBuf> {
-        // TODO: XXX: Account for PEX_PYTHON
-        let search_path = env::var_os("PEX_PYTHON_PATH").or_else(|| env::var_os("PATH"));
-        let binary_names = self.calculate_compatible_binary_names(selection_strategy);
+        let (python, path, known_paths) = search_path.into_parts();
+        let binary_names = if let Some(python) = python {
+            indexset! {python}
+        } else {
+            self.calculate_compatible_binary_names(selection_strategy)
+        };
         PythonExeIter {
-            search_path,
+            known_paths,
+            path,
             binary_names: binary_names.into_iter(),
             which_fn: which_in_global,
             binary_paths: None,
@@ -403,13 +412,15 @@ impl InterpreterConstraints {
 }
 
 struct PythonExeIter<
+    KnownBinaryPaths: Iterator<Item = PathBuf>,
     Name,
     BinaryNames: Iterator<Item = Name>,
     BinaryPaths: Iterator<Item = PathBuf>,
     WhichError,
     WhichFunction: Fn(Name, Option<OsString>) -> Result<BinaryPaths, WhichError>,
 > {
-    search_path: Option<OsString>,
+    known_paths: Option<KnownBinaryPaths>,
+    path: Option<OsString>,
     binary_names: BinaryNames,
     which_fn: WhichFunction,
     binary_paths: Option<BinaryPaths>,
@@ -417,17 +428,41 @@ struct PythonExeIter<
 }
 
 impl<
-    BinaryNames: Iterator<Item = String>,
+    KnownBinaryPaths: Iterator<Item = PathBuf>,
+    BinaryNames: Iterator<Item = OsString>,
     BinaryPaths: Iterator<Item = PathBuf>,
     WhichError,
-    WhichFunction: Fn(String, Option<OsString>) -> Result<BinaryPaths, WhichError>,
-> Iterator for PythonExeIter<String, BinaryNames, BinaryPaths, WhichError, WhichFunction>
+    WhichFunction: Fn(OsString, Option<OsString>) -> Result<BinaryPaths, WhichError>,
+> Iterator
+    for PythonExeIter<
+        KnownBinaryPaths,
+        OsString,
+        BinaryNames,
+        BinaryPaths,
+        WhichError,
+        WhichFunction,
+    >
 {
     type Item = PathBuf;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if let Some(binary_paths) = self.binary_paths.as_mut() {
+            if let Some(known_paths) = self.known_paths.as_mut() {
+                if let Some(binary_path) = known_paths.next() {
+                    if let Ok(real_binary_path) = binary_path.canonicalize() {
+                        if self.seen.contains(real_binary_path.as_path()) {
+                            continue;
+                        }
+                        self.seen.insert(real_binary_path.clone());
+                        return Some(real_binary_path);
+                    } else {
+                        // E.G: A broken symbolic link.
+                        continue;
+                    }
+                } else {
+                    self.known_paths = None;
+                }
+            } else if let Some(binary_paths) = self.binary_paths.as_mut() {
                 if let Some(binary_path) = binary_paths.next() {
                     if let Ok(real_binary_path) = binary_path.canonicalize() {
                         if self.seen.contains(real_binary_path.as_path()) {
@@ -443,7 +478,7 @@ impl<
                     self.binary_paths = None;
                 }
             } else if let Some(binary_name) = self.binary_names.next()
-                && let Ok(binary_paths) = (self.which_fn)(binary_name, self.search_path.clone())
+                && let Ok(binary_paths) = (self.which_fn)(binary_name, self.path.clone())
             {
                 self.binary_paths = Some(binary_paths);
             } else {
@@ -455,6 +490,7 @@ impl<
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::{OsStr, OsString};
     use std::str::FromStr;
 
     use pep440_rs::VersionSpecifiers;
@@ -529,6 +565,11 @@ mod tests {
         );
     }
 
+    fn os_str(value: &str) -> &OsStr {
+        // SAFETY: Tests use ascii.
+        unsafe { OsStr::from_encoded_bytes_unchecked(value.as_bytes()) }
+    }
+
     #[test]
     fn test_interpreter_constraints_binary_names_all_default_order() {
         let ics = InterpreterConstraints::try_from::<&str>(&[]).unwrap();
@@ -536,29 +577,41 @@ mod tests {
 
         assert_eq!(&["python2.7", "pypy2.7"], &binary_names[0..2]);
 
-        assert!(binary_names.get_index_of("pypy2.7") < binary_names.get_index_of("python3.14"));
-        assert!(binary_names.get_index_of("python3.14") < binary_names.get_index_of("pypy3.14"));
-        assert!(binary_names.get_index_of("pypy3.14") < binary_names.get_index_of("python3.15"));
-        assert!(binary_names.get_index_of("python3.15") < binary_names.get_index_of("pypy3.15"));
+        assert!(
+            binary_names.get_index_of(os_str("pypy2.7"))
+                < binary_names.get_index_of(os_str("python3.14"))
+        );
+        assert!(
+            binary_names.get_index_of(os_str("python3.14"))
+                < binary_names.get_index_of(os_str("pypy3.14"))
+        );
+        assert!(
+            binary_names.get_index_of(os_str("pypy3.14"))
+                < binary_names.get_index_of(os_str("python3.15"))
+        );
+        assert!(
+            binary_names.get_index_of(os_str("python3.15"))
+                < binary_names.get_index_of(os_str("pypy3.15"))
+        );
         assert_eq!(
             &["python2", "pypy2", "python3", "pypy3", "python", "pypy"],
             &binary_names[binary_names.len() - 6..]
         );
 
-        assert!(!binary_names.contains("python2.6"));
-        assert!(!binary_names.contains("python2.8"));
-        assert!(!binary_names.contains("python3.0"));
-        assert!(!binary_names.contains("python3.1"));
-        assert!(!binary_names.contains("python3.2"));
-        assert!(!binary_names.contains("python3.3"));
-        assert!(!binary_names.contains("python3.4"));
-        assert!(binary_names.contains("python3.5"));
-        assert!(binary_names.contains("python3.6"));
+        assert!(!binary_names.contains(os_str("python2.6")));
+        assert!(!binary_names.contains(os_str("python2.8")));
+        assert!(!binary_names.contains(os_str("python3.0")));
+        assert!(!binary_names.contains(os_str("python3.1")));
+        assert!(!binary_names.contains(os_str("python3.2")));
+        assert!(!binary_names.contains(os_str("python3.3")));
+        assert!(!binary_names.contains(os_str("python3.4")));
+        assert!(binary_names.contains(os_str("python3.5")));
+        assert!(binary_names.contains(os_str("python3.6")));
 
-        assert!(!binary_names.contains("python3.12t"));
-        assert!(binary_names.contains("python3.13t"));
-        assert!(binary_names.contains("python3.14t"));
-        assert!(binary_names.contains("python3.15t"));
+        assert!(!binary_names.contains(os_str("python3.12t")));
+        assert!(binary_names.contains(os_str("python3.13t")));
+        assert!(binary_names.contains(os_str("python3.14t")));
+        assert!(binary_names.contains(os_str("python3.15t")));
     }
 
     #[test]
@@ -566,10 +619,22 @@ mod tests {
         let ics = InterpreterConstraints::try_from::<&str>(&[]).unwrap();
         let binary_names = ics.calculate_compatible_binary_names(SelectionStrategy::Newest);
 
-        assert!(binary_names.get_index_of("python3.15") < binary_names.get_index_of("pypy3.15"));
-        assert!(binary_names.get_index_of("pypy3.15") < binary_names.get_index_of("python3.14"));
-        assert!(binary_names.get_index_of("python3.14") < binary_names.get_index_of("pypy3.14"));
-        assert!(binary_names.get_index_of("pypy3.14") < binary_names.get_index_of("python2.7"));
+        assert!(
+            binary_names.get_index_of(os_str("python3.15"))
+                < binary_names.get_index_of(os_str("pypy3.15"))
+        );
+        assert!(
+            binary_names.get_index_of(os_str("pypy3.15"))
+                < binary_names.get_index_of(os_str("python3.14"))
+        );
+        assert!(
+            binary_names.get_index_of(os_str("python3.14"))
+                < binary_names.get_index_of(os_str("pypy3.14"))
+        );
+        assert!(
+            binary_names.get_index_of(os_str("pypy3.14"))
+                < binary_names.get_index_of(os_str("python2.7"))
+        );
         assert_eq!(
             &[
                 "python2.7",
