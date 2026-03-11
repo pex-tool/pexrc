@@ -5,8 +5,9 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 
+use anyhow::anyhow;
 use ctor::dtor;
 use python::{InterpreterIdentificationScript, Resources, embedded};
 use rstest::fixture;
@@ -36,11 +37,42 @@ pub fn tmp_dir() -> PathBuf {
     create_tmp_dir()
 }
 
+static PEXRC_TESTING_CACHE_ROOT: LazyLock<anyhow::Result<PathBuf>> = LazyLock::new(|| {
+    let cache_dir = cache::cache_dir("pexrc-dev", ".pexrc-dev")
+        .ok_or_else(|| anyhow!("Failed to establish a testing cache dir."))?;
+    fs::create_dir_all(&cache_dir)?;
+    Ok(cache_dir)
+});
+
+const MANAGED_PYTHON_VERSION: &str = "3.14.3";
+
 #[fixture]
 #[once]
 pub fn python_exe() -> PathBuf {
+    let install_dir = PEXRC_TESTING_CACHE_ROOT
+        .as_ref()
+        .unwrap()
+        .join("interpreters");
+
+    assert!(
+        Command::new("uv")
+            .args([
+                "python",
+                "install",
+                "--managed-python",
+                MANAGED_PYTHON_VERSION
+            ])
+            .env("UV_PYTHON_INSTALL_DIR", &install_dir)
+            .spawn()
+            .unwrap()
+            .wait()
+            .unwrap()
+            .success()
+    );
+
     let python_exe_bytes = Command::new("uv")
-        .args(["python", "find"])
+        .args(["python", "find", "--managed-python", MANAGED_PYTHON_VERSION])
+        .env("UV_PYTHON_INSTALL_DIR", install_dir)
         .stdout(Stdio::piped())
         .spawn()
         .unwrap()

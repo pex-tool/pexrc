@@ -61,25 +61,30 @@ impl<'a> Virtualenv<'a> {
 
     #[time("debug", "Virtualenv.{}")]
     pub fn create(
-        interpreter: &Interpreter,
+        interpreter: Interpreter,
         path: Cow<'a, Path>,
         resources: &mut impl Resources<'a>,
         include_system_site_packages: bool,
     ) -> anyhow::Result<Self> {
+        let venv_interpreter = Self::host_interpreter(path.as_ref(), &interpreter);
+
         let site_packages_relpath =
             if interpreter.version.major == 3 && interpreter.version.minor >= 3 {
-                create_pep_405_venv(interpreter, path.as_ref(), include_system_site_packages)?
+                create_pep_405_venv(
+                    interpreter,
+                    path.as_ref(),
+                    include_system_site_packages,
+                    resources,
+                )?
             } else {
                 let virtualenv_script = VendoredVirtualenvScript::read(resources)?;
                 create_virtualenv_venv(
-                    interpreter,
+                    &interpreter,
                     path.as_ref(),
                     virtualenv_script,
                     include_system_site_packages,
                 )?
             };
-
-        let venv_interpreter = Self::host_interpreter(path.as_ref(), interpreter);
 
         Ok(Self {
             interpreter: venv_interpreter,
@@ -98,15 +103,17 @@ impl<'a> Virtualenv<'a> {
 }
 
 fn create_pep_405_venv<'a>(
-    interpreter: &Interpreter,
+    interpreter: Interpreter,
     path: &Path,
     include_system_site_packages: bool,
+    resources: &mut impl Resources<'a>,
 ) -> anyhow::Result<Cow<'a, Path>> {
     // See: https://peps.python.org/pep-0405/
-    let home = interpreter.realpath.parent().ok_or_else(|| {
+    let base_interpreter = interpreter.resolve_base_interpreter(resources)?;
+    let home = base_interpreter.realpath.parent().ok_or_else(|| {
         anyhow!(
             "Failed to calculate the home dir of venv base python {path}",
-            path = interpreter.realpath.display()
+            path = base_interpreter.realpath.display()
         )
     })?;
     fs::write(
@@ -121,8 +128,8 @@ fn create_pep_405_venv<'a>(
     )?;
     let scripts_dir = path.join(SCRIPTS_DIR);
     fs::create_dir_all(&scripts_dir)?;
-    link_or_copy(&interpreter.realpath, scripts_dir.join(PYTHON_EXE))?;
-    let site_packages_relpath = site_packages_relpath(interpreter);
+    link_or_copy(&base_interpreter.realpath, scripts_dir.join(PYTHON_EXE))?;
+    let site_packages_relpath = site_packages_relpath(&base_interpreter);
     fs::create_dir_all(path.join(site_packages_relpath.as_ref()))?;
     Ok(site_packages_relpath)
 }
@@ -205,14 +212,13 @@ mod tests {
     fn test_create(python_exe: &Path, tmp_dir: PathBuf, mut resources: impl Resources<'static>) {
         let identification_script = InterpreterIdentificationScript::read(&mut resources).unwrap();
         let interpreter = Interpreter::load(python_exe, &identification_script).unwrap();
+        let expected_prefix = interpreter
+            .base_prefix
+            .as_ref()
+            .unwrap_or(&interpreter.prefix)
+            .clone();
         let venv =
-            Virtualenv::create(&interpreter, Cow::Owned(tmp_dir), &mut resources, false).unwrap();
-        assert_eq!(
-            interpreter
-                .base_prefix
-                .unwrap_or(interpreter.prefix)
-                .as_os_str(),
-            venv.interpreter.base_prefix.unwrap().as_os_str()
-        )
+            Virtualenv::create(interpreter, Cow::Owned(tmp_dir), &mut resources, false).unwrap();
+        assert_eq!(expected_prefix, venv.interpreter.base_prefix.unwrap())
     }
 }

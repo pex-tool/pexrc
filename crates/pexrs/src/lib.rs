@@ -81,7 +81,7 @@ fn prepare_venv<'a>(python: impl AsRef<Path>, pex: &'a Path) -> anyhow::Result<V
         // TODO: XXX: Account for PEX_PATH
         let (interpreter, selected_wheels, mut resources) = pex.resolve(Some(python.as_ref()))?;
         let venv = Virtualenv::create(
-            &interpreter,
+            interpreter,
             Cow::Borrowed(work_dir),
             &mut resources,
             pex_info.venv_system_site_packages,

@@ -14,6 +14,14 @@ pub use atomic::{atomic_dir, atomic_file};
 pub use fingerprint::{Fingerprint, HashOptions, hash_file};
 use logging_timer::time;
 
+pub fn cache_dir(name: &str, alt_name: &str) -> Option<PathBuf> {
+    if let Some(cache_dir) = dirs::cache_dir() {
+        Some(cache_dir.join(name))
+    } else {
+        dirs::home_dir().map(|home_dir| home_dir.join(alt_name))
+    }
+}
+
 static PEXRC_ROOT: LazyLock<Result<PathBuf, Cow<'static, str>>> = LazyLock::new(|| {
     if let Some(pexrc_root) = env::var_os("PEXRC_ROOT") {
         let path = Path::new(&pexrc_root);
@@ -33,10 +41,8 @@ static PEXRC_ROOT: LazyLock<Result<PathBuf, Cow<'static, str>>> = LazyLock::new(
             }
         }
         Ok(cache_dir.iter().collect())
-    } else if let Some(cache_dir) = dirs::cache_dir() {
-        Ok(cache_dir.join("pexrc"))
-    } else if let Some(home_dir) = dirs::home_dir() {
-        Ok(home_dir.join(".pexrc"))
+    } else if let Some(cache_dir) = cache_dir("pexrc", ".pexrc") {
+        Ok(cache_dir)
     } else {
         Err(Cow::Borrowed(
             "Failed to calculate a PEXRC_ROOT directory!\n\

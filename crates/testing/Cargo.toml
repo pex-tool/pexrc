@@ -3,6 +3,8 @@ name = "testing"
 edition = "2024"
 
 [dependencies]
+anyhow = { workspace = true }
+cache = { path = "../cache" }
 ctor = { workspace = true }
 python = { path = "../python", features = ["embedded_resources"] }
 rstest = { workspace = true }

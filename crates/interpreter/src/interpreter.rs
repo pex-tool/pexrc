@@ -1,6 +1,8 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::borrow::Cow;
+use std::fmt::{Display, Formatter};
 use std::io::{BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -11,10 +13,10 @@ use cache::{CacheDir, HashOptions, atomic_file, hash_file};
 use log::debug;
 use logging_timer::time;
 use pep508_rs::MarkerEnvironment;
-use python::InterpreterIdentificationScript;
+use python::{InterpreterIdentificationScript, Resources};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct PythonVersion {
     pub major: u8,
     pub minor: u8,
@@ -23,9 +25,43 @@ pub struct PythonVersion {
     pub serial: u8,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+impl Display for PythonVersion {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!(
+            "{major}.{minor}.{micro}",
+            major = self.major,
+            minor = self.minor,
+            micro = self.micro
+        ))?;
+
+        // N.B.: Using this for possible strings reference:
+        // https://peps.python.org/pep-0739/#implementation-version-releaselevel
+
+        if let Some(level_abbrev) = match self.releaselevel.as_str() {
+            "alpha" => Some("a"),
+            "beta" => Some("b"),
+            "candidate" => Some("rc"),
+            _ => None,
+        } {
+            f.write_fmt(format_args!("{level_abbrev}{serial}", serial = self.serial))?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct PyPyVersion(u8, u8, u8);
 
+impl Display for PyPyVersion {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!(
+            "{major}.{minor}.{patch}",
+            major = self.0,
+            minor = self.1,
+            patch = self.2
+        ))
+    }
+}
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Interpreter {
     pub path: PathBuf,
@@ -39,16 +75,6 @@ pub struct Interpreter {
     pub supported_tags: Vec<String>,
     pub has_ensurepip: bool,
     pub free_threaded: Option<bool>,
-}
-
-impl Interpreter {
-    pub fn hermetic_args(&self) -> &'static str {
-        if self.version.major == 3 && self.version.minor >= 4 {
-            "-I"
-        } else {
-            "-sE"
-        }
-    }
 }
 
 #[cfg(target_os = "linux")]
@@ -113,11 +139,115 @@ impl Interpreter {
         })
     }
 
+    #[cfg(unix)]
+    fn iter_candidate_rel_paths<'a>(
+        version: &PythonVersion,
+        pypy_version: Option<&PyPyVersion>,
+    ) -> impl IntoIterator<Item = Cow<'a, Path>> {
+        let mut candidates: Vec<Cow<'_, Path>> =
+            Vec::with_capacity(if pypy_version.is_some() { 6 } else { 3 });
+        if let Some(pypy_version) = pypy_version {
+            candidates.push(Cow::Owned(PathBuf::from(format!(
+                "bin/pypy{major}.{minor}",
+                major = pypy_version.0,
+                minor = pypy_version.1
+            ))));
+            candidates.push(Cow::Owned(PathBuf::from(format!(
+                "bin/pypy{major}",
+                major = pypy_version.0
+            ))));
+            candidates.push(Cow::Borrowed(Path::new("bin/pypy")));
+        }
+        candidates.push(Cow::Owned(PathBuf::from(format!(
+            "bin/python{major}.{minor}",
+            major = version.major,
+            minor = version.minor
+        ))));
+        candidates.push(Cow::Owned(PathBuf::from(format!(
+            "bin/python{major}",
+            major = version.major
+        ))));
+        candidates.push(Cow::Borrowed(Path::new("bin/python")));
+        candidates
+    }
+
+    #[cfg(windows)]
+    fn iter_candidate_rel_paths<'a>(
+        version: &PythonVersion,
+        pypy_version: Option<&PyPyVersion>,
+    ) -> impl IntoIterator<Item = Cow<'a, Path>> {
+        if let Some(pypy_version) = pypy_version {
+            vec![
+                Cow::Borrowed(Path::new("pypy.exe")),
+                Cow::Borrowed(Path::new("python.exe")),
+                Cow::Owned(PathBuf::from(format!(
+                    "Scripts\\pypy{major}.{minor}.exe",
+                    major = pypy_version.0,
+                    minor = pypy_version.1
+                ))),
+                Cow::Owned(PathBuf::from(format!(
+                    "Scripts\\pypy{major}.exe",
+                    major = pypy_version.0
+                ))),
+                Cow::Borrowed(Path::new("Scripts\\pypy.exe")),
+                Cow::Owned(PathBuf::from(format!(
+                    "Scripts\\python{major}.{minor}.exe",
+                    major = version.major,
+                    minor = version.minor
+                ))),
+                Cow::Owned(PathBuf::from(format!(
+                    "Scripts\\python{major}.exe",
+                    major = version.major
+                ))),
+                Cow::Borrowed(Path::new("Scripts\\python.exe")),
+            ]
+        } else {
+            vec![
+                Cow::Borrowed(Path::new("python.exe")),
+                Cow::Borrowed(Path::new("Scripts\\python.exe")),
+            ]
+        }
+    }
+
+    fn at_prefix<'a>(
+        prefix: impl AsRef<Path>,
+        version: PythonVersion,
+        pypy_version: Option<PyPyVersion>,
+        resources: &mut impl Resources<'a>,
+    ) -> anyhow::Result<Self> {
+        let identification_script = InterpreterIdentificationScript::read(resources)?;
+        for rel_path in Self::iter_candidate_rel_paths(&version, pypy_version.as_ref()) {
+            let candidate_path = prefix.as_ref().join(rel_path);
+            if let Ok(interpreter) = Self::load(candidate_path, &identification_script) {
+                if interpreter.version != version {
+                    continue;
+                }
+                match (pypy_version.as_ref(), interpreter.pypy_version.as_ref()) {
+                    (Some(expected_pypy_version), Some(actual_pypy_version))
+                        if expected_pypy_version == actual_pypy_version =>
+                    {
+                        return Ok(interpreter);
+                    }
+                    (None, None) => return Ok(interpreter),
+                    _ => continue,
+                }
+            }
+        }
+        if let Some(pypy_version) = pypy_version {
+            bail!(
+                "Failed to find a Python interpreter matching version {version} \
+                (PyPy {pypy_version})"
+            )
+        } else {
+            bail!("Failed to find a Python interpreter matching version {version}")
+        }
+    }
+
     const INTERPRETER_HASH_CONFIG: HashOptions =
         HashOptions::new().path(true).mtime(true).size(true);
 
     #[time("debug", "Interpreter.{}")]
-    pub fn load<'a>(
+    pub fn load(
         python_exe: impl AsRef<Path>,
         identification_script: &InterpreterIdentificationScript,
     ) -> anyhow::Result<Self> {
@@ -146,17 +276,39 @@ impl Interpreter {
         })?;
         Ok(())
     }
+
+    pub fn hermetic_args(&self) -> &'static str {
+        if self.version.major == 3 && self.version.minor >= 4 {
+            "-I"
+        } else {
+            "-sE"
+        }
+    }
+
+    pub fn resolve_base_interpreter<'a>(
+        self,
+        resources: &mut impl Resources<'a>,
+    ) -> anyhow::Result<Interpreter> {
+        if let Some(base_prefix) = self.base_prefix.as_ref()
+            && base_prefix != &self.prefix
+        {
+            let resolved =
+                Self::at_prefix(base_prefix, self.version, self.pypy_version, resources)?;
+            return resolved.resolve_base_interpreter(resources);
+        }
+        Ok(self)
+    }
 }
 
 #[cfg(test)]
 mod tests {
 
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::process::{Command, Stdio};
 
-    use python::InterpreterIdentificationScript;
+    use python::{InterpreterIdentificationScript, Resources};
     use rstest::rstest;
-    use testing::{interpreter_identification_script, venv_python_exe};
+    use testing::{interpreter_identification_script, python_exe, resources, venv_python_exe};
     use textwrap::dedent;
 
     use crate::Interpreter;
@@ -197,5 +349,22 @@ mod tests {
             Interpreter::load_uncached(venv_python_exe, &interpreter_identification_script)
                 .unwrap();
         assert_eq!(expected_tags, interpreter.supported_tags);
+    }
+
+    #[rstest]
+    fn test_resolve_base_interpreter(
+        python_exe: &Path,
+        venv_python_exe: PathBuf,
+        mut resources: impl Resources<'static>,
+    ) {
+        let identification_script = InterpreterIdentificationScript::read(&mut resources).unwrap();
+        let venv_interpreter = Interpreter::load(venv_python_exe, &identification_script).unwrap();
+        assert_eq!(
+            python_exe,
+            venv_interpreter
+                .resolve_base_interpreter(&mut resources)
+                .unwrap()
+                .path
+        )
     }
 }
