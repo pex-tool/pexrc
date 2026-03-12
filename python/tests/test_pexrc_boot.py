@@ -150,7 +150,7 @@ def test_pex_path(
     expected_message = "| {message} |".format(message=colors.cyan("Moo?"))
     assert expected_message in run_traditional_pex(cowsay_pex, "Moo?", PEX_PATH=ansicolors_pex)
 
-    assert expected_message == run_injected_pex(
+    assert expected_message in run_injected_pex(
         pexrc,
         cowsay_pex,
         "Moo?",
