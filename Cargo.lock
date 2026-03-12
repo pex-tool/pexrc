@@ -1653,6 +1653,7 @@ dependencies = [
  "pexrc-build-system",
  "strum",
  "strum_macros",
+ "zip",
 ]
 
 [[package]]

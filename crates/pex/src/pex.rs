@@ -305,12 +305,27 @@ impl<'a> Pex<'a> {
         }
     }
 
+    fn resolve_wheels(&self, interpreter: &Interpreter) -> anyhow::Result<IndexSet<&str>> {
+        let zip_app_pex = match self {
+            Pex::Loose(_) => todo!("XXX: Implement loose PEX wheel resolution."),
+            Pex::Packed(_) => todo!("XXX: Implement packed PEX wheel resolution."),
+            Pex::ZipApp(zip_app) => zip_app,
+        };
+        zip_app_pex.resolve(interpreter)
+    }
+
     #[time("debug", "Pex.{}")]
     pub fn resolve(
-        &self,
+        &'a self,
         python_exe: Option<&Path>,
+        additional_pexes: impl Iterator<Item = &'a Pex<'a>>,
         search_path: SearchPath,
-    ) -> anyhow::Result<(Interpreter, IndexSet<&str>, impl Resources<'_>)> {
+    ) -> anyhow::Result<(
+        Interpreter,
+        IndexSet<&'a str>,
+        impl Resources<'a>,
+        Vec<(&'a Pex<'a>, IndexSet<&'a str>)>,
+    )> {
         let zip_app_pex = match self {
             Pex::Loose(_) => todo!("XXX: Implement loose PEX wheel resolution."),
             Pex::Packed(_) => todo!("XXX: Implement packed PEX wheel resolution."),
@@ -329,7 +344,12 @@ impl<'a> Pex<'a> {
             && interpreter_constraints.contains(&interpreter)
         {
             match zip_app_pex.resolve(&interpreter) {
-                Ok(selected_wheels) => return Ok((interpreter, selected_wheels, resources)),
+                Ok(selected_wheels) => {
+                    let additional_resolves = additional_pexes
+                        .map(|pex| pex.resolve_wheels(&interpreter).map(|wheels| (pex, wheels)))
+                        .collect::<anyhow::Result<Vec<_>>>()?;
+                    return Ok((interpreter, selected_wheels, resources, additional_resolves));
+                }
                 Err(err) => errors.push((interpreter, err)),
             }
         }
@@ -367,7 +387,10 @@ impl<'a> Pex<'a> {
                 }
             })
         {
-            return Ok((interpreter, selected_wheels, resources));
+            let additional_resolves = additional_pexes
+                .map(|pex| pex.resolve_wheels(&interpreter).map(|wheels| (pex, wheels)))
+                .collect::<anyhow::Result<Vec<_>>>()?;
+            return Ok((interpreter, selected_wheels, resources, additional_resolves));
         }
 
         let reqs = &self.info().requirements;
@@ -417,26 +440,32 @@ impl<'a> Pex<'a> {
 
 #[cfg(test)]
 mod tests {
+    use std::fs::File;
     use std::path::{Path, PathBuf};
     use std::process::Command;
     use std::str::FromStr;
 
     use ::interpreter::Interpreter;
     use indexmap::IndexSet;
+    use interpreter::SearchPath;
     use pep508_rs::{Requirement, VersionOrUrl};
-    use python::InterpreterIdentificationScript;
+    use python::{InterpreterIdentificationScript, Resources};
     use rstest::{fixture, rstest};
-    use testing::{interpreter_identification_script, python_exe, tmp_dir};
+    use testing::{interpreter_identification_script, python_exe, resources, tmp_dir};
     use url::Url;
+    use zip::write::SimpleFileOptions;
+    use zip::{CompressionMethod, ZipWriter};
 
     use crate::wheel::WheelFile;
-    use crate::{Pex, WheelResolver};
+    use crate::{Pex, PexPath, WheelResolver};
+
+    const EXPECTED_ANSICOLORS_PEX_WHEELS: [&str; 1] = ["ansicolors==1.1.8"];
 
     #[fixture]
-    fn pex(tmp_dir: PathBuf) -> PathBuf {
-        let pex = tmp_dir.join("pex");
+    fn ansicolors_pex(tmp_dir: PathBuf) -> PathBuf {
+        let pex = tmp_dir.join("ansicolors.pex");
         Command::new("uvx")
-            .args(["pex", "requests[socks]==2.32.5", "-o"])
+            .args(["pex", "ansicolors==1.1.8", "-o"])
             .arg(&pex)
             .spawn()
             .unwrap()
@@ -445,21 +474,49 @@ mod tests {
         pex
     }
 
-    #[rstest]
-    fn test_resolve(
-        pex: PathBuf,
-        python_exe: &Path,
-        interpreter_identification_script: InterpreterIdentificationScript,
-    ) {
-        let pex = match Pex::load(&pex).unwrap() {
-            Pex::ZipApp(zip_app_pex) => zip_app_pex,
-            _ => panic!("Unexpected pex type"),
-        };
-        let interpreter =
-            Interpreter::load(python_exe, &interpreter_identification_script).unwrap();
-        let resolved = pex
-            .resolve(&interpreter)
+    const EXPECTED_REQUESTS_PEX_WHEELS: [&str; 6] = [
+        "requests[socks]==2.32.5",
+        "charset_normalizer<4,>=2",
+        "idna<4,>=2.5",
+        "urllib3<3,>=1.21.1",
+        "certifi>=2017.4.17",
+        "PySocks!=1.5.7,>=1.5.6; extra == \"socks\"",
+    ];
+
+    #[fixture]
+    fn requests_pex(
+        tmp_dir: PathBuf,
+        ansicolors_pex: PathBuf,
+        mut resources: impl Resources<'static>,
+    ) -> PathBuf {
+        let pex = tmp_dir.join("requests.pex");
+        Command::new("uvx")
+            .args(["pex", "requests[socks]==2.32.5"])
+            .arg("--pex-path")
+            .arg(ansicolors_pex)
+            .arg("-o")
+            .arg(&pex)
+            .spawn()
             .unwrap()
+            .wait()
+            .unwrap();
+
+        let mut zip =
+            ZipWriter::new_append(File::options().read(true).write(true).open(&pex).unwrap())
+                .unwrap();
+        let file_options =
+            SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+        resources.inject_zip(&mut zip, file_options).unwrap();
+        zip.finish().unwrap();
+
+        pex
+    }
+
+    fn assert_wheels(
+        wheels: IndexSet<&str>,
+        expected_requirements: impl IntoIterator<Item = &'static str>,
+    ) {
+        let resolved = wheels
             .into_iter()
             .map(|wheel_file_name| {
                 WheelFile::parse_file_name(wheel_file_name)
@@ -467,17 +524,12 @@ mod tests {
             })
             .collect::<Result<IndexSet<_>, _>>()
             .unwrap();
-
-        let expected_requirements: Vec<Requirement<Url>> = vec![
-            Requirement::from_str("requests[socks]==2.32.5").unwrap(),
-            Requirement::from_str("charset_normalizer<4,>=2").unwrap(),
-            Requirement::from_str("idna<4,>=2.5").unwrap(),
-            Requirement::from_str("urllib3<3,>=1.21.1").unwrap(),
-            Requirement::from_str("certifi>=2017.4.17").unwrap(),
-            Requirement::from_str("PySocks!=1.5.7,>=1.5.6; extra == \"socks\"").unwrap(),
-        ];
+        let expected_resolve = expected_requirements
+            .into_iter()
+            .map(|req| Requirement::from_str(req).unwrap())
+            .collect::<Vec<Requirement<Url>>>();
         for (expected_requirement, (project_name, version)) in
-            itertools::zip_eq(expected_requirements, resolved)
+            itertools::zip_eq(expected_resolve, resolved)
         {
             assert_eq!(expected_requirement.name, project_name);
             let version_specifier = match expected_requirement.version_or_url {
@@ -486,5 +538,39 @@ mod tests {
             };
             assert!(version_specifier.contains(&version));
         }
+    }
+
+    #[rstest]
+    fn test_resolve_single(
+        requests_pex: PathBuf,
+        python_exe: &Path,
+        interpreter_identification_script: InterpreterIdentificationScript,
+    ) {
+        let pex = match Pex::load(&requests_pex).unwrap() {
+            Pex::ZipApp(zip_app_pex) => zip_app_pex,
+            _ => panic!("Unexpected pex type"),
+        };
+        let interpreter =
+            Interpreter::load(python_exe, &interpreter_identification_script).unwrap();
+        let wheels = pex.resolve(&interpreter).unwrap();
+
+        assert_wheels(wheels, EXPECTED_REQUESTS_PEX_WHEELS);
+    }
+
+    #[rstest]
+    fn test_resolve_additional(requests_pex: PathBuf, python_exe: &Path) {
+        let pex = Pex::load(&requests_pex).unwrap();
+        let pex_path = PexPath::from_pex_info(pex.info(), false);
+        let additional_pexes = pex_path.load_pexes().unwrap();
+        let search_path = SearchPath::known(vec![python_exe.to_path_buf()]);
+        let (_, wheels, _, additional_resolves) = pex
+            .resolve(Some(python_exe), additional_pexes.iter(), search_path)
+            .unwrap();
+
+        assert_wheels(wheels, EXPECTED_REQUESTS_PEX_WHEELS);
+
+        assert_eq!(1, additional_resolves.len());
+        let (_, additional_wheels) = additional_resolves.into_iter().next().unwrap();
+        assert_wheels(additional_wheels, EXPECTED_ANSICOLORS_PEX_WHEELS);
     }
 }

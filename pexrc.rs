@@ -12,8 +12,7 @@ use include_dir::{Dir, include_dir};
 use log::info;
 use owo_colors::OwoColorize as _;
 use platform::mark_executable;
-use python::{ResourcePath, Resources, embedded};
-use strum::IntoEnumIterator;
+use python::{Resources, embedded};
 use tempfile::NamedTempFile;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
@@ -104,18 +103,7 @@ fn inject(pex: &Path, compression_level: Option<i64>) -> anyhow::Result<()> {
     }
 
     let mut resources = embedded::RESOURCES;
-    dst_zip.add_directory("__pex__/.scripts", directory_options)?;
-    for resource_path in ResourcePath::iter() {
-        let text = resources.read(resource_path)?;
-        dst_zip.start_file(
-            format!(
-                "__pex__/.scripts/{script}",
-                script = resource_path.script_name()
-            ),
-            file_options,
-        )?;
-        dst_zip.write_all(text.as_bytes())?;
-    }
+    resources.inject_zip(&mut dst_zip, file_options)?;
 
     let file_options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
 

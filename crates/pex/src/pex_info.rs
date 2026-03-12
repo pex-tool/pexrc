@@ -5,6 +5,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io;
 use std::io::Read;
+use std::path::PathBuf;
 
 use anyhow::anyhow;
 use interpreter::SelectionStrategy;
@@ -77,7 +78,7 @@ pub struct PexInfo {
     pub overridden: Vec<String>,
     pub pex_hash: String,
     pub pex_path: String,
-    pub pex_paths: Vec<String>,
+    pub pex_paths: Vec<PathBuf>,
     pub pex_root: Option<String>,
     pub requirements: Vec<String>,
     pub script: Option<String>,

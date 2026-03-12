@@ -14,6 +14,14 @@ pub struct SearchPath {
 }
 
 impl SearchPath {
+    pub fn known(binary_paths: Vec<PathBuf>) -> Self {
+        Self {
+            python: None,
+            path: None,
+            binary_paths: Some(binary_paths),
+        }
+    }
+
     #[time("debug", "SearchPath.{}")]
     pub fn from_env() -> anyhow::Result<Self> {
         let mut binary_paths: Option<Vec<PathBuf>> = None;

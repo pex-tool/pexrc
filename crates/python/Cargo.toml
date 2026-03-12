@@ -9,6 +9,7 @@ embedded_resources = []
 anyhow = { workspace = true}
 strum = { workspace = true }
 strum_macros = { workspace = true }
+zip = { workspace = true }
 
 [build-dependencies]
 anyhow = { workspace = true }

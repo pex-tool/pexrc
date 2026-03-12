@@ -12,8 +12,8 @@ use interpreter::SearchPath;
 use itertools::Itertools;
 use log::debug;
 use logging_timer::time;
-use pex::Pex;
-use venv::{Virtualenv, populate};
+use pex::{Pex, PexPath};
+use venv::{Virtualenv, populate, populate_wheels};
 
 #[time("debug", "{}")]
 pub fn boot(
@@ -77,11 +77,15 @@ pub fn mount(python: impl AsRef<Path>, pex: impl AsRef<Path>) -> anyhow::Result<
 fn prepare_venv<'a>(python: impl AsRef<Path>, pex: &'a Path) -> anyhow::Result<Virtualenv<'a>> {
     let pex = Pex::load(pex)?;
     let pex_info = pex.info();
+    let pex_path = PexPath::from_pex_info(pex_info, true);
     let search_path = SearchPath::from_env()?;
+    // TODO: XXX: Mix PexPath into the cache dir key.
+    // TODO: XXX: Mix SearchPath into the cache dir key.
     let venv_dir = CacheDir::Venv.path()?.join(&pex_info.pex_hash);
     if let Some(venv_interpreter) = atomic_dir(&venv_dir, |work_dir| {
-        let (interpreter, selected_wheels, mut resources) =
-            pex.resolve(Some(python.as_ref()), search_path)?;
+        let additional_pexes = pex_path.load_pexes()?;
+        let (interpreter, selected_wheels, mut resources, additional_pexes) =
+            pex.resolve(Some(python.as_ref()), additional_pexes.iter(), search_path)?;
         let venv = Virtualenv::create(
             interpreter,
             Cow::Borrowed(work_dir),
@@ -89,6 +93,9 @@ fn prepare_venv<'a>(python: impl AsRef<Path>, pex: &'a Path) -> anyhow::Result<V
             pex_info.venv_system_site_packages,
         )?;
         populate(&venv, &venv_dir, &pex, &selected_wheels, &mut resources)?;
+        for (additional_pex, selected_wheels) in additional_pexes {
+            populate_wheels(&venv, additional_pex, &selected_wheels, false)?;
+        }
         Ok(venv.interpreter)
     })? {
         debug!("Built venv at {path}", path = venv_dir.display());

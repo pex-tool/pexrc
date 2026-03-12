@@ -12,6 +12,7 @@ requires-python = ">=2.7"
 
 [dependency-groups]
 dev = [
+    "ansicolors",
     "mypy",
     "pytest",
     "ruff",

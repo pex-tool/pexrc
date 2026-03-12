@@ -2,8 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::borrow::Cow;
+use std::io::{Seek, Write};
 
+use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
+use zip::ZipWriter;
+use zip::write::{FileOptionExtension, FileOptions, SimpleFileOptions};
 
 #[cfg(feature = "embedded_resources")]
 pub mod embedded;
@@ -29,6 +33,27 @@ impl ResourcePath {
 
 pub trait Resources<'a> {
     fn read(&mut self, path: ResourcePath) -> anyhow::Result<Cow<'a, str>>;
+
+    fn inject_zip<T: FileOptionExtension + Copy>(
+        &mut self,
+        zip: &mut ZipWriter<impl Write + Seek>,
+        file_options: FileOptions<'a, T>,
+    ) -> anyhow::Result<()> {
+        let directory_options = SimpleFileOptions::default();
+        zip.add_directory("__pex__/.scripts", directory_options)?;
+        for resource_path in ResourcePath::iter() {
+            let text = self.read(resource_path)?;
+            zip.start_file(
+                format!(
+                    "__pex__/.scripts/{script}",
+                    script = resource_path.script_name()
+                ),
+                file_options,
+            )?;
+            zip.write_all(text.as_bytes())?;
+        }
+        Ok(())
+    }
 }
 
 macro_rules! generate_script_type {

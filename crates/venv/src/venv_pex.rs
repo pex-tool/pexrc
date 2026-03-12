@@ -20,16 +20,15 @@ use zip::ZipArchive;
 
 use crate::virtualenv::Virtualenv;
 
-#[time("debug", "venv_pex.{}")]
-pub fn populate<'a>(
+#[time("debug", "{}")]
+pub fn populate_wheels<'a>(
     venv: &Virtualenv,
-    resting_venv_dir: &Path,
-    pex: &Pex,
-    selected_wheels: &IndexSet<&str>,
-    resources: &mut impl Resources<'a>,
-) -> anyhow::Result<()> {
+    pex: &'a Pex<'a>,
+    selected_wheels: &IndexSet<&'a str>,
+    populate_pex_info: bool,
+) -> anyhow::Result<&'a PexInfo> {
     let site_packages_path = venv.site_packages_path();
-    let (path, pex_info) = match pex {
+    match pex {
         Pex::Loose(_) => todo!("XXX: Implement loose PEX venv population."),
         Pex::Packed(_) => todo!("XXX: Implement packed PEX venv population."),
         Pex::ZipApp(zip_app_pex) => {
@@ -66,13 +65,30 @@ pub fn populate<'a>(
                     extract_idx(&site_packages_path, index, &mut zip)?;
                     Ok(())
                 })?;
-            let mut pex_info_src_fp = pex_zip.by_name("PEX-INFO")?;
-            let mut pex_info_dst_fp = File::create_new(venv.prefix().join("PEX-INFO"))?;
-            io::copy(&mut pex_info_src_fp, &mut pex_info_dst_fp)?;
-            (zip_app_pex.0, &zip_app_pex.1)
+            if populate_pex_info {
+                let mut pex_info_src_fp = pex_zip.by_name("PEX-INFO")?;
+                let mut pex_info_dst_fp = File::create_new(venv.prefix().join("PEX-INFO"))?;
+                io::copy(&mut pex_info_src_fp, &mut pex_info_dst_fp)?;
+            }
+            Ok(&zip_app_pex.1)
         }
-    };
+    }
+}
 
+#[time("debug", "{}")]
+pub fn populate<'a>(
+    venv: &Virtualenv,
+    resting_venv_dir: &Path,
+    pex: &'a Pex<'a>,
+    selected_wheels: &IndexSet<&str>,
+    resources: &mut impl Resources<'a>,
+) -> anyhow::Result<()> {
+    let path = match &pex {
+        Pex::Loose(_) => todo!("XXX: Implement loose PEX venv population."),
+        Pex::Packed(_) => todo!("XXX: Implement packed PEX venv population."),
+        Pex::ZipApp(zip_app_pex) => zip_app_pex.0,
+    };
+    let pex_info = populate_wheels(venv, pex, selected_wheels, true)?;
     let interpreter_relpath = venv
         .interpreter
         .path

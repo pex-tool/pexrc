@@ -4,5 +4,5 @@
 pub mod venv_pex;
 pub mod virtualenv;
 
-pub use venv_pex::populate;
+pub use venv_pex::{populate, populate_wheels};
 pub use virtualenv::Virtualenv;
