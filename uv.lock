@@ -674,6 +674,16 @@ wheels = [
 ]
 
 [[package]]
+name = "pex"
+version = "2.91.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/35/93/adbafe9e0da6a817e2e07d2f908935e3d9ff4e5693222dc8739880bc9795/pex-2.91.1.tar.gz", hash = "sha256:503f084ddf95ad469d7bcd319436b9e45c89518db01baf060c93c78feb85d54a", size = 5269330, upload-time = "2026-03-10T21:14:35.094Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ec/0e/fd3129f359fd13997f6509c4b96104ab86d712998ee29f88dd903989ad7f/pex-2.91.1-py2.py35.py36.py37.py38.py39.py310.py311-none-any.whl", hash = "sha256:59ba07bc0dd36211373f6109a7bbdabcfb7bf8f5f6fc0c311045dd8955aa3a39", size = 3967558, upload-time = "2026-03-10T21:14:30.103Z" },
+    { url = "https://files.pythonhosted.org/packages/d4/7a/3a74693433eaf6d4cb4dcda2a5d51d6325a4e48ef5c7b36b42fc6df33c71/pex-2.91.1-py3.py312-none-any.whl", hash = "sha256:aea5c0971968f31315b64d0b19c8b6bab2de828cfa8d23f2a8955cd80d26989d", size = 1767182, upload-time = "2026-03-10T21:14:33.051Z" },
+]
+
+[[package]]
 name = "pexrc"
 version = "0.1.0"
 source = { editable = "." }
@@ -687,6 +697,7 @@ dev = [
     { name = "mypy", version = "1.4.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.7.*'" },
     { name = "mypy", version = "1.14.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.8.*'" },
     { name = "mypy", version = "1.15.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+    { name = "pex" },
     { name = "pytest", version = "4.6.11", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.5'" },
     { name = "pytest", version = "6.1.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.5.*'" },
     { name = "pytest", version = "7.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.6.*'" },
@@ -712,6 +723,7 @@ dev = [
 dev = [
     { name = "ansicolors" },
     { name = "mypy" },
+    { name = "pex" },
     { name = "pytest" },
     { name = "pytest-xdist" },
     { name = "ruff" },

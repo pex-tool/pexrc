@@ -12,7 +12,7 @@ use indexmap::IndexSet;
 use itertools::Itertools;
 use log::warn;
 use logging_timer::time;
-use pex::{BinPath, Pex, PexInfo};
+use pex::{BinPath, InheritPath, Pex, PexInfo};
 use platform::{link_or_copy, mark_executable, path_as_bytes, path_as_str};
 use python::{Resources, VenvPexReplScript, VenvPexScript};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
@@ -94,8 +94,23 @@ pub fn populate<'a>(
         .path
         .strip_prefix(&venv.interpreter.prefix)?;
     let shebang_interpreter = resting_venv_dir.join(interpreter_relpath);
-    write_main(venv, &shebang_interpreter, pex_info, resources)?;
-    write_repl(venv, &shebang_interpreter, path, pex_info, resources)
+    let shebang_arg = if (pex_info.venv && pex_info.venv_hermetic_scripts)
+        || (!pex_info.venv
+            && pex_info.inherit_path.unwrap_or(InheritPath::False) == InheritPath::False)
+    {
+        Some(venv.interpreter.hermetic_args())
+    } else {
+        None
+    };
+    write_main(venv, &shebang_interpreter, shebang_arg, pex_info, resources)?;
+    write_repl(
+        venv,
+        &shebang_interpreter,
+        shebang_arg,
+        path,
+        pex_info,
+        resources,
+    )
 }
 
 fn extract_idx(
@@ -133,10 +148,18 @@ fn extract_idx(
     Ok(())
 }
 
-fn write_shebang_bytes(file: &mut File, shebang_interpreter: &Path) -> anyhow::Result<()> {
-    for chunk in [b"#!", path_as_bytes(shebang_interpreter)?, b"\n"] {
-        file.write_all(chunk)?;
+fn write_shebang_bytes(
+    file: &mut File,
+    shebang_interpreter: &Path,
+    shebang_arg: Option<&str>,
+) -> anyhow::Result<()> {
+    file.write_all(b"#!")?;
+    file.write_all(path_as_bytes(shebang_interpreter)?)?;
+    if let Some(shebang_arg) = shebang_arg {
+        file.write_all(b" ")?;
+        file.write_all(shebang_arg.as_bytes())?;
     }
+    file.write_all(b"\n")?;
     Ok(())
 }
 
@@ -155,12 +178,12 @@ fn as_optional_python_str(value: Option<&str>) -> Cow<'_, str> {
 fn write_main<'a>(
     venv: &Virtualenv,
     shebang_interpreter: &Path,
+    shebang_arg: Option<&str>,
     pex_info: &PexInfo,
     resources: &mut impl Resources<'a>,
 ) -> anyhow::Result<()> {
     let mut main_py_fp = File::create_new(venv.prefix().join("__main__.py"))?;
-
-    write_shebang_bytes(&mut main_py_fp, shebang_interpreter)?;
+    write_shebang_bytes(&mut main_py_fp, shebang_interpreter, shebang_arg)?;
     let venv_pex_script = VenvPexScript::read(resources)?;
     main_py_fp.write_all(venv_pex_script.contents().as_bytes())?;
     write!(
@@ -175,7 +198,8 @@ if __name__ == "__main__":
         venv_bin_dir=r"{venv_bin_dir}",
         bin_path=r"{bin_path}",
         strip_pex_env={strip_pex_env},
-        inject_env={{{inject_env}}},
+        bind_resource_paths=[{bind_resource_paths}],
+        inject_env=[{inject_env}],
         inject_args=[{inject_args}],
         entry_point={entry_point},
         script={script},
@@ -190,10 +214,15 @@ if __name__ == "__main__":
                 .unwrap_or(&BinPath::False)
                 .as_str(),
             strip_pex_env = as_python_bool(pex_info.strip_pex_env.unwrap_or(true)),
+            bind_resource_paths = pex_info
+                .bind_resource_paths
+                .iter()
+                .map(|(k, v)| format!("(r\"{k}\", r\"{v}\")"))
+                .join(","),
             inject_env = pex_info
                 .inject_env
                 .iter()
-                .map(|(k, v)| format!("r\"{k}\":r\"{v}\""))
+                .map(|(k, v)| format!("(r\"{k}\", r\"{v}\")"))
                 .join(","),
             inject_args = pex_info
                 .inject_args
@@ -216,12 +245,13 @@ if __name__ == "__main__":
 fn write_repl<'a>(
     venv: &Virtualenv,
     shebang_interpreter: &Path,
+    shebang_arg: Option<&str>,
     pex: &Path,
     pex_info: &PexInfo,
     resources: &mut impl Resources<'a>,
 ) -> anyhow::Result<()> {
     let mut pex_repl_py_fp = File::create_new(venv.prefix().join("pex-repl"))?;
-    write_shebang_bytes(&mut pex_repl_py_fp, shebang_interpreter)?;
+    write_shebang_bytes(&mut pex_repl_py_fp, shebang_interpreter, shebang_arg)?;
     let venv_pex_repl_script = VenvPexReplScript::read(resources)?;
     pex_repl_py_fp.write_all(venv_pex_repl_script.contents().as_bytes())?;
     // TODO: XXX: Need to append a if __name__ == "__main__" that calls _create_pex_repl(...)

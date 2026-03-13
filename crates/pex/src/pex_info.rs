@@ -34,7 +34,7 @@ impl BinPath {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Deserialize)]
 pub enum InheritPath {
     #[serde(rename = "false")]
     False,
@@ -84,6 +84,7 @@ pub struct PexInfo {
     pub requirements: Vec<String>,
     pub script: Option<String>,
     pub strip_pex_env: Option<bool>,
+    pub venv: bool,
     pub venv_bin_path: Option<BinPath>,
     pub venv_hermetic_scripts: bool,
     pub venv_system_site_packages: bool,

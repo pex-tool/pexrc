@@ -361,7 +361,6 @@ impl<'a> Pex<'a> {
                 search_path,
             )?
             .collect::<Vec<_>>();
-        eprintln!(">>> Interpreters to try: {interpreters_to_try:?}");
         let resolve_results_iter = interpreters_to_try
             .into_par_iter()
             .filter_map(

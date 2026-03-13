@@ -19,6 +19,6 @@ def pexrc_inject(pex):
     # type: (str) -> str
 
     subprocess.check_call(args=[pexrc(), "inject", pex])
-    injected_pex = pex + "rc"
+    injected_pex = pex + "rc" if pex.endswith(".pex") else pex + ".pexrc"
     assert os.path.isfile(injected_pex)
     return injected_pex
