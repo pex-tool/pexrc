@@ -28,7 +28,7 @@ def run_tests():
 
     pexrc = ensure_pexrc()
     env = os.environ.copy()
-    env.update(_PEXRC_TEST_PEXRC_BINARY=pexrc)
+    env.update(_PEXRC_TEST_PEXRC_BINARY=pexrc, PYTHONPATH=os.path.abspath(os.path.join("python")))
     return subprocess.call(
         args=["pytest"] + sys.argv[1:],
         cwd=os.path.abspath(os.path.join("python", "tests")),

@@ -4,75 +4,22 @@
 from __future__ import absolute_import, print_function
 
 import os.path
-import platform
 import subprocess
-import sys
-import time
 from textwrap import dedent
 
 import colors  # type: ignore[import-untyped]
+from testing.compare import compare
 
 TYPE_CHECKING = False
 if TYPE_CHECKING:
     # Ruff doesn't understand Python 2 and thus the type comment usages.
     from typing import Any, Text  # noqa: F401
 
-
-def run_traditional_pex(
-    pex,  # type: str
-    *args,  # type: str
-    **env,  # type: str
-):
-    # type: (...) -> Text
-
-    start = time.time()
-
-    try:
-        output = subprocess.check_output(
-            args=[sys.executable, pex] + list(args), env=dict(os.environ, **env)
-        )
-    except subprocess.CalledProcessError as e:
-        if platform.system() != "Windows":
-            raise e
-        # TODO: XXX: Get rid of this once Pex fixes cross-drive commonpath issues.
-        print("Expected failure from Pex PEX on Windows: {err}".format(err=e))
-        output = b""
-
-    print(
-        "Traditional PEX run took {elapsed:.5}ms".format(elapsed=(time.time() - start) * 1000),
-        file=sys.stderr,
-    )
-    return output.decode("utf-8")
+    from testing.compare import ProcessResult  # noqa: F401
 
 
-def run_injected_pex(
-    pexrc,  # type: str
-    pex,  # type: str
-    *args,  # type: str
-    **env,  # type: str
-):
-    # type: (...) -> Text
-
-    subprocess.check_call(args=[pexrc, "inject", pex])
-
-    start = time.time()
-    output = subprocess.check_output(
-        args=[sys.executable, pex + "rc"] + list(args), env=dict(os.environ, **env)
-    )
-    print(
-        "pexrc.boot import and run took {elapsed:.5}ms".format(
-            elapsed=(time.time() - start) * 1000
-        ),
-        file=sys.stderr,
-    )
-    return output.decode("utf-8")
-
-
-def test_boot(
-    tmpdir,  # type: Any
-    pexrc,  # type: str
-):
-    # type: (...) -> None
+def test_boot(tmpdir):
+    # type: (Any) -> None
 
     pex = os.path.join(str(tmpdir), "cowsay.pex")
     pex_root = os.path.join(str(tmpdir), "pex-root")
@@ -89,15 +36,24 @@ def test_boot(
         ]
     )
 
-    run_traditional_pex(pex, "Moo!")
-    run_injected_pex(pexrc, pex, "Moo!", PEXRC_ROOT=os.path.join(str(tmpdir), "pexrc-root"))
+    def test_result(
+        result,  # type: ProcessResult
+        _is_traditional_pex,  # type: bool
+    ):
+        # type: (...) -> None
+        result.assert_success()
+        assert "| Moo! |" in result.stdout
+
+    compare(
+        pex,
+        args=["Moo!"],
+        env=dict(PEXRC_ROOT=os.path.join(str(tmpdir), "pexrc-root")),
+        test_result=test_result,
+    )
 
 
-def test_pex_path(
-    tmpdir,  # type: Any
-    pexrc,  # type: str
-):
-    # type: (...) -> None
+def test_pex_path(tmpdir):
+    # type: (Any) -> None
 
     pex_root = os.path.join(str(tmpdir), "pex-root")
     ansicolors_pex = os.path.join(str(tmpdir), "ansicolors.pex")
@@ -147,13 +103,17 @@ def test_pex_path(
         ]
     )
 
-    expected_message = "| {message} |".format(message=colors.cyan("Moo?"))
-    assert expected_message in run_traditional_pex(cowsay_pex, "Moo?", PEX_PATH=ansicolors_pex)
+    def test_result(
+        result,  # type: ProcessResult
+        _is_traditional_pex,  # type: bool
+    ):
+        # type: (...) -> None
+        result.assert_success()
+        assert "| {message} |".format(message=colors.cyan("Moo?")) in result.stdout
 
-    assert expected_message in run_injected_pex(
-        pexrc,
+    compare(
         cowsay_pex,
-        "Moo?",
-        PEX_PATH=ansicolors_pex,
-        PEXRC_ROOT=os.path.join(str(tmpdir), "pexrc-root"),
+        args=["Moo?"],
+        env=dict(PEX_PATH=ansicolors_pex, PEXRC_ROOT=os.path.join(str(tmpdir), "pexrc-root")),
+        test_result=test_result,
     )

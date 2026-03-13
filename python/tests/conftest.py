@@ -3,12 +3,11 @@
 
 from __future__ import absolute_import
 
-import os
-
 import pytest
+import testing
 
 
 @pytest.fixture
 def pexrc():
     # type: () -> str
-    return os.environ["_PEXRC_TEST_PEXRC_BINARY"]
+    return testing.pexrc()
