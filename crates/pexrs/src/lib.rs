@@ -2,17 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::borrow::Cow;
-use std::ffi::OsStr;
+use std::env;
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::anyhow;
-use cache::{CacheDir, atomic_dir};
+use cache::{CacheDir, HashOptions, Key, atomic_dir};
 use interpreter::SearchPath;
 use itertools::Itertools;
-use log::debug;
+use log::{debug, warn};
 use logging_timer::time;
 use pex::{Pex, PexPath};
+use regex::bytes::Regex;
 use venv::{Virtualenv, populate, populate_wheels};
 
 #[time("debug", "{}")]
@@ -78,12 +80,10 @@ fn prepare_venv<'a>(python: impl AsRef<Path>, pex: &'a Path) -> anyhow::Result<V
     let pex = Pex::load(pex)?;
     let pex_info = pex.info();
     let pex_path = PexPath::from_pex_info(pex_info, true);
+    let additional_pexes = pex_path.load_pexes()?;
     let search_path = SearchPath::from_env()?;
-    // TODO: XXX: Mix PexPath into the cache dir key.
-    // TODO: XXX: Mix SearchPath into the cache dir key.
-    let venv_dir = CacheDir::Venv.path()?.join(&pex_info.pex_hash);
+    let venv_dir = venv_dir(python.as_ref(), &pex, &search_path, &additional_pexes)?;
     if let Some(venv_interpreter) = atomic_dir(&venv_dir, |work_dir| {
-        let additional_pexes = pex_path.load_pexes()?;
         let (interpreter, selected_wheels, mut resources, additional_pexes) =
             pex.resolve(Some(python.as_ref()), additional_pexes.iter(), search_path)?;
         let venv = Virtualenv::create(
@@ -107,4 +107,102 @@ fn prepare_venv<'a>(python: impl AsRef<Path>, pex: &'a Path) -> anyhow::Result<V
         let mut resources = pex.resources()?;
         Virtualenv::load(Cow::Owned(venv_dir), &mut resources)
     }
+}
+
+const INTERPRETER_HASH_OPTIONS: HashOptions = HashOptions::new().path(true).mtime(true).size(true);
+
+fn venv_dir(
+    ambient_python: &Path,
+    pex: &Pex,
+    search_path: &SearchPath,
+    additional_pexes: &[Pex],
+) -> anyhow::Result<PathBuf> {
+    let pex_info = pex.info();
+    let mut key = Key::default();
+
+    // The primary PEX hash covers its user code contents, distributions and ICs.
+    key.property("pex_hash", &pex_info.pex_hash);
+
+    // We hash just the distributions of additional PEXes since those are the only items used from
+    // PEX_PATH adjoined PEX files; i.e.: neither the entry_point nor any other PEX file data or
+    // metadata is used.
+    for additional_pex in additional_pexes {
+        key.object("additional_pex", additional_pex.info().distributions.iter());
+    }
+
+    let mut imprecise_pex_python: Option<&OsStr> = None;
+    let mut imprecise_pex_python_path: Option<OsString> = None;
+
+    // If there are no restrictions on interpreter, whatever we derive from the ambient python is
+    // our opaque choice, which we can keep.
+    if pex_info.interpreter_constraints.is_empty() && search_path.is_empty() {
+        key.file(ambient_python, &INTERPRETER_HASH_OPTIONS)?;
+    } else if let Some(python_exe) = search_path.unique_interpreter() {
+        // The user chose a unique interpreter (via PEX_PYTHON or PEX_PYTHON_PATH or a combination
+        // of the two). It may not match the ICs, if any, but the choice is respected.
+        key.file(python_exe, &INTERPRETER_HASH_OPTIONS)?;
+    } else {
+        // Otherwise, we do our best.
+        if let Some(python) = search_path.pex_python() {
+            let value = python.as_encoded_bytes();
+            key.property("PEX_PYTHON", value);
+            if pex_info.emit_warnings
+                && !Regex::new(r"^(?:[Pp]ython|pypy)\d+\.\d+[^\d]?(?:\.exe)$")?.is_match(value)
+            {
+                imprecise_pex_python = Some(python);
+            }
+        }
+        if let Some(path) = search_path.pex_python_path() {
+            key.list(
+                "PEX_PYTHON_PATH",
+                path.iter().map(|path| path.as_os_str().as_encoded_bytes()),
+            );
+            if pex_info.emit_warnings {
+                imprecise_pex_python_path = Some(env::join_paths(path)?);
+            }
+        }
+    }
+
+    let venv_dir = CacheDir::Venv.path()?.join(PathBuf::from(key));
+    if let Some(pex_python) = imprecise_pex_python {
+        warn!(
+            "\
+            Using a venv selected by PEX_PYTHON={pex_python}\n\
+            for {pex_file}\n\
+            at {venv_dir}.\n\
+            \n\
+            If `{pex_python}` is upgraded or downgraded at some later date, this venv will still\n\
+            be used. To force re-creation of the venv using the upgraded or downgraded\n\
+            `{pex_python}` you will need to delete it at that point in time.\n\
+            \n\
+            To avoid this warning, either specify a Python binary with major and minor version\n\
+            in its name, like PEX_PYTHON=python3.14 or else re-build the PEX\n\
+            with `--no-emit-warnings` or re-run the PEX with PEX_EMIT_WARNINGS=False.\n\
+            ",
+            pex_python = pex_python.display(),
+            pex_file = pex.path().display(),
+            venv_dir = venv_dir.display()
+        )
+    }
+    if let Some(pex_python_path) = imprecise_pex_python_path {
+        warn!(
+            "\
+            Using a venv restricted by PEX_PYTHON_PATH={ppp}\n\
+            for {pex_file}\n\
+            at {venv_dir}.\n\
+            \n\
+            If the contents of `{ppp}` changes at some later date, this venv and the interpreter\n\
+            selected from `{ppp}` will still be used. To force re-creation of the venv using\n\
+            the new pythons available on `{ppp}` you will need to delete it at that point in\n\
+            time.\n\
+            \n\
+            To avoid this warning, re-build the PEX with `--no-emit-warnings` or re-run the PEX\n\
+            with PEX_EMIT_WARNINGS=False.\n\
+            ",
+            ppp = pex_python_path.display(),
+            pex_file = pex.path().display(),
+            venv_dir = venv_dir.display()
+        )
+    }
+    Ok(venv_dir)
 }

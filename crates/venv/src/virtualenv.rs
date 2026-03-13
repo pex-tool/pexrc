@@ -3,6 +3,7 @@
 
 use std::borrow::Cow;
 use std::env::consts::EXE_SUFFIX;
+use std::io::Write;
 use std::path::{MAIN_SEPARATOR_STR, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::{env, fs};
@@ -140,11 +141,15 @@ fn create_virtualenv_venv<'a>(
     virtualenv_script: VendoredVirtualenvScript<'a>,
     include_system_site_packages: bool,
 ) -> anyhow::Result<Cow<'a, Path>> {
+    let mut script = tempfile::Builder::new()
+        .prefix("virtualenv.")
+        .suffix(".py")
+        .tempfile()?;
+    script.write_all(virtualenv_script.contents().as_bytes())?;
     let mut command = Command::new(&interpreter.path);
     command
         .arg(interpreter.hermetic_args())
-        .arg("-c")
-        .arg(virtualenv_script.contents())
+        .arg(script.path())
         .args(["--no-pip", "--no-setuptools", "--no-wheel"]);
     if include_system_site_packages {
         command.arg("--system-site-packages");
@@ -161,7 +166,7 @@ fn create_virtualenv_venv<'a>(
             interpreter {python_exe}:\n{stderr}",
             workdir = path.display(),
             python_implementation = interpreter.marker_env.platform_python_implementation(),
-            python_version = interpreter.marker_env.platform_version(),
+            python_version = interpreter.marker_env.python_full_version(),
             python_exe = interpreter.path.display(),
             stderr = String::from_utf8_lossy(&output.stderr)
         )

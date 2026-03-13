@@ -14,7 +14,9 @@ pep508_rs = { workspace = true }
 elf = { workspace = true }
 log = { workspace = true }
 logging_timer = { workspace = true }
+platform = { path = "../platform" }
 python = { path = "../python" }
+same-file = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 time = { workspace = true }

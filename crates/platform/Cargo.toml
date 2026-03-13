@@ -7,3 +7,9 @@ edition = "2024"
 
 [dependencies]
 anyhow = { workspace = true }
+
+# N.B.: Although is_executable is cross-platform, we only use it for Windows. The nix unistd access
+# function is more robust that the check is_executable does on unix.
+is_executable = { workspace = true }
+
+nix = { workspace = true }

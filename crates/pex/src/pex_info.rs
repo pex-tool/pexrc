@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::borrow::Cow;
-use std::collections::HashMap;
 use std::io;
 use std::io::Read;
 use std::path::PathBuf;
 
 use anyhow::anyhow;
+use indexmap::IndexMap;
 use interpreter::SelectionStrategy;
 use logging_timer::time;
 use serde::Deserialize;
@@ -63,15 +63,16 @@ impl From<InterpreterSelectionStrategy> for SelectionStrategy {
 
 #[derive(Debug, Deserialize)]
 pub struct PexInfo {
-    pub bind_resource_paths: HashMap<String, String>,
-    pub build_properties: HashMap<String, String>,
+    pub bind_resource_paths: IndexMap<String, String>,
+    pub build_properties: IndexMap<String, String>,
     pub deps_are_wheel_files: bool,
-    pub distributions: HashMap<String, String>,
+    pub distributions: IndexMap<String, String>,
+    pub emit_warnings: bool,
     pub entry_point: Option<String>,
     pub excluded: Vec<String>,
     pub inherit_path: Option<InheritPath>,
     pub inject_args: Vec<String>,
-    pub inject_env: HashMap<String, String>,
+    pub inject_env: IndexMap<String, String>,
     pub inject_python_args: Vec<String>,
     pub interpreter_constraints: Vec<String>,
     pub interpreter_selection_strategy: InterpreterSelectionStrategy,

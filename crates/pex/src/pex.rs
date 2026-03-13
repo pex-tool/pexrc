@@ -14,7 +14,7 @@ use anyhow::{anyhow, bail};
 use indexmap::{IndexMap, IndexSet};
 use interpreter::{Interpreter, InterpreterConstraints, SearchPath};
 use itertools::Itertools;
-use log::{Level, debug};
+use log::{Level, debug, warn};
 use logging_timer::{time, timer};
 use pep440_rs::Version;
 use pep508_rs::{ExtraName, PackageName, Requirement, VersionOrUrl};
@@ -342,6 +342,7 @@ impl<'a> Pex<'a> {
         if let Some(python_exe) = python_exe
             && let Ok(interpreter) = Interpreter::load(python_exe, &identification_script)
             && interpreter_constraints.contains(&interpreter)
+            && search_path.contains(python_exe)
         {
             match zip_app_pex.resolve(&interpreter) {
                 Ok(selected_wheels) => {
@@ -358,11 +359,23 @@ impl<'a> Pex<'a> {
             .iter_possibly_compatible_python_exes(
                 pex_info.interpreter_selection_strategy.into(),
                 search_path,
-            )
+            )?
             .collect::<Vec<_>>();
+        eprintln!(">>> Interpreters to try: {interpreters_to_try:?}");
         let resolve_results_iter = interpreters_to_try
             .into_par_iter()
-            .filter_map(|python_exe| Interpreter::load(python_exe, &identification_script).ok())
+            .filter_map(
+                |python_exe| match Interpreter::load(&python_exe, &identification_script) {
+                    Ok(interpreter) => Some(interpreter),
+                    Err(err) => {
+                        warn!(
+                            "Failed to load {python_exe}: {err}",
+                            python_exe = python_exe.display()
+                        );
+                        None
+                    }
+                },
+            )
             .filter(|interpreter| interpreter_constraints.contains(interpreter))
             .map(|interpreter| match zip_app_pex.resolve(&interpreter) {
                 Ok(selected_wheels) => Ok((interpreter, selected_wheels)),
@@ -446,7 +459,7 @@ mod tests {
     use std::str::FromStr;
 
     use ::interpreter::Interpreter;
-    use indexmap::IndexSet;
+    use indexmap::{IndexSet, indexset};
     use interpreter::SearchPath;
     use pep508_rs::{Requirement, VersionOrUrl};
     use python::{InterpreterIdentificationScript, Resources};
@@ -562,7 +575,7 @@ mod tests {
         let pex = Pex::load(&requests_pex).unwrap();
         let pex_path = PexPath::from_pex_info(pex.info(), false);
         let additional_pexes = pex_path.load_pexes().unwrap();
-        let search_path = SearchPath::known(vec![python_exe.to_path_buf()]);
+        let search_path = SearchPath::known(indexset![python_exe.to_path_buf()]);
         let (_, wheels, _, additional_resolves) = pex
             .resolve(Some(python_exe), additional_pexes.iter(), search_path)
             .unwrap();

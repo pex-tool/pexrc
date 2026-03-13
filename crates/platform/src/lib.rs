@@ -11,9 +11,9 @@ use std::path::Path;
 
 use anyhow::anyhow;
 #[cfg(unix)]
-pub use unix::{link_or_copy, mark_executable, path_as_bytes};
+pub use unix::{is_executable, link_or_copy, mark_executable, path_as_bytes};
 #[cfg(windows)]
-pub use windows::{link_or_copy, mark_executable, path_as_bytes};
+pub use windows::{is_executable, link_or_copy, mark_executable, path_as_bytes};
 
 pub fn path_as_str(path: &Path) -> anyhow::Result<&str> {
     path.to_str().ok_or_else(|| {

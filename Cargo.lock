@@ -1108,8 +1108,10 @@ dependencies = [
  "logging_timer",
  "pep440_rs",
  "pep508_rs",
+ "platform",
  "python",
  "rstest",
+ "same-file",
  "serde",
  "serde_json",
  "target-lexicon",
@@ -1135,6 +1137,15 @@ checksum = "c91338f0783edbd6195decb37bae672fd3b165faffb89bf7b9e6942f8b1a731a"
 dependencies = [
  "memchr",
  "serde",
+]
+
+[[package]]
+name = "is_executable"
+version = "1.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "baabb8b4867b26294d818bf3f651a454b6901431711abb96e296245888d6e8c4"
+dependencies = [
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1359,6 +1370,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "nix"
+version = "0.31.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d6d0705320c1e6ba1d912b5e37cf18071b6c2e9b7fa8215a1e8a7651966f5d3"
+dependencies = [
+ "bitflags",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
+]
+
+[[package]]
 name = "num-conv"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1524,16 +1547,13 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "cache",
- "indexmap",
  "interpreter",
  "itertools 0.14.0",
  "log",
  "logging_timer",
  "pex",
- "rayon",
- "tempfile",
+ "regex",
  "venv",
- "zip",
 ]
 
 [[package]]
@@ -1565,6 +1585,8 @@ name = "platform"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "is_executable",
+ "nix",
 ]
 
 [[package]]

@@ -15,6 +15,7 @@ use pep440_rs::{Version, VersionSpecifiers};
 use pep508_rs::{ExtraName, MarkerTree, PackageName, Requirement, VersionOrUrl};
 use time::Month;
 use url::Url;
+use which::sys::{RealSys, Sys};
 use which::which_in_global;
 
 use crate::{Interpreter, SearchPath};
@@ -393,21 +394,21 @@ impl InterpreterConstraints {
         &self,
         selection_strategy: SelectionStrategy,
         search_path: SearchPath,
-    ) -> impl Iterator<Item = PathBuf> {
-        let (python, path, known_paths) = search_path.into_parts();
+    ) -> anyhow::Result<impl Iterator<Item = PathBuf>> {
+        let (python, path, known_paths) = search_path.into_parts()?;
         let binary_names = if let Some(python) = python {
             indexset! {python}
         } else {
             self.calculate_compatible_binary_names(selection_strategy)
         };
-        PythonExeIter {
+        Ok(PythonExeIter {
             known_paths,
             path,
             binary_names: binary_names.into_iter(),
             which_fn: which_in_global,
             binary_paths: None,
             seen: HashSet::new(),
-        }
+        })
     }
 }
 
@@ -478,7 +479,10 @@ impl<
                     self.binary_paths = None;
                 }
             } else if let Some(binary_name) = self.binary_names.next()
-                && let Ok(binary_paths) = (self.which_fn)(binary_name, self.path.clone())
+                && let Ok(binary_paths) = (self.which_fn)(
+                    binary_name,
+                    self.path.clone().or_else(|| RealSys.env_path()),
+                )
             {
                 self.binary_paths = Some(binary_paths);
             } else {
@@ -490,7 +494,7 @@ impl<
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::{OsStr, OsString};
+    use std::ffi::OsStr;
     use std::str::FromStr;
 
     use pep440_rs::VersionSpecifiers;

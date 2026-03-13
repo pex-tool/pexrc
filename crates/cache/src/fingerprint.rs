@@ -4,6 +4,7 @@
 use std::fmt::{Display, Formatter};
 use std::fs::File;
 use std::io;
+use std::io::Write;
 use std::path::Path;
 use std::time::SystemTime;
 
@@ -16,6 +17,10 @@ use sha2::{Digest, Sha256};
 pub struct Fingerprint(Vec<u8>);
 
 impl Fingerprint {
+    pub fn new<D: Digest>(digest: D) -> Self {
+        Self(Vec::from(digest.finalize().as_slice()))
+    }
+
     #[time("debug", "Fingerprint.{}")]
     pub fn base64_digest(&self) -> String {
         URL_SAFE_NO_PAD.encode(&self.0)
@@ -70,6 +75,18 @@ impl HashOptions {
 #[time("debug", "fingerprint.{}")]
 pub fn hash_file(path: &Path, options: &HashOptions) -> anyhow::Result<Fingerprint> {
     let mut digest = Sha256::new();
+    digest_file(path, options, &mut digest)?;
+    Ok(Fingerprint::new(digest))
+}
+
+pub(crate) fn digest_file<D>(
+    path: &Path,
+    options: &HashOptions,
+    digest: &mut D,
+) -> anyhow::Result<()>
+where
+    D: Digest + Write,
+{
     if options.path {
         digest.update(b"path:");
         digest.update(path.as_os_str().as_encoded_bytes());
@@ -93,7 +110,7 @@ pub fn hash_file(path: &Path, options: &HashOptions) -> anyhow::Result<Fingerpri
     }
     if options.contents {
         digest.update(b"contents:");
-        io::copy(&mut File::open(path)?, &mut digest)?;
+        io::copy(&mut File::open(path)?, digest)?;
     }
-    Ok(Fingerprint(Vec::from(digest.finalize().as_slice())))
+    Ok(())
 }

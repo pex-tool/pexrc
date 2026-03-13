@@ -173,10 +173,10 @@ impl Interpreter {
     }
 
     #[cfg(windows)]
-    fn iter_candidate_rel_paths<'a>(
+    fn candidate_rel_paths<'a>(
         version: &PythonVersion,
         pypy_version: Option<&PyPyVersion>,
-    ) -> impl IntoIterator<Item = Cow<'a, Path>> {
+    ) -> Vec<Cow<'a, Path>> {
         if let Some(pypy_version) = pypy_version {
             vec![
                 Cow::Borrowed(Path::new("pypy.exe")),
