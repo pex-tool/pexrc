@@ -15,6 +15,7 @@ dev = [
     "ansicolors",
     "mypy",
     "pytest",
+    "pytest-xdist",
     "ruff",
     "types-setuptools",
 ]
