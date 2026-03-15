@@ -17,7 +17,8 @@ pub fn display() {
     }
     let count = paths.len();
     anstream::println!(
-        "There are {count} embedded {clibs}:",
+        "There {are} {count} embedded {clibs}:",
+        are = if count == 1 { "is" } else { "are" },
         count = count.yellow(),
         clibs = if count == 1 { "clib" } else { "clibs" }
     );

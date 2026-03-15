@@ -37,6 +37,7 @@ enum Commands {
         #[arg(value_name = "FILE")]
         pex: PathBuf,
     },
+    /// Provide information about the supported target runtimes.
     Info,
 }
 
