@@ -185,7 +185,17 @@ fn main() -> anyhow::Result<()> {
             targets,
         } => {
             let clibs = if !targets.is_empty() {
-                Some(targets.into_iter().map(|target| CLIB_BY_TARGET.get(target.as_str()).copied().expect("The allowed --target values are all keys in the CLIB_BY_TARGET map.")).collect::<HashSet<_>>())
+                Some(
+                    targets
+                        .into_iter()
+                        .map(|target| {
+                            CLIB_BY_TARGET.get(target.as_str()).copied().expect(
+                                "The allowed --target values are all keys in the CLIB_BY_TARGET \
+                                map.",
+                            )
+                        })
+                        .collect::<HashSet<_>>(),
+                )
             } else {
                 None
             };
