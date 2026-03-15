@@ -153,6 +153,7 @@ clap-verbosity-flag = { workspace = true }
 colorchoice-clap = { workspace = true }
 env_logger = { workspace = true }
 include_dir = { workspace = true }
+indexmap = { workspace = true }
 itertools = { workspace = true }
 log = { workspace = true }
 owo-colors = { workspace = true }

@@ -1,23 +1,26 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 use std::{cmp, io};
 
 use anyhow::Context;
-use clap::{Parser, Subcommand};
+use clap::{ArgAction, Parser, Subcommand};
 use include_dir::{Dir, include_dir};
+use indexmap::IndexMap;
 use log::info;
-use owo_colors::OwoColorize as _;
+use owo_colors::OwoColorize;
 use platform::mark_executable;
 use python::{Resources, embedded};
 use tempfile::NamedTempFile;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
-const CLIBS_DIR: Dir<'_> = include_dir!("$CLIBS_DIR");
+const CLIBS_DIR: Dir<'static> = include_dir!("$CLIBS_DIR");
 const MAIN: &[u8] = include_bytes!("python/pexrc/__init__.py");
 
 /// Pex Runtime Control.
@@ -34,6 +37,21 @@ struct Cli {
     command: Commands,
 }
 
+static CLIB_BY_TARGET: LazyLock<IndexMap<&'static str, &'static Path>> = LazyLock::new(|| {
+    CLIBS_DIR
+        .files()
+        .map(|file| {
+            let path = file.path();
+            let target = path
+                .file_prefix()
+                .expect("Embedded C-libs all have a file name with an extension")
+                .to_str()
+                .expect("Embedded C-lib file names are utf-8 strings.");
+            (target, path)
+        })
+        .collect()
+});
+
 #[derive(Subcommand)]
 enum Commands {
     /// Inject a traditional PEX with the pexrc runtime.
@@ -41,15 +59,23 @@ enum Commands {
         #[arg(long)]
         compression_level: Option<i64>,
 
+        #[arg(long = "target")]
+        #[arg(action=ArgAction::Append)]
+        #[arg(value_parser=clap::builder::PossibleValuesParser::new(CLIB_BY_TARGET.keys()))]
+        targets: Vec<String>,
+
         #[arg(value_name = "FILE")]
         pex: PathBuf,
     },
     Info,
 }
 
-fn inject(pex: &Path, compression_level: Option<i64>) -> anyhow::Result<()> {
+fn inject(
+    pex: &Path,
+    compression_level: Option<i64>,
+    clibs: Option<HashSet<&Path>>,
+) -> anyhow::Result<()> {
     let zip_read_fp = File::open(pex)?;
-
     let mut src_zip = ZipArchive::new(&zip_read_fp)?;
     let prefix = {
         let first_entry = src_zip.by_index(0)?;
@@ -110,10 +136,21 @@ fn inject(pex: &Path, compression_level: Option<i64>) -> anyhow::Result<()> {
     dst_zip.add_directory("__pex__/.clib", directory_options)?;
     info!("Embedded clibs:");
     for file in CLIBS_DIR.files() {
-        let dst_path = format!("__pex__/.clib/{clib}", clib = file.path().display());
+        let path = file.path();
+        if let Some(clibs) = clibs.as_ref()
+            && !clibs.contains(path)
+        {
+            continue;
+        }
+        let dst_path = format!(
+            "__pex__/.clib/{clib}",
+            clib = path
+                .to_str()
+                .expect("Embedded C-lib file names are utf-8 strings.")
+        );
         anstream::eprint!(
             "Writing {entry} {size} bytes to {dst_path}...",
-            entry = file.path().display().blue(),
+            entry = path.display().blue(),
             size = file.contents().len()
         );
         dst_zip.start_file(dst_path, file_options)?;
@@ -145,7 +182,15 @@ fn main() -> anyhow::Result<()> {
         Commands::Inject {
             pex,
             compression_level,
-        } => inject(&pex, compression_level),
+            targets,
+        } => {
+            let clibs = if !targets.is_empty() {
+                Some(targets.into_iter().map(|target| CLIB_BY_TARGET.get(target.as_str()).copied().expect("The allowed --target values are all keys in the CLIB_BY_TARGET map.")).collect::<HashSet<_>>())
+            } else {
+                None
+            };
+            inject(&pex, compression_level, clibs)
+        }
         Commands::Info => {
             let mut paths = Vec::new();
             let mut max_width = 0;
