@@ -1,6 +1,5 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
-pub mod clibs;
-pub mod commands;
-pub mod sh_boot;
+pub mod info;
+pub mod inject;

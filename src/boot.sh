@@ -40,7 +40,7 @@ on_fast_path() {
 if on_fast_path; then
   for python in ${PYTHONS} ; do
       if [ -x "${VENV}/sh-boot/${python}" ]; then
-          # The fast path: We're a installed under the PEXRC_ROOT and the venv interpreter to use is
+          # The fast path: We're installed under the PEXRC_ROOT and the venv interpreter to use is
           # embedded in the shebang of our venv pex script; so just execute that script directly.
           export PEX="$0"
 
@@ -69,8 +69,8 @@ if [ -n "${python_exe}" ]; then
         echo >&2 "$0 used /bin/sh boot to select python: ${python_exe} for re-exec..."
         echo >&2 "Running pex to lay itself out under PEXRC_ROOT."
     fi
-    # TODO: XXX: Inject -sE or -I if hermetic?
     export _PEXRC_SH_BOOT_SEED_DIR="${VENV}/sh-boot"
+    # TODO: XXX: Inject -sE or -I if hermetic?
     exec "${python_exe}" "$0" "$@"
 fi
 
