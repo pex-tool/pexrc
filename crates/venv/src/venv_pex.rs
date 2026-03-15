@@ -1,15 +1,14 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::borrow::Cow;
+use std::fmt::{Display, Formatter};
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 use std::{fs, io};
 
 use anyhow::anyhow;
-use indexmap::IndexSet;
-use itertools::Itertools;
+use indexmap::{IndexMap, IndexSet};
 use log::warn;
 use logging_timer::time;
 use pex::{BinPath, InheritPath, Pex, PexInfo};
@@ -109,6 +108,7 @@ pub fn populate<'a>(
         shebang_arg,
         path,
         pex_info,
+        selected_wheels,
         resources,
     )
 }
@@ -167,11 +167,45 @@ fn as_python_bool(value: bool) -> &'static str {
     if value { "True" } else { "False" }
 }
 
-fn as_optional_python_str(value: Option<&str>) -> Cow<'_, str> {
-    if let Some(value) = value {
-        Cow::Owned(format!("r\"{value}\""))
-    } else {
-        Cow::Borrowed("None")
+struct OptionalPythonStr<'a>(Option<&'a str>);
+
+impl<'a> Display for OptionalPythonStr<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if let Some(value) = self.0 {
+            write!(f, "r\"{value}\"")
+        } else {
+            f.write_str("None")
+        }
+    }
+}
+
+struct PythonListStr<'a>(&'a Vec<String>);
+
+impl<'a> Display for PythonListStr<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[")?;
+        for (idx, item) in self.0.iter().enumerate() {
+            write!(f, "r\"{item}\"")?;
+            if idx < self.0.len() - 1 {
+                write!(f, ",")?;
+            }
+        }
+        write!(f, "]")
+    }
+}
+
+struct PythonListTupleStrStr<'a>(&'a IndexMap<String, String>);
+
+impl<'a> Display for PythonListTupleStrStr<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[")?;
+        for (idx, (item1, item2)) in self.0.iter().enumerate() {
+            write!(f, "(r\"{item1}\",r\"{item2}\")")?;
+            if idx < self.0.len() - 1 {
+                write!(f, ",")?;
+            }
+        }
+        write!(f, "]")
     }
 }
 
@@ -186,6 +220,7 @@ fn write_main<'a>(
     write_shebang_bytes(&mut main_py_fp, shebang_interpreter, shebang_arg)?;
     let venv_pex_script = VenvPexScript::read(resources)?;
     main_py_fp.write_all(venv_pex_script.contents().as_bytes())?;
+
     write!(
         main_py_fp,
         "{}",
@@ -198,9 +233,9 @@ if __name__ == "__main__":
         venv_bin_dir=r"{venv_bin_dir}",
         bin_path=r"{bin_path}",
         strip_pex_env={strip_pex_env},
-        bind_resource_paths=[{bind_resource_paths}],
-        inject_env=[{inject_env}],
-        inject_args=[{inject_args}],
+        bind_resource_paths={bind_resource_paths},
+        inject_env={inject_env},
+        inject_args={inject_args},
         entry_point={entry_point},
         script={script},
         hermetic_re_exec={hermetic_re_exec},
@@ -214,24 +249,12 @@ if __name__ == "__main__":
                 .unwrap_or(&BinPath::False)
                 .as_str(),
             strip_pex_env = as_python_bool(pex_info.strip_pex_env.unwrap_or(true)),
-            bind_resource_paths = pex_info
-                .bind_resource_paths
-                .iter()
-                .map(|(k, v)| format!("(r\"{k}\", r\"{v}\")"))
-                .join(","),
-            inject_env = pex_info
-                .inject_env
-                .iter()
-                .map(|(k, v)| format!("(r\"{k}\", r\"{v}\")"))
-                .join(","),
-            inject_args = pex_info
-                .inject_args
-                .iter()
-                .map(|v| format!("r\"{v}\""))
-                .join(","),
-            entry_point = as_optional_python_str(pex_info.entry_point.as_deref()),
-            script = as_optional_python_str(pex_info.script.as_deref()),
-            hermetic_re_exec = as_optional_python_str(if pex_info.venv_hermetic_scripts {
+            bind_resource_paths = PythonListTupleStrStr(&pex_info.bind_resource_paths),
+            inject_env = PythonListTupleStrStr(&pex_info.inject_env),
+            inject_args = PythonListStr(&pex_info.inject_args),
+            entry_point = OptionalPythonStr(pex_info.entry_point.as_deref()),
+            script = OptionalPythonStr(pex_info.script.as_deref()),
+            hermetic_re_exec = OptionalPythonStr(if pex_info.venv_hermetic_scripts {
                 Some(venv.interpreter.hermetic_args())
             } else {
                 None
@@ -248,48 +271,55 @@ fn write_repl<'a>(
     shebang_arg: Option<&str>,
     pex: &Path,
     pex_info: &PexInfo,
+    selected_wheels: &IndexSet<&str>,
     resources: &mut impl Resources<'a>,
 ) -> anyhow::Result<()> {
     let mut pex_repl_py_fp = File::create_new(venv.prefix().join("pex-repl"))?;
     write_shebang_bytes(&mut pex_repl_py_fp, shebang_interpreter, shebang_arg)?;
     let venv_pex_repl_script = VenvPexReplScript::read(resources)?;
     pex_repl_py_fp.write_all(venv_pex_repl_script.contents().as_bytes())?;
-    // TODO: XXX: Need to append a if __name__ == "__main__" that calls _create_pex_repl(...)
-    // const activation_summary, const activation_details = res: {
-    //         if (wheels_to_install.*) |wheels| {
-    //             const summary = try std.fmt.allocPrint(
-    //                 allocator,
-    //                 "{d} {s} and {d} activated {s}",
-    //                 .{
-    //                     self.pex_info.requirements.len,
-    //                     if (self.pex_info.requirements.len > 1) "requirements" else "requirement",
-    //                     wheels.entries.len,
-    //                     if (wheels.entries.len > 1) "distributions" else "distribution",
-    //                 },
-    //             );
-    //             errdefer allocator.free(summary);
-    //
-    //             var details = std.ArrayList(u8).init(allocator);
-    //             errdefer details.deinit();
-    //
-    //             var details_writer = details.writer();
-    //             try details_writer.writeAll("Requirements:\n");
-    //             for (self.pex_info.requirements) |requirement| {
-    //                 try details_writer.writeAll("  ");
-    //                 try details_writer.writeAll(requirement);
-    //                 try details_writer.writeByte('\n');
-    //             }
-    //             try details_writer.writeAll("Activated Distributions:\n");
-    //             for (wheels.entries) |wheel| {
-    //                 try details_writer.writeAll("  ");
-    //                 try details_writer.writeAll(wheel.name);
-    //                 try details_writer.writeByte('\n');
-    //             }
-    //             break :res .{ summary, try details.toOwnedSlice() };
-    //         } else {
-    //             break :res .{ "no dependencies", "" };
-    //         }
-    //     };
+
+    let activation_summary = if selected_wheels.is_empty() {
+        format_args!("")
+    } else {
+        format_args!(
+            "{req_count} {requirements} and {dist_count} activated {distributions}",
+            req_count = pex_info.requirements.len(),
+            requirements = if pex_info.requirements.len() == 1 {
+                "requirement"
+            } else {
+                "requirements"
+            },
+            dist_count = selected_wheels.len(),
+            distributions = if selected_wheels.len() == 1 {
+                "distribution"
+            } else {
+                "distributions"
+            }
+        )
+    };
+
+    struct ActivationDetails<'a> {
+        requirements: &'a Vec<String>,
+        selected_wheels: &'a IndexSet<&'a str>,
+    }
+
+    impl<'a> Display for ActivationDetails<'a> {
+        fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+            if !self.requirements.is_empty() {
+                writeln!(f, "Requirements:")?;
+                for requirement in self.requirements {
+                    writeln!(f, "  {requirement}")?;
+                }
+                writeln!(f, "Activated Distributions:")?;
+                for selected_wheel in self.selected_wheels {
+                    writeln!(f, "  {selected_wheel}")?;
+                }
+            }
+            Ok(())
+        }
+    }
+
     write!(
         pex_repl_py_fp,
         "{}",
@@ -328,8 +358,11 @@ if __name__ == "__main__":
                 .map(String::as_ref)
                 .unwrap_or("(unknown version)"),
             seed_pex = path_as_str(pex)?,
-            activation_summary = "",
-            activation_details = "",
+            activation_summary = activation_summary,
+            activation_details = ActivationDetails {
+                requirements: &pex_info.requirements,
+                selected_wheels
+            },
         )
     )?;
     mark_executable(&mut pex_repl_py_fp)?;
