@@ -141,21 +141,35 @@ impl Interpreter {
     }
 
     #[cfg(unix)]
+    pub fn most_specific_exe_name(&self) -> String {
+        let name = if self.pypy_version.is_some() {
+            "pypy"
+        } else {
+            "python"
+        };
+        format!(
+            "{name}{major}.{minor}",
+            major = self.version.major,
+            minor = self.version.minor
+        )
+    }
+
+    #[cfg(unix)]
     fn candidate_rel_paths<'a>(
         version: &PythonVersion,
         pypy_version: Option<&PyPyVersion>,
     ) -> Vec<Cow<'a, Path>> {
         let mut candidates: Vec<Cow<'_, Path>> =
             Vec::with_capacity(if pypy_version.is_some() { 6 } else { 3 });
-        if let Some(pypy_version) = pypy_version {
+        if pypy_version.is_some() {
             candidates.push(Cow::Owned(PathBuf::from(format!(
                 "bin/pypy{major}.{minor}",
-                major = pypy_version.0,
-                minor = pypy_version.1
+                major = version.major,
+                minor = version.minor
             ))));
             candidates.push(Cow::Owned(PathBuf::from(format!(
                 "bin/pypy{major}",
-                major = pypy_version.0
+                major = version.major
             ))));
             candidates.push(Cow::Borrowed(Path::new("bin/pypy")));
         }

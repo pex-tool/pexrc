@@ -17,6 +17,12 @@ pub struct SearchPath {
 }
 
 impl SearchPath {
+    pub const EMPTY: Self = Self {
+        pex_python: None,
+        pex_python_path: None,
+        python_exes: None,
+    };
+
     pub fn known(python_exes: IndexSet<PathBuf>) -> Self {
         Self {
             pex_python: None,

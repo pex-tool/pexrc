@@ -14,6 +14,7 @@ use include_dir::{Dir, include_dir};
 use indexmap::IndexMap;
 use log::info;
 use owo_colors::OwoColorize;
+use pexrc::sh_boot;
 use platform::mark_executable;
 use python::{Resources, embedded};
 use tempfile::NamedTempFile;
@@ -77,7 +78,9 @@ fn inject(
 ) -> anyhow::Result<()> {
     let zip_read_fp = File::open(pex)?;
     let mut src_zip = ZipArchive::new(&zip_read_fp)?;
-    let prefix = {
+    let prefix = if let Some(sh_boot_shebang) = sh_boot::shebang(pex)? {
+        Some(sh_boot_shebang.into_bytes())
+    } else {
         let first_entry = src_zip.by_index(0)?;
         let zip_start = first_entry.header_start();
         if zip_start > 0 {
@@ -106,9 +109,11 @@ fn inject(
     }
     let mut dst_zip = ZipWriter::new(&dst_zip_fp);
 
-    let file_options = SimpleFileOptions::default()
+    let zstd_file_options = SimpleFileOptions::default()
         .compression_method(CompressionMethod::Zstd)
         .compression_level(compression_level);
+    let other_file_options =
+        SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
     let directory_options = SimpleFileOptions::default();
     for index in 0..src_zip.len() {
         let mut src_file = src_zip.by_index(index)?;
@@ -123,13 +128,18 @@ fn inject(
         if src_file.is_dir() {
             dst_zip.add_directory(entry_name, directory_options)?
         } else {
-            dst_zip.start_file(entry_name, file_options)?;
+            let options = if entry_name == "PEX-INFO" {
+                other_file_options
+            } else {
+                zstd_file_options
+            };
+            dst_zip.start_file(entry_name, options)?;
             io::copy(&mut src_file, &mut dst_zip)?;
         }
     }
 
     let mut resources = embedded::RESOURCES;
-    resources.inject_zip(&mut dst_zip, file_options)?;
+    resources.inject_zip(&mut dst_zip, zstd_file_options)?;
 
     let file_options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
 

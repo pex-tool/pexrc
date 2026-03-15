@@ -60,6 +60,10 @@ pub enum CacheDir {
 }
 
 impl CacheDir {
+    pub fn root() -> anyhow::Result<&'static Path> {
+        PEXRC_ROOT.as_deref().map_err(|err| anyhow!("{err}"))
+    }
+
     fn version(&self) -> &'static str {
         match self {
             CacheDir::Interpreter => "0",
@@ -69,15 +73,12 @@ impl CacheDir {
 
     #[time("debug", "CacheDir.{}")]
     pub fn path(&self) -> anyhow::Result<PathBuf> {
-        PEXRC_ROOT
-            .as_ref()
-            .map(|pexrc_root| {
-                match self {
-                    CacheDir::Interpreter => pexrc_root.join("interpreters"),
-                    CacheDir::Venv => pexrc_root.join("venvs"),
-                }
-                .join(self.version())
-            })
-            .map_err(|err| anyhow!("{err}"))
+        Self::root().map(|pexrc_root| {
+            match self {
+                CacheDir::Interpreter => pexrc_root.join("interpreters"),
+                CacheDir::Venv => pexrc_root.join("venvs"),
+            }
+            .join(self.version())
+        })
     }
 }

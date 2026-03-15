@@ -83,6 +83,10 @@ panic = "abort"
 inherits = "release"
 opt-level = "z"
 
+[lib]
+name = "pexrc"
+path = "src/lib.rs"
+
 [[bin]]
 name = "pexrc"
 path = "pexrc.rs"
@@ -96,7 +100,7 @@ build-target = "0.8"
 clap = {  version = "4.5", features = ["derive"] }
 clap-verbosity-flag = "3.0"
 colorchoice-clap = "1.0"
-const_format = "0.2"
+const_format = { version = "0.2", features = ["rust_1_64"] }
 ctor = "0.6"
 dirs = "6.0"
 elf = "0.8"
@@ -148,15 +152,20 @@ zstd = { workspace = true }
 [dependencies]
 anstream = { workspace = true }
 anyhow = { workspace = true }
+cache = { path = "crates/cache" }
 clap = { workspace = true }
 clap-verbosity-flag = { workspace = true }
 colorchoice-clap = { workspace = true }
+const_format = { workspace = true }
 env_logger = { workspace = true }
 include_dir = { workspace = true }
 indexmap = { workspace = true }
+interpreter = { path = "crates/interpreter" }
 itertools = { workspace = true }
 log = { workspace = true }
 owo-colors = { workspace = true }
+pex = { path = "crates/pex" }
+pexrs = { path = "crates/pexrs" }
 platform = { path = "crates/platform" }
 python = { path = "crates/python", features = ["embedded_resources"] }
 strum = { workspace = true }

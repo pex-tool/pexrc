@@ -241,7 +241,7 @@ if __name__ == "__main__":
         hermetic_re_exec={hermetic_re_exec},
     )
 "#,
-            shebang_python = path_as_str(&venv.interpreter.path)?,
+            shebang_python = path_as_str(shebang_interpreter)?,
             venv_bin_dir = venv.bin_dir_relpath,
             bin_path = pex_info
                 .venv_bin_path

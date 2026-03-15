@@ -249,16 +249,6 @@ pub enum Pex<'a> {
 }
 
 impl<'a> Pex<'a> {
-    pub fn resources(&self) -> anyhow::Result<impl Resources<'a>> {
-        match self {
-            Pex::Loose(_) => todo!("XXX: Implement loose PEX resource resolution."),
-            Pex::Packed(_) => todo!("XXX: Implement packed PEX resource resolution."),
-            Pex::ZipApp(zip_app) => zip_app.resources(),
-        }
-    }
-}
-
-impl<'a> Pex<'a> {
     #[time("debug", "Pex.{}")]
     pub fn load(path: &'a Path) -> anyhow::Result<Self> {
         if path.is_file() {
@@ -302,6 +292,14 @@ impl<'a> Pex<'a> {
             Pex::Loose(pex) => &pex.1,
             Pex::Packed(pex) => &pex.1,
             Pex::ZipApp(pex) => &pex.1,
+        }
+    }
+
+    pub fn resources(&self) -> anyhow::Result<impl Resources<'a>> {
+        match self {
+            Pex::Loose(_) => todo!("XXX: Implement loose PEX resource resolution."),
+            Pex::Packed(_) => todo!("XXX: Implement packed PEX resource resolution."),
+            Pex::ZipApp(zip_app) => zip_app.resources(),
         }
     }
 

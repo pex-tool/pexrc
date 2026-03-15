@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::borrow::Cow;
-use std::env;
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::{env, fs};
 
 use anyhow::anyhow;
 use cache::{CacheDir, HashOptions, Key, atomic_dir};
@@ -40,7 +40,11 @@ fn prepare_boot(
     pex: impl AsRef<Path>,
     argv: Vec<String>,
 ) -> anyhow::Result<Command> {
-    let venv = prepare_venv(python, pex.as_ref())?;
+    let venv = prepare_venv(
+        python,
+        pex.as_ref(),
+        env::var_os("_PEXRC_SH_BOOT_SEED_DIR").map(PathBuf::from),
+    )?;
     let mut command = Command::new(&venv.interpreter.path);
     command
         .args(python_args)
@@ -72,17 +76,21 @@ fn exec(command: &mut Command) -> anyhow::Result<i32> {
 
 #[time("debug", "{}")]
 pub fn mount(python: impl AsRef<Path>, pex: impl AsRef<Path>) -> anyhow::Result<PathBuf> {
-    prepare_venv(python, pex.as_ref()).map(|venv| venv.site_packages_path())
+    prepare_venv(python, pex.as_ref(), None).map(|venv| venv.site_packages_path())
 }
 
 #[time("debug", "{}")]
-fn prepare_venv<'a>(python: impl AsRef<Path>, pex: &'a Path) -> anyhow::Result<Virtualenv<'a>> {
+fn prepare_venv<'a>(
+    python: impl AsRef<Path>,
+    pex: &'a Path,
+    sh_boot_seed_dir: Option<PathBuf>,
+) -> anyhow::Result<Virtualenv<'a>> {
     let pex = Pex::load(pex)?;
     let pex_info = pex.info();
     let pex_path = PexPath::from_pex_info(pex_info, true);
     let additional_pexes = pex_path.load_pexes()?;
     let search_path = SearchPath::from_env()?;
-    let venv_dir = venv_dir(python.as_ref(), &pex, &search_path, &additional_pexes)?;
+    let venv_dir = venv_dir(Some(python.as_ref()), &pex, &search_path, &additional_pexes)?;
     if let Some(venv_interpreter) = atomic_dir(&venv_dir, |work_dir| {
         let (interpreter, selected_wheels, mut resources, additional_pexes) =
             pex.resolve(Some(python.as_ref()), additional_pexes.iter(), search_path)?;
@@ -101,6 +109,14 @@ fn prepare_venv<'a>(python: impl AsRef<Path>, pex: &'a Path) -> anyhow::Result<V
         debug!("Built venv at {path}", path = venv_dir.display());
         let venv_interpreter = Virtualenv::host_interpreter(&venv_dir, &venv_interpreter);
         venv_interpreter.store()?;
+        #[cfg(unix)]
+        if let Some(sh_boot_seed_dir) = sh_boot_seed_dir {
+            fs::create_dir_all(&sh_boot_seed_dir)?;
+            std::os::unix::fs::symlink(
+                venv_dir.join("pex"),
+                sh_boot_seed_dir.join(venv_interpreter.most_specific_exe_name()),
+            )?;
+        }
         Virtualenv::enclosing(venv_interpreter)
     } else {
         debug!("Loading cached venv at {path}", path = venv_dir.display());
@@ -111,8 +127,8 @@ fn prepare_venv<'a>(python: impl AsRef<Path>, pex: &'a Path) -> anyhow::Result<V
 
 const INTERPRETER_HASH_OPTIONS: HashOptions = HashOptions::new().path(true).mtime(true).size(true);
 
-fn venv_dir(
-    ambient_python: &Path,
+pub fn venv_dir(
+    ambient_python: Option<&Path>,
     pex: &Pex,
     search_path: &SearchPath,
     additional_pexes: &[Pex],
@@ -135,8 +151,11 @@ fn venv_dir(
 
     // If there are no restrictions on interpreter, whatever we derive from the ambient python is
     // our opaque choice, which we can keep.
-    if pex_info.interpreter_constraints.is_empty() && search_path.is_empty() {
-        key.file(ambient_python, &INTERPRETER_HASH_OPTIONS)?;
+    if pex_info.interpreter_constraints.is_empty()
+        && search_path.is_empty()
+        && let Some(python_exe) = ambient_python
+    {
+        key.file(python_exe, &INTERPRETER_HASH_OPTIONS)?;
     } else if let Some(python_exe) = search_path.unique_interpreter() {
         // The user chose a unique interpreter (via PEX_PYTHON or PEX_PYTHON_PATH or a combination
         // of the two). It may not match the ICs, if any, but the choice is respected.

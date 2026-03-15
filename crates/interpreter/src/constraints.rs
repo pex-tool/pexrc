@@ -356,7 +356,7 @@ impl InterpreterConstraints {
         binary_specs
     }
 
-    fn calculate_compatible_binary_names(
+    pub fn calculate_compatible_binary_names(
         &self,
         selection_strategy: SelectionStrategy,
     ) -> IndexSet<OsString> {
