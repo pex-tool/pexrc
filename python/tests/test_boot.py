@@ -6,6 +6,7 @@ from __future__ import absolute_import, print_function
 import os.path
 import subprocess
 
+from testing import skip_windows_cant_build_pex_to_inject_yet
 from testing.compare import compare
 
 TYPE_CHECKING = False
@@ -16,6 +17,7 @@ if TYPE_CHECKING:
     from testing.compare import ProcessResult  # noqa: F401
 
 
+@skip_windows_cant_build_pex_to_inject_yet
 def test_basic(tmpdir):
     # type: (Any) -> None
 

@@ -8,7 +8,7 @@ import subprocess
 import sys
 import time
 
-from testing import IS_WINDOWS, pexrc_inject
+from testing import pexrc_inject
 
 TYPE_CHECKING = False
 if TYPE_CHECKING:
@@ -65,16 +65,6 @@ def _test_result(
 ):
     # type: (...) -> None
 
-    # TODO: XXX: Get rid of this once Pex fixes cross-drive commonpath issues.
-    if is_traditional_pex and IS_WINDOWS:
-        assert result.exit_code != 0
-        print(
-            "Expected failure from Pex PEX on Windows {exit_code}:\n{stderr}".format(
-                exit_code=result.exit_code, stderr=result.stderr
-            ),
-            file=sys.stderr,
-        )
-
     if test_result:
         test_result(result, is_traditional_pex)
     else:
@@ -87,10 +77,6 @@ def _compare_results(
     compare_results=None,  # type: Optional[Callable[[ProcessResult, ProcessResult], None]]
 ):
     # type: (...) -> None
-
-    # TODO: XXX: Get rid of this once Pex fixes cross-drive commonpath issues.
-    if IS_WINDOWS:
-        return
 
     if compare_results:
         compare_results(traditional_result, injected_result)
