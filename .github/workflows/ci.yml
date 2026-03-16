@@ -21,7 +21,7 @@ jobs:
         run: |
           echo "This is a dummy step that will never run."
   checks:
-    name: "Unix: uv run dev-cmd -s test"
+    name: "Check Formatting, Lints and Cross-build"
     needs: setup
     runs-on: ubuntu-24.04
     steps:
