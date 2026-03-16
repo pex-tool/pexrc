@@ -86,11 +86,13 @@ impl Interpreter {
         python_exe: impl AsRef<Path>,
         identification_script: &InterpreterIdentificationScript,
     ) -> anyhow::Result<Vec<u8>> {
+        let mut script = tempfile::Builder::new()
+            .prefix("virtualenv.")
+            .suffix(".py")
+            .tempfile()?;
+        script.write_all(identification_script.contents().as_bytes())?;
         let mut command = Command::new(python_exe.as_ref());
-        command
-            .arg("-sE")
-            .arg("-c")
-            .arg(identification_script.contents());
+        command.arg("-sE").arg(script.path());
         #[cfg(target_os = "linux")]
         {
             let mut linux_info = LINUX_INFO

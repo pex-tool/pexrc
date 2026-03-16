@@ -21,7 +21,8 @@ pub fn create_tmp_dir() -> PathBuf {
     //   The filename or extension is too long. (os error 206)
     // With a prefix of 2 characters, we get 8 character names like tdu6ERy3.
     let tmp_dir = tempfile::Builder::new()
-        .prefix("td")
+        .prefix("pexrc-test-")
+        .suffix(".dir")
         .tempdir()
         .unwrap()
         .keep();
