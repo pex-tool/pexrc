@@ -1,10 +1,10 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::fs::File;
 use std::path::Path;
 
 use fs_err as fs;
-use std::fs::File;
 use is_executable::IsExecutable;
 
 pub fn link_or_copy(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> anyhow::Result<()> {
