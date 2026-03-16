@@ -3,7 +3,6 @@
 
 use std::borrow::Cow;
 use std::fmt::{Display, Formatter};
-use std::fs;
 use std::io::{BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -11,6 +10,7 @@ use std::sync::Mutex;
 
 use anyhow::{anyhow, bail};
 use cache::{CacheDir, HashOptions, atomic_file, hash_file};
+use fs_err as fs;
 use log::debug;
 use logging_timer::time;
 use pep508_rs::MarkerEnvironment;

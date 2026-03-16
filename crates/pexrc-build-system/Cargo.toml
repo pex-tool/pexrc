@@ -11,6 +11,7 @@ bstr = { workspace = true }
 const_format = { workspace = true }
 dirs = { workspace = true }
 flate2 = { workspace = true }
+fs-err = { workspace = true }
 hex = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }

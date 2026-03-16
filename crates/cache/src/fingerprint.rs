@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::fmt::{Display, Formatter};
-use std::fs::File;
 use std::io;
 use std::io::Write;
 use std::path::Path;
@@ -11,6 +10,7 @@ use std::time::SystemTime;
 use base64::Engine;
 use base64::display::Base64Display;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use fs_err::File;
 use logging_timer::time;
 use sha2::{Digest, Sha256};
 

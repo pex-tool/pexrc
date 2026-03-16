@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::ffi::OsString;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{LazyLock, Mutex};
 
 use anyhow::anyhow;
 use ctor::dtor;
+use fs_err as fs;
 use python::{InterpreterIdentificationScript, Resources, embedded};
 use rstest::fixture;
 use target_lexicon::{HOST, OperatingSystem};

@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::collections::HashSet;
-use std::fs::File;
 use std::io;
 use std::io::{Read, Write};
 use std::path::Path;
 
 use anyhow::Context;
+use fs_err::File;
 use log::info;
 use owo_colors::OwoColorize;
 use platform::mark_executable;

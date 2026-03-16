@@ -3,7 +3,6 @@
 
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
-use std::fs::File;
 use std::io;
 use std::io::{BufReader, Read, Seek};
 use std::path::Path;
@@ -11,6 +10,7 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, bail};
+use fs_err::File;
 use indexmap::{IndexMap, IndexSet};
 use interpreter::{Interpreter, InterpreterConstraints, SearchPath};
 use itertools::Itertools;
@@ -450,12 +450,12 @@ impl<'a> Pex<'a> {
 
 #[cfg(test)]
 mod tests {
-    use std::fs::File;
     use std::path::{Path, PathBuf};
     use std::process::Command;
     use std::str::FromStr;
 
     use ::interpreter::Interpreter;
+    use fs_err::File;
     use indexmap::{IndexSet, indexset};
     use interpreter::SearchPath;
     use pep508_rs::{Requirement, VersionOrUrl};

@@ -3,13 +3,13 @@
 
 use std::borrow::Cow;
 use std::ffi::OsStr;
-use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::{env, fs, io, iter};
 
 use anyhow::{anyhow, bail};
 use bstr::ByteSlice;
+use fs_err::File;
 use itertools::Itertools;
 use pexrc_build_system::{
     ClassifiedTargets,

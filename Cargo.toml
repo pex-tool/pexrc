@@ -106,6 +106,7 @@ dirs = "6.0"
 elf = "0.8"
 env_logger = "0.11"
 flate2 = "1.1"
+fs-err = "3.3"
 glob = "0.3"
 hex = "0.4"
 include_dir = "0.7"
@@ -144,6 +145,7 @@ zstd = "0.13"
 [build-dependencies]
 anyhow = { workspace = true }
 bstr = { workspace = true }
+fs-err = { workspace = true }
 pexrc-build-system = { path = "crates/pexrc-build-system" }
 env_logger = { workspace = true }
 itertools = { workspace = true }
@@ -158,6 +160,7 @@ clap-verbosity-flag = { workspace = true }
 colorchoice-clap = { workspace = true }
 const_format = { workspace = true }
 env_logger = { workspace = true }
+fs-err = { workspace = true }
 include_dir = { workspace = true }
 indexmap = { workspace = true }
 interpreter = { path = "crates/interpreter" }

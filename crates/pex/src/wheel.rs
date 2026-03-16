@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::ffi::OsStr;
-use std::fs::File;
 use std::io;
 use std::io::{Read, Seek};
 use std::path::Path;
 use std::str::FromStr;
 
 use anyhow::{anyhow, bail};
+use fs_err::File;
 use itertools::Itertools;
 use pep440_rs::{Version, VersionSpecifiers};
 use pep508_rs::{PackageName, Requirement};
@@ -193,11 +193,11 @@ impl<'a> WheelMetadata<'a> {
 #[cfg(test)]
 mod tests {
 
-    use std::fs::File;
     use std::path::{Path, PathBuf};
     use std::process::Command;
     use std::str::FromStr;
 
+    use fs_err::File;
     use pep440_rs::{Version, VersionSpecifiers};
     use pep508_rs::{PackageName, Requirement};
     use rstest::*;

@@ -1,11 +1,11 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::fs;
-use std::fs::File;
 use std::path::Path;
 
 use anyhow::anyhow;
+use fs_err as fs;
+use fs_err::File;
 use logging_timer::time;
 
 #[time("debug", "atomic.{}")]

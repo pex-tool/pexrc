@@ -12,6 +12,7 @@ indexmap = { workspace = true }
 pep440_rs = { workspace = true }
 pep508_rs = { workspace = true }
 elf = { workspace = true }
+fs-err = { workspace = true }
 log = { workspace = true }
 logging_timer = { workspace = true }
 platform = { path = "../platform" }

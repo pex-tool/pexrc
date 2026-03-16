@@ -3,7 +3,6 @@
 
 use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
-use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::{env, fs};
@@ -11,6 +10,7 @@ use std::{env, fs};
 use anyhow::bail;
 use bstr::ByteSlice;
 use const_format::concatcp;
+use fs_err::File;
 use strum::{EnumCount, IntoEnumIterator};
 use strum_macros::{EnumCount, EnumIter};
 use which::which_in_global;

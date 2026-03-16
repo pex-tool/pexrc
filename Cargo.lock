@@ -209,6 +209,7 @@ dependencies = [
  "anyhow",
  "base64",
  "dirs",
+ "fs-err",
  "logging_timer",
  "sha2",
  "tempfile",
@@ -1104,6 +1105,7 @@ dependencies = [
  "anyhow",
  "cache",
  "elf",
+ "fs-err",
  "indexmap",
  "log",
  "logging_timer",
@@ -1489,6 +1491,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "ctor",
+ "fs-err",
  "glob",
  "indexmap",
  "interpreter",
@@ -1523,6 +1526,7 @@ dependencies = [
  "colorchoice-clap",
  "const_format",
  "env_logger",
+ "fs-err",
  "include_dir",
  "indexmap",
  "interpreter",
@@ -1549,6 +1553,7 @@ dependencies = [
  "const_format",
  "dirs",
  "flate2",
+ "fs-err",
  "hex",
  "reqwest",
  "serde",
@@ -1607,6 +1612,7 @@ name = "platform"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "fs-err",
  "is_executable",
  "nix",
 ]
@@ -2427,6 +2433,7 @@ dependencies = [
  "anyhow",
  "cache",
  "ctor",
+ "fs-err",
  "python",
  "rstest",
  "target-lexicon",
@@ -2778,6 +2785,7 @@ dependencies = [
  "anyhow",
  "build-target",
  "const_format",
+ "fs-err",
  "indexmap",
  "interpreter",
  "itertools 0.14.0",

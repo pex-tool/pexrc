@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::fmt::{Display, Formatter};
-use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 use std::{fs, io};
 
 use anyhow::anyhow;
+use fs_err::File;
 use indexmap::{IndexMap, IndexSet};
 use log::warn;
 use logging_timer::time;
@@ -261,7 +261,7 @@ if __name__ == "__main__":
             })
         )
     )?;
-    mark_executable(&mut main_py_fp)?;
+    mark_executable(main_py_fp.file_mut())?;
     link_or_copy(Path::new("__main__.py"), venv.prefix().join("pex"))
 }
 
@@ -365,7 +365,7 @@ if __name__ == "__main__":
             },
         )
     )?;
-    mark_executable(&mut pex_repl_py_fp)?;
+    mark_executable(pex_repl_py_fp.file_mut())?;
 
     Ok(())
 }

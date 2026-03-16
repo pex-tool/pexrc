@@ -1,13 +1,13 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::fs::File;
 use std::io::{ErrorKind, Read};
 use std::path::Path;
 
 use anyhow::{anyhow, bail};
 use cache::CacheDir;
 use const_format::str_split;
+use fs_err::File;
 use interpreter::{InterpreterConstraints, SearchPath, SelectionStrategy};
 use pex::{Pex, PexPath};
 use pexrs::venv_dir;

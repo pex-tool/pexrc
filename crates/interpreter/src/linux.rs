@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::ffi::OsStr;
-use std::fs::File;
 use std::io::BufRead;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
@@ -12,6 +11,7 @@ use anyhow::{anyhow, bail};
 use elf::ElfStream;
 use elf::endian::{AnyEndian, EndianParse};
 use elf::file::{Class, FileHeader};
+use fs_err::File;
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
@@ -94,7 +94,7 @@ pub(crate) enum LinuxInfo {
 
 impl LinuxInfo {
     pub(crate) fn parse(exe: impl AsRef<Path>) -> anyhow::Result<Self> {
-        let exe_fp = File::open(&exe)?;
+        let exe_fp = File::open(exe.as_ref())?;
         let mut elf: ElfStream<AnyEndian, _> = ElfStream::open_stream(exe_fp)?;
         let segments = elf.segments().clone();
         for program_header in segments {

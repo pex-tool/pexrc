@@ -7,6 +7,7 @@ edition = "2024"
 
 [dependencies]
 anyhow = { workspace = true }
+fs-err = { workspace = true }
 indexmap = { workspace = true }
 interpreter = { path = "../interpreter" }
 itertools = { workspace = true }
