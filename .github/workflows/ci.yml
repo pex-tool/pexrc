@@ -44,7 +44,7 @@ jobs:
     steps:
       - name: Checkout Pexrc
         uses: actions/checkout@v6
-      - name: Run Tests
+      - name: Build pexrc binary for all targets.
         run: |
           PEXRC_TARGETS=all cargo build --release
           target/release/pexrc info
