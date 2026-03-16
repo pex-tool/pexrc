@@ -142,11 +142,13 @@ pub(crate) struct Build<'a> {
     pub(crate) clib: Clib<'a>,
     #[serde(borrow)]
     pub(crate) glibc: Glibc<'a>,
+
     // N.B.: This fails to unpack on Windows; so cross-build from Windows likely won't work right now:
     // failed to unpack `MacOSX11.3.sdk/usr/share/man/mann/ttk::progressbar.ntcl` into `\\?\C:\Users\runneradmin\AppData\Local\pexrc-dev\downloads\.tmpy6R6aW\MacOSX11.3.sdk\usr\share\man\mann\ttk::progressbar.ntcl`
     #[cfg(not(windows))]
     #[serde(borrow)]
     pub(crate) mac_osx_sdk: Download<'a>,
+
     pub(crate) virtualenv: Download<'a>,
     pub(crate) zig_version: &'a str,
 }
