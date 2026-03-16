@@ -35,6 +35,9 @@ impl<'a> From<Build<'a>> for ToolBox<'a> {
             zig_version: build.zig_version,
             glibc: build.glibc,
             binstall_tools: BinstallTool::iter().collect::<Vec<_>>(),
+            // N.B.: This fails to unpack on Windows; so cross-build from Windows likely won't work right now:
+            // failed to unpack `MacOSX11.3.sdk/usr/share/man/mann/ttk::progressbar.ntcl` into `\\?\C:\Users\runneradmin\AppData\Local\pexrc-dev\downloads\.tmpy6R6aW\MacOSX11.3.sdk\usr\share\man\mann\ttk::progressbar.ntcl`
+            #[cfg(not(windows))]
             downloads: vec![("SDKROOT", build.mac_osx_sdk)],
         }
     }

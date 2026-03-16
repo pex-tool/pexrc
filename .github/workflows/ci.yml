@@ -20,8 +20,37 @@ jobs:
         if: false
         run: |
           echo "This is a dummy step that will never run."
+
+  build:
+    name: "${{ matrix.name }} build"
+    needs: setup
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        # N.B.: macos-14 is the oldest non-deprecated ARM Mac runner.
+        include:
+          - name: Linux aarch64
+            os: ubuntu-22.04-arm
+          - name: Linux x86_64
+            os: ubuntu-22.04
+          - name: Mac aarch64
+            os: macos-14
+          - name: Mac x86_64
+            os: macos-15-intel
+          - name: Windows aarch64
+            os: windows-11-arm
+          - name: Windows x86_64
+            os: windows-2022
+    steps:
+      - name: Checkout Pexrc
+        uses: actions/checkout@v6
+      - name: Run Tests
+        run: |
+          PEXRC_TARGETS=all cargo build --release
+          target/release/pexrc info
+
   checks:
-    name: "Check Formatting, Lints and Cross-build"
+    name: "Check Formatting and Lints"
     needs: setup
     runs-on: ubuntu-24.04
     steps:
@@ -32,8 +61,6 @@ jobs:
           rustup toolchain add nightly -c rustfmt
           cargo +nightly fmt --check --all
           cargo clippy --locked --all
-          PEXRC_TARGETS=all cargo build --release
-          target/release/pexrc info
 
   tests:
     name: "${{ matrix.name }} tests"
@@ -66,6 +93,7 @@ jobs:
   final-status:
     name: Gather Final Status
     needs:
+      - build
       - checks
       - tests
     runs-on: ubuntu-24.04
