@@ -1,0 +1,80 @@
+name: CI
+on: [push, pull_request]
+defaults:
+  run:
+    shell: bash
+env:
+  PEXRC_INSTALL_TOOLS: 1
+
+concurrency:
+  group: CI-${{ github.ref }}
+  # Queue on all branches and tags, but only cancel overlapping PR burns.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
+jobs:
+  setup:
+    name: Check GitHub Organization
+    if: github.repository_owner == 'pex-tool'
+    runs-on: ubuntu-slim
+    steps:
+      - name: Noop
+        if: false
+        run: |
+          echo "This is a dummy step that will never run."
+  checks:
+    name: "Unix: uv run dev-cmd -s test"
+    needs: setup
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Pexrc
+        uses: actions/checkout@v6
+      - name: Check Formatting, Lints and Cross-build
+        run: |
+          rustup toolchain add nightly -c rustfmt
+          cargo +nightly fmt --check --all
+          cargo clippy --locked --all
+          PEXRC_TARGETS=all cargo build --release
+          target/release/pexrc info
+
+  tests:
+    name: "${{ matrix.name }} tests"
+    needs: setup
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        # N.B.: macos-14 is the oldest non-deprecated ARM Mac runner.
+        include:
+          - name: Linux aarch64
+            os: ubuntu-22.04-arm
+          - name: Linux x86_64
+            os: ubuntu-22.04
+          - name: Mac aarch64
+            os: macos-14
+          - name: Mac x86_64
+            os: macos-15-intel
+          - name: Windows aarch64
+            os: windows-11-arm
+          - name: Windows x86_64
+            os: windows-2022
+    steps:
+      - name: Checkout Pexrc
+        uses: actions/checkout@v6
+      - name: Run Tests
+        run: |
+          cargo test --all
+          uv run dev-cmd test -- -vvs
+
+  final-status:
+    name: Gather Final Status
+    needs:
+      - checks
+      - tests
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check Non-Success
+        if: |
+          contains(needs.*.result, 'cancelled') ||
+          contains(needs.*.result, 'failure') ||
+          contains(needs.*.result, 'skipped')
+        run: "false"
+      - name: Success
+        run: "true"
