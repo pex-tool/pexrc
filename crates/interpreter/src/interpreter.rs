@@ -369,6 +369,7 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::process::{Command, Stdio};
 
+    use anyhow::Context;
     use python::{InterpreterIdentificationScript, Resources};
     use rstest::rstest;
     use testing::{interpreter_identification_script, python_exe, resources, venv_python_exe};
@@ -409,7 +410,13 @@ mod tests {
             serde_json::from_str(String::from_utf8(tags_output).unwrap().as_str()).unwrap();
 
         let interpreter =
-            Interpreter::load_uncached(venv_python_exe, &interpreter_identification_script)
+            Interpreter::load_uncached(&venv_python_exe, &interpreter_identification_script)
+                .with_context(|| {
+                    format!(
+                        "Failed to load interpreter info for {python}",
+                        python = venv_python_exe.display()
+                    )
+                })
                 .unwrap();
         assert_eq!(expected_tags, interpreter.supported_tags);
     }
@@ -421,7 +428,14 @@ mod tests {
         mut resources: impl Resources<'static>,
     ) {
         let identification_script = InterpreterIdentificationScript::read(&mut resources).unwrap();
-        let venv_interpreter = Interpreter::load(venv_python_exe, &identification_script).unwrap();
+        let venv_interpreter = Interpreter::load(&venv_python_exe, &identification_script)
+            .with_context(|| {
+                format!(
+                    "Failed to load interpreter info for {python}",
+                    python = venv_python_exe.display()
+                )
+            })
+            .unwrap();
         assert_eq!(
             python_exe,
             venv_interpreter
