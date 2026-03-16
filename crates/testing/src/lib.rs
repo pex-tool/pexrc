@@ -16,7 +16,15 @@ use target_lexicon::{HOST, OperatingSystem};
 static TMP_DIRS: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 
 pub fn create_tmp_dir() -> PathBuf {
-    let tmp_dir = tempfile::tempdir().unwrap().keep();
+    // N.B.: Without a prefix / suffix, we get default tmp dir names like: .tmp2BgOL1
+    // Windows complains with:
+    //   The filename or extension is too long. (os error 206)
+    let tmp_dir = tempfile::Builder::new()
+        .prefix("pexrc-test")
+        .suffix(".dir")
+        .tempdir()
+        .unwrap()
+        .keep();
     let mut tmp_dirs = TMP_DIRS.lock().unwrap();
     let chroot = tmp_dir.join("chroot");
     fs::create_dir(&chroot).unwrap();
