@@ -1538,6 +1538,7 @@ dependencies = [
  "pexrs",
  "platform",
  "python",
+ "sha2",
  "strum",
  "tempfile",
  "zip",

@@ -71,9 +71,6 @@ fn main() -> anyhow::Result<()> {
             };
             inject::inject(&pex, compression_level, clibs)
         }
-        Commands::Info => {
-            info::display();
-            Ok(())
-        }
+        Commands::Info => info::display(),
     }
 }

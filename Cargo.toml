@@ -171,6 +171,7 @@ pex = { path = "crates/pex" }
 pexrs = { path = "crates/pexrs" }
 platform = { path = "crates/platform" }
 python = { path = "crates/python", features = ["embedded_resources"] }
+sha2 = { workspace = true }
 strum = { workspace = true }
 tempfile = { workspace = true }
 zip = { workspace = true }
