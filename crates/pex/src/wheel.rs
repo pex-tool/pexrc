@@ -45,6 +45,7 @@ pub struct WheelFile<'a> {
     pub(crate) project_name: PackageName,
     pub(crate) raw_version: &'a str,
     pub(crate) version: Version,
+    pub(crate) build_tag: Option<&'a str>,
     pub(crate) tags: Vec<Tag<'a>>,
 }
 
@@ -66,18 +67,26 @@ impl<'a> WheelFile<'a> {
             bail!("337")
         }
 
-        let (raw_project_name, raw_version, python_tag, abi_tag, platform_tag) = {
+        let (raw_project_name, raw_version, build_tag, python_tag, abi_tag, platform_tag) = {
             let mut trailing_components = file_name[0..file_name.len() - 4].rsplitn(4, "-");
             let platform_tag = trailing_components.next().ok_or_else(|| anyhow!("338"))?;
             let abi_tag = trailing_components.next().ok_or_else(|| anyhow!("339"))?;
             let python_tag = trailing_components.next().ok_or_else(|| anyhow!("340"))?;
             let rest = trailing_components.next().ok_or_else(|| anyhow!("341"))?;
 
-            let mut leading_components = rest.splitn(2, "-");
+            let mut leading_components = rest.splitn(3, "-");
             let project_name = leading_components.next().ok_or_else(|| anyhow!("342"))?;
             let version = leading_components.next().ok_or_else(|| anyhow!("343"))?;
+            let build_tag = leading_components.next();
 
-            (project_name, version, python_tag, abi_tag, platform_tag)
+            (
+                project_name,
+                version,
+                build_tag,
+                python_tag,
+                abi_tag,
+                platform_tag,
+            )
         };
 
         let mut tags: Vec<Tag<'a>> = Vec::new();
@@ -100,6 +109,7 @@ impl<'a> WheelFile<'a> {
             project_name,
             raw_version,
             version,
+            build_tag,
             tags,
         })
     }
@@ -269,8 +279,9 @@ mod tests {
             PackageName::from_str("cffi").unwrap(),
             wheel_file.project_name
         );
-        assert_eq!("1.14.3-2", wheel_file.raw_version);
-        assert_eq!(Version::from_str("1.14.3-2").unwrap(), wheel_file.version);
+        assert_eq!("1.14.3", wheel_file.raw_version);
+        assert_eq!(Some("2"), wheel_file.build_tag);
+        assert_eq!(Version::from_str("1.14.3").unwrap(), wheel_file.version);
         assert_eq!(
             vec![Tag {
                 python: "cp39",
