@@ -451,7 +451,7 @@ impl<'a> Pex<'a> {
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
-    use std::process::Command;
+    use std::process::{Command, Stdio};
     use std::str::FromStr;
 
     use ::interpreter::Interpreter;
@@ -474,15 +474,22 @@ mod tests {
     #[fixture]
     fn ansicolors_pex(tmp_dir: PathBuf, python_exe: &Path) -> PathBuf {
         let pex = tmp_dir.join("ansicolors.pex");
-        Command::new("uvx")
+        let output = Command::new("uvx")
             .arg("--python")
             .arg(python_exe)
             .args(["pex", "ansicolors==1.1.8", "-o"])
             .arg(&pex)
+            .stderr(Stdio::piped())
             .spawn()
             .unwrap()
-            .wait()
+            .wait_with_output()
             .unwrap();
+        assert!(
+            output.status.success(),
+            "Failed to create ansicolors.pex: {exit_status:?}\n{stderr}",
+            exit_status = output.status,
+            stderr = String::from_utf8_lossy(&output.stderr)
+        );
         pex
     }
 
@@ -503,7 +510,7 @@ mod tests {
         mut resources: impl Resources<'static>,
     ) -> PathBuf {
         let pex = tmp_dir.join("requests.pex");
-        Command::new("uvx")
+        let output = Command::new("uvx")
             .arg("--python")
             .arg(python_exe)
             .args(["pex", "requests[socks]==2.32.5"])
@@ -511,10 +518,17 @@ mod tests {
             .arg(ansicolors_pex)
             .arg("-o")
             .arg(&pex)
+            .stderr(Stdio::piped())
             .spawn()
             .unwrap()
-            .wait()
+            .wait_with_output()
             .unwrap();
+        assert!(
+            output.status.success(),
+            "Failed to create requests.pex: {exit_status:?}\n{stderr}",
+            exit_status = output.status,
+            stderr = String::from_utf8_lossy(&output.stderr)
+        );
 
         let mut zip =
             ZipWriter::new_append(File::options().read(true).write(true).open(&pex).unwrap())
