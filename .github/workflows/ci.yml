@@ -22,34 +22,6 @@ jobs:
         run: |
           echo "This is a dummy step that will never run."
 
-  build:
-    name: "${{ matrix.name }} build"
-    needs: setup
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        # N.B.: macos-14 is the oldest non-deprecated ARM Mac runner.
-        include:
-          - name: Linux aarch64
-            os: ubuntu-22.04-arm
-          - name: Linux x86_64
-            os: ubuntu-22.04
-          - name: Mac aarch64
-            os: macos-14
-          - name: Mac x86_64
-            os: macos-15-intel
-          - name: Windows aarch64
-            os: windows-11-arm
-          - name: Windows x86_64
-            os: windows-2022
-    steps:
-      - name: Checkout Pexrc
-        uses: actions/checkout@v6
-      - name: Build pexrc binary for all targets.
-        run: |
-          PEXRC_TARGETS=all cargo build --release
-          target/release/pexrc info
-
   checks:
     name: "Check Formatting and Lints"
     needs: setup
@@ -62,6 +34,31 @@ jobs:
           rustup toolchain add nightly -c rustfmt
           cargo +nightly fmt --check --all
           cargo clippy --locked --all
+
+  cross-build:
+    name: "Cross-build pexrc"
+    needs: setup
+    runs-on: ubuntu-22.04-arm
+    steps:
+      - name: Checkout Pexrc
+        uses: actions/checkout@v6
+      - name: Build pexrc binary for all targets.
+        run: |
+          PEXRC_TARGETS=all cargo zigbuild \
+            --release \
+            --target aarch64-unknown-linux-gnu \
+            --target aarch64-unknown-linux-musl \
+            --target armv7-unknown-linux-gnueabihf \
+            --target powerpc64le-unknown-linux-gnu \
+            --target riscv64gc-unknown-linux-gnu \
+            --target s390x-unknown-linux-gnu \
+            --target x86_64-unknown-linux-gnu \
+            --target x86_64-unknown-linux-musl \
+            --target aarch64-apple-darwin \
+            --target x86_64-apple-darwin \
+            --target aarch64-pc-windows-gnullvm \
+            --target x86_64-pc-windows-gnu
+          target/aarch64-unknown-linux-gnu/release/pexrc info
 
   tests:
     name: "${{ matrix.name }} tests"
@@ -94,8 +91,8 @@ jobs:
   final-status:
     name: Gather Final Status
     needs:
-      - build
       - checks
+      - cross-build
       - tests
     runs-on: ubuntu-24.04
     steps:
