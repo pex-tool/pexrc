@@ -472,9 +472,11 @@ mod tests {
     const EXPECTED_ANSICOLORS_PEX_WHEELS: [&str; 1] = ["ansicolors==1.1.8"];
 
     #[fixture]
-    fn ansicolors_pex(tmp_dir: PathBuf) -> PathBuf {
+    fn ansicolors_pex(tmp_dir: PathBuf, python_exe: &Path) -> PathBuf {
         let pex = tmp_dir.join("ansicolors.pex");
         Command::new("uvx")
+            .arg("--python")
+            .arg(python_exe)
             .args(["pex", "ansicolors==1.1.8", "-o"])
             .arg(&pex)
             .spawn()
@@ -496,11 +498,14 @@ mod tests {
     #[fixture]
     fn requests_pex(
         tmp_dir: PathBuf,
+        python_exe: &Path,
         ansicolors_pex: PathBuf,
         mut resources: impl Resources<'static>,
     ) -> PathBuf {
         let pex = tmp_dir.join("requests.pex");
         Command::new("uvx")
+            .arg("--python")
+            .arg(python_exe)
             .args(["pex", "requests[socks]==2.32.5"])
             .arg("--pex-path")
             .arg(ansicolors_pex)
