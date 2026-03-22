@@ -216,7 +216,8 @@ fn write_main<'a>(
     pex_info: &PexInfo,
     resources: &mut impl Resources<'a>,
 ) -> anyhow::Result<()> {
-    let mut main_py_fp = File::create_new(venv.prefix().join("__main__.py"))?;
+    let main_py = venv.prefix().join("__main__.py");
+    let mut main_py_fp = File::create_new(&main_py)?;
     write_shebang_bytes(&mut main_py_fp, shebang_interpreter, shebang_arg)?;
     let venv_pex_script = VenvPexScript::read(resources)?;
     main_py_fp.write_all(venv_pex_script.contents().as_bytes())?;
@@ -262,7 +263,7 @@ if __name__ == "__main__":
         )
     )?;
     mark_executable(main_py_fp.file_mut())?;
-    link_or_copy(Path::new("__main__.py"), venv.prefix().join("pex"))
+    link_or_copy(&main_py, venv.prefix().join("pex"))
 }
 
 fn write_repl<'a>(
