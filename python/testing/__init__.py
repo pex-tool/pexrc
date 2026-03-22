@@ -4,17 +4,7 @@
 from __future__ import absolute_import
 
 import os
-import platform
 import subprocess
-
-import pytest
-
-IS_WINDOWS = platform.system() == "Windows"
-
-
-skip_windows_cant_build_pex_to_inject_yet = pytest.mark.skipif(
-    IS_WINDOWS, reason="Pex doesn't work on Windows yet; so we can't build a PEX to inject."
-)
 
 
 def pexrc():

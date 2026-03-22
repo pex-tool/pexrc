@@ -550,7 +550,6 @@ mod tests {
         }
     }
 
-    #[cfg_attr(windows, ignore)] // requests.pex cannot be built on Windows currently.
     #[rstest]
     fn test_resolve_single(
         requests_pex: PathBuf,
@@ -568,7 +567,6 @@ mod tests {
         assert_wheels(wheels, EXPECTED_REQUESTS_PEX_WHEELS);
     }
 
-    #[cfg_attr(windows, ignore)] // requests.pex cannot be built on Windows currently.
     #[rstest]
     fn test_resolve_additional(requests_pex: PathBuf, python_exe: &Path) {
         let pex = Pex::load(&requests_pex).unwrap();

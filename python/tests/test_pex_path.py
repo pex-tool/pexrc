@@ -8,7 +8,6 @@ import subprocess
 from textwrap import dedent
 
 import colors  # type: ignore[import-untyped]
-from testing import skip_windows_cant_build_pex_to_inject_yet
 from testing.compare import compare
 
 TYPE_CHECKING = False
@@ -19,7 +18,6 @@ if TYPE_CHECKING:
     from testing.compare import ProcessResult  # noqa: F401
 
 
-@skip_windows_cant_build_pex_to_inject_yet
 def test_via_env(tmpdir):
     # type: (Any) -> None
 
