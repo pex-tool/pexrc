@@ -451,7 +451,7 @@ impl<'a> Pex<'a> {
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
-    use std::process::{Command, Stdio};
+    use std::process::Command;
     use std::str::FromStr;
 
     use ::interpreter::Interpreter;
@@ -515,7 +515,6 @@ mod tests {
                 .arg(ansicolors_pex)
                 .arg("-o")
                 .arg(&pex)
-                .stderr(Stdio::piped())
                 .spawn()
                 .unwrap()
                 .wait()

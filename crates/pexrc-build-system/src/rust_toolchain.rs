@@ -31,7 +31,13 @@ impl<'a> Target<'a> {
 
     pub fn python_identifier(&self) -> Cow<'_, str> {
         match self {
-            Target::Windows(target) => Cow::Owned(target.split("-").take(3).join("-")),
+            Target::Windows(target) => {
+                // N.B.: The last element of the "target-triple" (the 4th element) is msvc or gnu
+                // depending on whether this was a native build or cross-build. Either way, the dll
+                // can be loaded by the host Python interpreter; so we store the dll without the
+                // C-lib component.
+                Cow::Owned(target.split("-").take(3).join("-"))
+            },
             Target::Apple(target) | Target::Unix(target) => Cow::Borrowed(target),
             Target::GnuLinux(linux) => Cow::Borrowed(linux.target),
         }
