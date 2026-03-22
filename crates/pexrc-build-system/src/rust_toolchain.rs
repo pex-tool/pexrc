@@ -37,7 +37,7 @@ impl<'a> Target<'a> {
                 // can be loaded by the host Python interpreter; so we store the dll without the
                 // C-lib component.
                 Cow::Owned(target.split("-").take(3).join("-"))
-            },
+            }
             Target::Apple(target) | Target::Unix(target) => Cow::Borrowed(target),
             Target::GnuLinux(linux) => Cow::Borrowed(linux.target),
         }
