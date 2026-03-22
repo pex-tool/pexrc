@@ -1,8 +1,10 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::borrow::Cow;
 use std::env;
 
+use itertools::Itertools;
 use serde::Deserialize;
 
 use crate::metadata::Glibc;
@@ -24,6 +26,14 @@ impl<'a> Target<'a> {
         match self {
             Target::Apple(target) | Target::Unix(target) | Target::Windows(target) => target,
             Target::GnuLinux(linux) => linux.target,
+        }
+    }
+
+    pub fn python_identifier(&self) -> Cow<'_, str> {
+        match self {
+            Target::Windows(target) => Cow::Owned(target.split("-").take(3).join("-")),
+            Target::Apple(target) | Target::Unix(target) => Cow::Borrowed(target),
+            Target::GnuLinux(linux) => Cow::Borrowed(linux.target),
         }
     }
 

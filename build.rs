@@ -221,9 +221,10 @@ fn collect_clibs<'a>(
                 target = target.as_str(),
             );
         }
-        let mut dst = File::create(
-            clibs_dir.join(format!("{target}.{clib_name}", target = target.as_str())),
-        )?;
+        let mut dst = File::create(clibs_dir.join(format!(
+            "{target}.{clib_name}",
+            target = target.python_identifier()
+        )))?;
         if compress {
             let encoder = zstd::Encoder::new(dst, clib.compression_level)?;
             io::copy(&mut File::open(clib_path)?, &mut encoder.auto_finish())?;
