@@ -44,6 +44,9 @@ jobs:
         uses: actions/checkout@v6
       - name: Build pexrc binary for all targets.
         run: |
+          # N.B.: This is needed to bootstrap tools, but the work for the native host does not go
+          # to waste.
+          cargo build --release
           PEXRC_TARGETS=all cargo zigbuild \
             --release \
             --target aarch64-unknown-linux-gnu \
