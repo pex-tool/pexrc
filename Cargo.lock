@@ -1460,6 +1460,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d211803b9b6b570f68772237e415a029d5a50c65d382910b879fb19d3271f94d"
 
 [[package]]
+name = "package"
+version = "0.0.0"
+dependencies = [
+ "anstream 1.0.0",
+ "anyhow",
+ "clap",
+ "clap-verbosity-flag",
+ "colorchoice-clap",
+ "env_logger",
+ "itertools 0.14.0",
+ "log",
+ "owo-colors",
+ "pexrc-build-system",
+]
+
+[[package]]
 name = "pathdiff"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

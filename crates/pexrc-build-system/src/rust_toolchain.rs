@@ -103,7 +103,7 @@ impl<'a> ClassifiedTargets<'a> {
         }
     }
 
-    pub fn iter_zigbuild_targets(&'a self) -> impl Iterator<Item = &'a str> {
+    pub fn iter_zigbuild_targets(&'a self) -> impl ExactSizeIterator<Item = &'a str> {
         self.zigbuild_targets.iter().map(|target| {
             if let Target::GnuLinux(gnu_linux) = target {
                 gnu_linux.zigbuild_target.as_str()
@@ -113,7 +113,7 @@ impl<'a> ClassifiedTargets<'a> {
         })
     }
 
-    pub fn iter_xwin_targets(&'a self) -> impl Iterator<Item = &'a str> {
+    pub fn iter_xwin_targets(&'a self) -> impl ExactSizeIterator<Item = &'a str> {
         self.xwin_targets.iter().map(Target::as_str)
     }
 

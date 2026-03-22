@@ -1,0 +1,15 @@
+[package]
+name = "package"
+edition = "2024"
+
+[dependencies]
+anstream = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+clap-verbosity-flag = { workspace = true }
+colorchoice-clap = { workspace = true }
+env_logger = { workspace = true }
+itertools = { workspace = true }
+log = { workspace = true }
+owo-colors = { workspace = true }
+pexrc-build-system = { path = "../pexrc-build-system" }

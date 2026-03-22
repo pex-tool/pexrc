@@ -8,6 +8,7 @@ members = [
     "crates/cache",
     "crates/clib",
     "crates/interpreter",
+    "crates/package",
     "crates/pex",
     "crates/pexrc-build-system",
     "crates/pexrs",
