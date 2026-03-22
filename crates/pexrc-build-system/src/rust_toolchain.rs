@@ -1,8 +1,10 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::borrow::Cow;
 use std::env;
 
+use itertools::Itertools;
 use serde::Deserialize;
 
 use crate::metadata::Glibc;
@@ -24,6 +26,20 @@ impl<'a> Target<'a> {
         match self {
             Target::Apple(target) | Target::Unix(target) | Target::Windows(target) => target,
             Target::GnuLinux(linux) => linux.target,
+        }
+    }
+
+    pub fn python_identifier(&self) -> Cow<'_, str> {
+        match self {
+            Target::Windows(target) => {
+                // N.B.: The last element of the "target-triple" (the 4th element) is msvc or gnu
+                // depending on whether this was a native build or cross-build. Either way, the dll
+                // can be loaded by the host Python interpreter; so we store the dll without the
+                // C-lib component.
+                Cow::Owned(target.split("-").take(3).join("-"))
+            }
+            Target::Apple(target) | Target::Unix(target) => Cow::Borrowed(target),
+            Target::GnuLinux(linux) => Cow::Borrowed(linux.target),
         }
     }
 

@@ -54,9 +54,10 @@ description = "Runs all development checks, including auto-formatting code."
 steps = [
     "fmt",
     "lint",
-    # Parallelizing the type checks and test is safe (they don't modify files), and it nets a ~3x
+    # Parallelizing the type checks is safe (they don't modify files), and it nets a ~3x
     # speedup over running them all serially.
-    ["type-check-py3.{8..14}", "test"],
+    ["type-check-py3.{8..14}"],
+    "test",
 ]
 
 [tool.dev-cmd.tasks.ci]

@@ -5,6 +5,7 @@ defaults:
     shell: bash
 env:
   PEXRC_INSTALL_TOOLS: 1
+  PEXRC_PROFILE: release
 
 concurrency:
   group: CI-${{ github.ref }}

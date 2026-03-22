@@ -16,10 +16,6 @@ use target_lexicon::{HOST, OperatingSystem};
 static TMP_DIRS: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 
 pub fn create_tmp_dir() -> PathBuf {
-    // N.B.: Without a prefix / suffix, we get default tmp dir names like: .tmp2BgOL1
-    // Windows complains with:
-    //   The filename or extension is too long. (os error 206)
-    // With a prefix of 2 characters, we get 8 character names like tdu6ERy3.
     let tmp_dir = tempfile::Builder::new()
         .prefix("pexrc-test-")
         .suffix(".dir")
@@ -53,7 +49,7 @@ static PEXRC_TESTING_CACHE_ROOT: LazyLock<anyhow::Result<PathBuf>> = LazyLock::n
     Ok(cache_dir)
 });
 
-const MANAGED_PYTHON_VERSION: &str = "3.14.3";
+const MANAGED_PYTHON_VERSION: &str = "cpython-3.14.3";
 
 #[fixture]
 #[once]
@@ -69,7 +65,13 @@ pub fn python_exe() -> PathBuf {
                 "python",
                 "install",
                 "--managed-python",
-                MANAGED_PYTHON_VERSION
+                // N.B.: We force arch to get arm64 PBS builds for Windows arm64 machines.
+                // See: https://github.com/astral-sh/uv/issues/12906
+                &format!(
+                    "{MANAGED_PYTHON_VERSION}-{os}-{arch}",
+                    os = HOST.operating_system.into_str(),
+                    arch = HOST.architecture.into_str()
+                )
             ])
             .env("UV_PYTHON_INSTALL_DIR", &install_dir)
             .spawn()
@@ -79,30 +81,32 @@ pub fn python_exe() -> PathBuf {
             .success()
     );
 
-    let python_exe_bytes = Command::new("uv")
+    let output = Command::new("uv")
         .args(["python", "find", "--managed-python", MANAGED_PYTHON_VERSION])
         .env("UV_PYTHON_INSTALL_DIR", install_dir)
         .stdout(Stdio::piped())
         .spawn()
         .unwrap()
         .wait_with_output()
-        .unwrap()
-        .stdout;
-
-    PathBuf::from(String::from_utf8(python_exe_bytes).unwrap().trim())
+        .unwrap();
+    assert!(output.status.success());
+    PathBuf::from(String::from_utf8(output.stdout).unwrap().trim())
 }
 
 #[fixture]
 pub fn venv_python_exe(python_exe: &Path) -> PathBuf {
     let venv_dir = tmp_dir();
     let python_exe_basename = {
-        Command::new(python_exe)
-            .args(["-m", "venv"])
-            .arg(&venv_dir)
-            .spawn()
-            .unwrap()
-            .wait()
-            .unwrap();
+        assert!(
+            Command::new(python_exe)
+                .args(["-m", "venv"])
+                .arg(&venv_dir)
+                .spawn()
+                .unwrap()
+                .wait()
+                .unwrap()
+                .success()
+        );
         OsString::from(python_exe.file_name().unwrap())
     };
 

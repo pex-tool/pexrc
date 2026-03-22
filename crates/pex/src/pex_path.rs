@@ -15,9 +15,11 @@ impl PexPath {
             pex_path.extend(env::split_paths(&path))
         } else if !pex_info.pex_paths.is_empty() {
             pex_path.extend_from_slice(&pex_info.pex_paths)
-        } else if !pex_info.pex_path.is_empty() {
+        } else if let Some(legacy_pex_path) = pex_info.pex_path.as_deref()
+            && !legacy_pex_path.is_empty()
+        {
             // Legacy PEX-INFO stored this in a single string as a colon-separated list.
-            for entry in pex_info.pex_path.split(':') {
+            for entry in legacy_pex_path.split(':') {
                 pex_path.push(entry.into())
             }
         }

@@ -1556,6 +1556,7 @@ dependencies = [
  "flate2",
  "fs-err",
  "hex",
+ "itertools 0.14.0",
  "reqwest",
  "serde",
  "sha2",

@@ -78,7 +78,7 @@ pub struct PexInfo {
     pub interpreter_selection_strategy: InterpreterSelectionStrategy,
     pub overridden: Vec<String>,
     pub pex_hash: String,
-    pub pex_path: String,
+    pub pex_path: Option<String>,
     pub pex_paths: Vec<PathBuf>,
     pub pex_root: Option<String>,
     pub requirements: Vec<String>,
