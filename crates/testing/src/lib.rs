@@ -65,7 +65,8 @@ pub fn python_exe() -> PathBuf {
                 "python",
                 "install",
                 "--managed-python",
-                // N.B.: We force arch to get aarch64 PBS builds for Windows arm64 machines.
+                // N.B.: We force arch to get arm64 PBS builds for Windows arm64 machines.
+                // See: https://github.com/astral-sh/uv/issues/12906
                 &format!(
                     "{MANAGED_PYTHON_VERSION}-{os}-{arch}",
                     os = HOST.operating_system.into_str(),
@@ -80,30 +81,32 @@ pub fn python_exe() -> PathBuf {
             .success()
     );
 
-    let python_exe_bytes = Command::new("uv")
+    let output = Command::new("uv")
         .args(["python", "find", "--managed-python", MANAGED_PYTHON_VERSION])
         .env("UV_PYTHON_INSTALL_DIR", install_dir)
         .stdout(Stdio::piped())
         .spawn()
         .unwrap()
         .wait_with_output()
-        .unwrap()
-        .stdout;
-
-    PathBuf::from(String::from_utf8(python_exe_bytes).unwrap().trim())
+        .unwrap();
+    assert!(output.status.success());
+    PathBuf::from(String::from_utf8(output.stdout).unwrap().trim())
 }
 
 #[fixture]
 pub fn venv_python_exe(python_exe: &Path) -> PathBuf {
     let venv_dir = tmp_dir();
     let python_exe_basename = {
-        Command::new(python_exe)
-            .args(["-m", "venv"])
-            .arg(&venv_dir)
-            .spawn()
-            .unwrap()
-            .wait()
-            .unwrap();
+        assert!(
+            Command::new(python_exe)
+                .args(["-m", "venv"])
+                .arg(&venv_dir)
+                .spawn()
+                .unwrap()
+                .wait()
+                .unwrap()
+                .success()
+        );
         OsString::from(python_exe.file_name().unwrap())
     };
 

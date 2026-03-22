@@ -296,22 +296,25 @@ mod tests {
     #[once]
     fn requests_2_32_5_whl(tmp_dir: PathBuf, venv_python_exe: PathBuf) -> PathBuf {
         let wheel_dir = tmp_dir.join("wheels");
-        Command::new(venv_python_exe)
-            .args([
-                "-m",
-                "pip",
-                "download",
-                "--no-deps",
-                "--only-binary",
-                ":all:",
-                "--dest",
-            ])
-            .arg(&wheel_dir)
-            .arg("requests==2.32.5")
-            .spawn()
-            .unwrap()
-            .wait()
-            .unwrap();
+        assert!(
+            Command::new(venv_python_exe)
+                .args([
+                    "-m",
+                    "pip",
+                    "download",
+                    "--no-deps",
+                    "--only-binary",
+                    ":all:",
+                    "--dest",
+                ])
+                .arg(&wheel_dir)
+                .arg("requests==2.32.5")
+                .spawn()
+                .unwrap()
+                .wait()
+                .unwrap()
+                .success()
+        );
         let mut matches = glob::glob(wheel_dir.join("*.whl").to_str().unwrap()).unwrap();
         let wheel = matches.next().unwrap();
         assert!(matches.next().is_none());

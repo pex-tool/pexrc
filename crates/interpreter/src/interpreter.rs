@@ -384,13 +384,16 @@ mod tests {
         venv_python_exe: PathBuf,
         interpreter_identification_script: InterpreterIdentificationScript,
     ) {
-        Command::new(&venv_python_exe)
-            .args(["-m", "pip", "install", "packaging"])
-            .spawn()
-            .unwrap()
-            .wait()
-            .unwrap();
-        let tags_output = Command::new(&venv_python_exe)
+        assert!(
+            Command::new(&venv_python_exe)
+                .args(["-m", "pip", "install", "packaging"])
+                .spawn()
+                .unwrap()
+                .wait()
+                .unwrap()
+                .success()
+        );
+        let output = Command::new(&venv_python_exe)
             .arg("-c")
             .arg(dedent(
                 "
@@ -406,10 +409,10 @@ mod tests {
             .spawn()
             .unwrap()
             .wait_with_output()
-            .unwrap()
-            .stdout;
+            .unwrap();
+        assert!(output.status.success());
         let expected_tags: Vec<String> =
-            serde_json::from_str(String::from_utf8(tags_output).unwrap().as_str()).unwrap();
+            serde_json::from_str(String::from_utf8(output.stdout).unwrap().as_str()).unwrap();
 
         let interpreter =
             Interpreter::load_uncached(&venv_python_exe, &interpreter_identification_script)
