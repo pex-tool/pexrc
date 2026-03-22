@@ -49,7 +49,7 @@ static PEXRC_TESTING_CACHE_ROOT: LazyLock<anyhow::Result<PathBuf>> = LazyLock::n
     Ok(cache_dir)
 });
 
-const MANAGED_PYTHON_VERSION: &str = "3.14.3";
+const MANAGED_PYTHON_VERSION: &str = "cpython-3.14.3";
 
 #[fixture]
 #[once]
@@ -65,7 +65,12 @@ pub fn python_exe() -> PathBuf {
                 "python",
                 "install",
                 "--managed-python",
-                MANAGED_PYTHON_VERSION
+                // N.B.: We force arch to get aarch64 PBS builds for Windows arm64 machines.
+                &format!(
+                    "{MANAGED_PYTHON_VERSION}-{os}-{arch}",
+                    os = HOST.operating_system.into_str(),
+                    arch = HOST.architecture.into_str()
+                )
             ])
             .env("UV_PYTHON_INSTALL_DIR", &install_dir)
             .spawn()
