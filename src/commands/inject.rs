@@ -19,8 +19,6 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 use crate::clibs::CLIBS_DIR;
 use crate::sh_boot;
 
-const MAIN: &[u8] = include_bytes!("../../python/pexrc/__init__.py");
-
 pub fn inject(
     pex: &Path,
     compression_level: Option<i64>,
@@ -89,10 +87,11 @@ pub fn inject(
     }
 
     let mut resources = embedded::RESOURCES;
-    resources.inject_zip(&mut dst_zip, zstd_file_options)?;
+    dst_zip.add_directory("__pex__", directory_options)?;
+    resources.inject_scripts(&mut dst_zip, zstd_file_options)?;
 
-    let file_options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
-
+    let deflate_options =
+        SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
     dst_zip.add_directory("__pex__/.clib", directory_options)?;
     info!("Embedded clibs:");
     for file in CLIBS_DIR.files() {
@@ -113,16 +112,12 @@ pub fn inject(
             entry = path.display().blue(),
             size = file.contents().len()
         );
-        dst_zip.start_file(dst_path, file_options)?;
+        dst_zip.start_file(dst_path, deflate_options)?;
         let mut clib_reader = zstd::Decoder::new(file.contents())?;
         io::copy(&mut clib_reader, &mut dst_zip)?;
         anstream::eprintln!("{}.", "done".green())
     }
-
-    dst_zip.start_file("__pex__/__init__.py", file_options)?;
-    dst_zip.write_all(MAIN)?;
-    dst_zip.start_file("__main__.py", file_options)?;
-    dst_zip.write_all(MAIN)?;
+    resources.inject_boot(&mut dst_zip, deflate_options)?;
 
     dst_zip.finish()?;
     mark_executable(dst_zip_fp.as_file_mut())?;
