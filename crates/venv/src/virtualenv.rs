@@ -13,7 +13,7 @@ use const_format::concatcp;
 use interpreter::Interpreter;
 use logging_timer::time;
 use platform::link_or_copy;
-use python::{InterpreterIdentificationScript, Resources, VendoredVirtualenvScript};
+use resources::{InterpreterIdentificationScript, Resources, VendoredVirtualenvScript};
 use target_lexicon::{HOST, OperatingSystem};
 
 const SCRIPTS_DIR: &str = env!("SCRIPTS_DIR");
@@ -207,23 +207,33 @@ mod tests {
     use std::path::PathBuf;
 
     use interpreter::Interpreter;
-    use python::{InterpreterIdentificationScript, Resources};
+    use resources::{InterpreterIdentificationScript, Resources};
     use rstest::rstest;
-    use testing::{python_exe, resources, tmp_dir};
+    use testing::{embedded_resources, python_exe, tmp_dir};
 
     use crate::virtualenv::{Path, Virtualenv};
 
     #[rstest]
-    fn test_create(python_exe: &Path, tmp_dir: PathBuf, mut resources: impl Resources<'static>) {
-        let identification_script = InterpreterIdentificationScript::read(&mut resources).unwrap();
+    fn test_create(
+        python_exe: &Path,
+        tmp_dir: PathBuf,
+        mut embedded_resources: impl Resources<'static>,
+    ) {
+        let identification_script =
+            InterpreterIdentificationScript::read(&mut embedded_resources).unwrap();
         let interpreter = Interpreter::load(python_exe, &identification_script).unwrap();
         let expected_prefix = interpreter
             .base_prefix
             .as_ref()
             .unwrap_or(&interpreter.prefix)
             .clone();
-        let venv =
-            Virtualenv::create(interpreter, Cow::Owned(tmp_dir), &mut resources, false).unwrap();
+        let venv = Virtualenv::create(
+            interpreter,
+            Cow::Owned(tmp_dir),
+            &mut embedded_resources,
+            false,
+        )
+        .unwrap();
         assert_eq!(expected_prefix, venv.interpreter.base_prefix.unwrap())
     }
 }

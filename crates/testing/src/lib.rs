@@ -9,7 +9,7 @@ use std::sync::{LazyLock, Mutex};
 use anyhow::anyhow;
 use ctor::dtor;
 use fs_err as fs;
-use python::{InterpreterIdentificationScript, Resources, embedded};
+use resources::{InterpreterIdentificationScript, Resources, embedded};
 use rstest::fixture;
 use target_lexicon::{HOST, OperatingSystem};
 
@@ -119,13 +119,13 @@ pub fn venv_python_exe(python_exe: &Path) -> PathBuf {
 }
 
 #[fixture]
-pub fn resources() -> impl Resources<'static> {
+pub fn embedded_resources() -> impl Resources<'static> {
     embedded::RESOURCES
 }
 
 #[fixture]
 pub fn interpreter_identification_script(
-    mut resources: impl Resources<'static>,
+    mut embedded_resources: impl Resources<'static>,
 ) -> InterpreterIdentificationScript<'static> {
-    InterpreterIdentificationScript::read(&mut resources).unwrap()
+    InterpreterIdentificationScript::read(&mut embedded_resources).unwrap()
 }

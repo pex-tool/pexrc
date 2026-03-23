@@ -18,8 +18,8 @@ use log::{Level, debug, warn};
 use logging_timer::{time, timer};
 use pep440_rs::Version;
 use pep508_rs::{ExtraName, PackageName, Requirement, VersionOrUrl};
-use python::{InterpreterIdentificationScript, ResourcePath, Resources};
 use rayon::prelude::*;
+use resources::{InterpreterIdentificationScript, ResourcePath, Resources};
 use url::Url;
 use zip::ZipArchive;
 
@@ -454,14 +454,13 @@ mod tests {
     use std::process::Command;
     use std::str::FromStr;
 
-    use ::interpreter::Interpreter;
     use fs_err::File;
     use indexmap::{IndexSet, indexset};
-    use interpreter::SearchPath;
+    use interpreter::{Interpreter, SearchPath};
     use pep508_rs::{Requirement, VersionOrUrl};
-    use python::{InterpreterIdentificationScript, Resources};
+    use resources::{InterpreterIdentificationScript, Resources};
     use rstest::{fixture, rstest};
-    use testing::{interpreter_identification_script, python_exe, resources, tmp_dir};
+    use testing::{embedded_resources, interpreter_identification_script, python_exe, tmp_dir};
     use url::Url;
     use zip::write::SimpleFileOptions;
     use zip::{CompressionMethod, ZipWriter};
@@ -503,7 +502,7 @@ mod tests {
         tmp_dir: PathBuf,
         python_exe: &Path,
         ansicolors_pex: PathBuf,
-        mut resources: impl Resources<'static>,
+        mut embedded_resources: impl Resources<'static>,
     ) -> PathBuf {
         let pex = tmp_dir.join("requests.pex");
         assert!(
@@ -527,7 +526,9 @@ mod tests {
                 .unwrap();
         let file_options =
             SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
-        resources.inject_scripts(&mut zip, file_options).unwrap();
+        embedded_resources
+            .inject_scripts(&mut zip, file_options)
+            .unwrap();
         zip.finish().unwrap();
 
         pex

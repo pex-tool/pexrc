@@ -7,17 +7,17 @@ use std::io::{Read, Write};
 use std::path::Path;
 
 use anyhow::Context;
+use boot::{inject_boot, sh_boot_shebang};
 use fs_err::File;
 use log::info;
 use owo_colors::OwoColorize;
 use platform::mark_executable;
-use python::{Resources, embedded};
+use resources::{Resources, embedded};
 use tempfile::NamedTempFile;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 use crate::clibs::CLIBS_DIR;
-use crate::sh_boot;
 
 pub fn inject(
     pex: &Path,
@@ -26,7 +26,7 @@ pub fn inject(
 ) -> anyhow::Result<()> {
     let zip_read_fp = File::open(pex)?;
     let mut src_zip = ZipArchive::new(&zip_read_fp)?;
-    let prefix = if let Some(sh_boot_shebang) = sh_boot::shebang(pex)? {
+    let prefix = if let Some(sh_boot_shebang) = sh_boot_shebang(pex)? {
         Some(sh_boot_shebang.into_bytes())
     } else {
         let first_entry = src_zip.by_index(0)?;
@@ -117,7 +117,7 @@ pub fn inject(
         io::copy(&mut clib_reader, &mut dst_zip)?;
         anstream::eprintln!("{}.", "done".green())
     }
-    resources.inject_boot(&mut dst_zip, deflate_options)?;
+    inject_boot(&mut dst_zip, deflate_options)?;
 
     dst_zip.finish()?;
     mark_executable(dst_zip_fp.as_file_mut())?;

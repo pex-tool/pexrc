@@ -13,8 +13,8 @@ use log::warn;
 use logging_timer::time;
 use pex::{BinPath, InheritPath, Pex, PexInfo};
 use platform::{link_or_copy, mark_executable, path_as_bytes, path_as_str};
-use python::{Resources, VenvPexReplScript, VenvPexScript};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use resources::{Resources, VenvPexReplScript, VenvPexScript};
 use zip::ZipArchive;
 
 use crate::virtualenv::Virtualenv;

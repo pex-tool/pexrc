@@ -1,7 +1,7 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::io::{ErrorKind, Read};
+use std::io::{ErrorKind, Read, Seek, Write};
 use std::path::Path;
 
 use anyhow::{anyhow, bail};
@@ -12,11 +12,13 @@ use interpreter::{InterpreterConstraints, SearchPath, SelectionStrategy};
 use pex::{Pex, PexPath};
 use pexrs::venv_dir;
 use platform::path_as_str;
+use zip::ZipWriter;
+use zip::write::{FileOptionExtension, FileOptions};
 
 const SH_BOOT_SHEBANG: &[u8] = b"#!/bin/sh\n";
-const PARTS: [&str; 3] = str_split!(include_str!("boot.sh"), "# --- vars --- #\n");
+const SH_BOOT_PARTS: [&str; 3] = str_split!(include_str!("boot.sh"), "# --- vars --- #\n");
 
-pub fn shebang(pex: &Path) -> anyhow::Result<Option<String>> {
+pub fn sh_boot_shebang(pex: &Path) -> anyhow::Result<Option<String>> {
     let mut sh_boot_shebang_buffer: [_; SH_BOOT_SHEBANG.len()] = [0; SH_BOOT_SHEBANG.len()];
     let mut pex_fp = File::open(pex)?;
     match pex_fp.read_exact(&mut sh_boot_shebang_buffer) {
@@ -55,14 +57,27 @@ pub fn shebang(pex: &Path) -> anyhow::Result<Option<String>> {
 
     Ok(Some(format!(
         "{header}{vars}{body}\n",
-        header = PARTS[0],
-        vars = PARTS[1]
+        header = SH_BOOT_PARTS[0],
+        vars = SH_BOOT_PARTS[1]
             .replace(
                 "{pexrc_root}",
                 pex_info.pex_root.as_deref().unwrap_or_default()
             )
             .replace("{venv_relpath}", path_as_str(venv_relpath)?)
             .replace("{pythons}", &pythons.join("\n")),
-        body = PARTS[2]
+        body = SH_BOOT_PARTS[2]
     )))
+}
+
+const PY_BOOT: &[u8] = include_bytes!("boot.py");
+
+pub fn inject_boot<T: FileOptionExtension + Copy>(
+    zip: &mut ZipWriter<impl Write + Seek>,
+    file_options: FileOptions<T>,
+) -> anyhow::Result<()> {
+    zip.start_file("__pex__/__init__.py", file_options)?;
+    zip.write_all(PY_BOOT)?;
+    zip.start_file("__main__.py", file_options)?;
+    zip.write_all(PY_BOOT)?;
+    Ok(())
 }

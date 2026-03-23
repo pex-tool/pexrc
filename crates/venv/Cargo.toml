@@ -11,18 +11,19 @@ const_format = { workspace = true }
 fs-err = { workspace = true }
 indexmap = { workspace = true }
 interpreter = { path = "../interpreter" }
-itertools = { workspace = true }
 log = { workspace = true }
 logging_timer = { workspace = true }
 pex = { path = "../pex" }
 platform = { path = "../platform" }
-python = { path = "../python" }
+resources = { path = "../resources" }
 rayon = { workspace = true }
 target-lexicon = { workspace = true }
 tempfile = { workspace = true }
 zip = { workspace = true }
 
 [dev-dependencies]
+interpreter = { path = "../interpreter" }
+resources = { path = "../resources" }
 rstest = { workspace = true}
 testing = { path = "../testing" }
 
