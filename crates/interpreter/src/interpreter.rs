@@ -14,7 +14,7 @@ use fs_err as fs;
 use log::debug;
 use logging_timer::time;
 use pep508_rs::MarkerEnvironment;
-use python::{InterpreterIdentificationScript, Resources};
+use resources::{InterpreterIdentificationScript, Resources};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
@@ -372,9 +372,14 @@ mod tests {
     use std::process::{Command, Stdio};
 
     use anyhow::Context;
-    use python::{InterpreterIdentificationScript, Resources};
+    use resources::{InterpreterIdentificationScript, Resources};
     use rstest::rstest;
-    use testing::{interpreter_identification_script, python_exe, resources, venv_python_exe};
+    use testing::{
+        embedded_resources,
+        interpreter_identification_script,
+        python_exe,
+        venv_python_exe,
+    };
     use textwrap::dedent;
 
     use crate::Interpreter;
@@ -430,9 +435,10 @@ mod tests {
     fn test_resolve_base_interpreter(
         python_exe: &Path,
         venv_python_exe: PathBuf,
-        mut resources: impl Resources<'static>,
+        mut embedded_resources: impl Resources<'static>,
     ) {
-        let identification_script = InterpreterIdentificationScript::read(&mut resources).unwrap();
+        let identification_script =
+            InterpreterIdentificationScript::read(&mut embedded_resources).unwrap();
         let venv_interpreter = Interpreter::load(&venv_python_exe, &identification_script)
             .with_context(|| {
                 format!(
@@ -444,7 +450,7 @@ mod tests {
         assert_eq!(
             python_exe,
             venv_interpreter
-                .resolve_base_interpreter(&mut resources)
+                .resolve_base_interpreter(&mut embedded_resources)
                 .unwrap()
                 .path
         )

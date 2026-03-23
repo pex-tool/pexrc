@@ -168,6 +168,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "boot"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "cache",
+ "const_format",
+ "fs-err",
+ "interpreter",
+ "pex",
+ "pexrs",
+ "platform",
+ "zip",
+]
+
+[[package]]
 name = "boxcar"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1112,7 +1127,7 @@ dependencies = [
  "pep440_rs",
  "pep508_rs",
  "platform",
- "python",
+ "resources",
  "rstest",
  "same-file",
  "serde",
@@ -1490,7 +1505,6 @@ name = "pex"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "ctor",
  "fs-err",
  "glob",
  "indexmap",
@@ -1500,13 +1514,12 @@ dependencies = [
  "logging_timer",
  "pep440_rs",
  "pep508_rs",
- "python",
  "python-pkginfo",
  "rayon",
+ "resources",
  "rstest",
  "serde",
  "serde_json",
- "target-lexicon",
  "tempfile",
  "testing",
  "url",
@@ -1519,12 +1532,12 @@ version = "0.1.0"
 dependencies = [
  "anstream 1.0.0",
  "anyhow",
+ "boot",
  "bstr",
  "cache",
  "clap",
  "clap-verbosity-flag",
  "colorchoice-clap",
- "const_format",
  "env_logger",
  "fs-err",
  "include_dir",
@@ -1537,7 +1550,7 @@ dependencies = [
  "pexrc-build-system",
  "pexrs",
  "platform",
- "python",
+ "resources",
  "sha2",
  "strum",
  "tempfile",
@@ -1694,18 +1707,6 @@ checksum = "3852766467df634d74f0b2d7819bf8dc483a0eb2e3b0f50f756f9cfe8b0d18d8"
 dependencies = [
  "ar_archive_writer",
  "cc",
-]
-
-[[package]]
-name = "python"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "env_logger",
- "pexrc-build-system",
- "strum",
- "strum_macros",
- "zip",
 ]
 
 [[package]]
@@ -1965,6 +1966,18 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+]
+
+[[package]]
+name = "resources"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "env_logger",
+ "pexrc-build-system",
+ "strum",
+ "strum_macros",
+ "zip",
 ]
 
 [[package]]
@@ -2436,7 +2449,7 @@ dependencies = [
  "cache",
  "ctor",
  "fs-err",
- "python",
+ "resources",
  "rstest",
  "target-lexicon",
  "tempfile",
@@ -2790,13 +2803,12 @@ dependencies = [
  "fs-err",
  "indexmap",
  "interpreter",
- "itertools 0.14.0",
  "log",
  "logging_timer",
  "pex",
  "platform",
- "python",
  "rayon",
+ "resources",
  "rstest",
  "target-lexicon",
  "tempfile",

@@ -4,6 +4,7 @@
 [workspace]
 members = [
     ".",
+    "crates/boot",
     "crates/cache",
     "crates/clib",
     "crates/interpreter",
@@ -11,7 +12,7 @@ members = [
     "crates/pexrc-build-system",
     "crates/pexrs",
     "crates/platform",
-    "crates/python",
+    "crates/resources",
     "crates/testing",
     "crates/venv",
 ]
@@ -154,11 +155,11 @@ zstd = { workspace = true }
 [dependencies]
 anstream = { workspace = true }
 anyhow = { workspace = true }
+boot = { path = "crates/boot" }
 cache = { path = "crates/cache" }
 clap = { workspace = true }
 clap-verbosity-flag = { workspace = true }
 colorchoice-clap = { workspace = true }
-const_format = { workspace = true }
 env_logger = { workspace = true }
 fs-err = { workspace = true }
 include_dir = { workspace = true }
@@ -170,7 +171,7 @@ owo-colors = { workspace = true }
 pex = { path = "crates/pex" }
 pexrs = { path = "crates/pexrs" }
 platform = { path = "crates/platform" }
-python = { path = "crates/python", features = ["embedded_resources"] }
+resources = { path = "crates/resources", features = ["embedded"] }
 sha2 = { workspace = true }
 strum = { workspace = true }
 tempfile = { workspace = true }

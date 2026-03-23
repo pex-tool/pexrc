@@ -1,9 +1,9 @@
 [package]
-name = "python"
+name = "resources"
 edition = "2024"
 
 [features]
-embedded_resources = []
+embedded = []
 
 [dependencies]
 anyhow = { workspace = true}

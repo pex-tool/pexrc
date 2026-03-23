@@ -9,12 +9,11 @@ use strum_macros::EnumIter;
 use zip::ZipWriter;
 use zip::write::{FileOptionExtension, FileOptions, SimpleFileOptions};
 
-#[cfg(feature = "embedded_resources")]
+#[cfg(feature = "embedded")]
 pub mod embedded;
 
 #[derive(Copy, Clone, EnumIter)]
 pub enum ResourcePath {
-    BootScript,
     InterpreterIdentificationScript,
     VendoredVirtualenvScript,
     VenvPexScript,
@@ -24,7 +23,6 @@ pub enum ResourcePath {
 impl ResourcePath {
     pub fn script_name(&self) -> &'static str {
         match self {
-            ResourcePath::BootScript => "boot.py",
             ResourcePath::InterpreterIdentificationScript => "interpreter.py",
             ResourcePath::VendoredVirtualenvScript => "virtualenv.py",
             ResourcePath::VenvPexScript => "venv-pex.py",
@@ -44,34 +42,16 @@ pub trait Resources<'a> {
         let directory_options = SimpleFileOptions::default();
         zip.add_directory("__pex__/.scripts", directory_options)?;
         for resource_path in ResourcePath::iter() {
-            match resource_path {
-                ResourcePath::BootScript => continue,
-                _ => {
-                    let text = self.read(resource_path)?;
-                    zip.start_file(
-                        format!(
-                            "__pex__/.scripts/{script}",
-                            script = resource_path.script_name()
-                        ),
-                        file_options,
-                    )?;
-                    zip.write_all(text.as_bytes())?;
-                }
-            }
+            let text = self.read(resource_path)?;
+            zip.start_file(
+                format!(
+                    "__pex__/.scripts/{script}",
+                    script = resource_path.script_name()
+                ),
+                file_options,
+            )?;
+            zip.write_all(text.as_bytes())?;
         }
-        Ok(())
-    }
-
-    fn inject_boot<T: FileOptionExtension + Copy>(
-        &mut self,
-        zip: &mut ZipWriter<impl Write + Seek>,
-        file_options: FileOptions<'a, T>,
-    ) -> anyhow::Result<()> {
-        let text = self.read(ResourcePath::BootScript)?;
-        zip.start_file("__pex__/__init__.py", file_options)?;
-        zip.write_all(text.as_bytes())?;
-        zip.start_file("__main__.py", file_options)?;
-        zip.write_all(text.as_bytes())?;
         Ok(())
     }
 }
@@ -93,7 +73,6 @@ macro_rules! generate_script_type {
     };
 }
 
-generate_script_type!(BootScript);
 generate_script_type!(InterpreterIdentificationScript);
 generate_script_type!(VendoredVirtualenvScript);
 generate_script_type!(VenvPexScript);

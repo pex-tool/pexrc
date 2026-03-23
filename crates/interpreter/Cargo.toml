@@ -16,7 +16,7 @@ fs-err = { workspace = true }
 log = { workspace = true }
 logging_timer = { workspace = true }
 platform = { path = "../platform" }
-python = { path = "../python" }
+resources = { path = "../resources" }
 same-file = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -26,9 +26,10 @@ url = { workspace = true }
 which = { workspace = true }
 
 [dev-dependencies]
-python = { path = "../python" }
+anyhow = { workspace = true }
+pep440_rs = { workspace = true }
+resources = { path = "../resources" }
 rstest = { workspace = true }
 target-lexicon = { workspace = true }
-tempfile = { workspace = true }
 testing = { path = "../testing" }
 textwrap = { workspace = true }

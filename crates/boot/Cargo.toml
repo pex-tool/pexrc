@@ -1,0 +1,14 @@
+[package]
+name = "boot"
+edition = "2024"
+
+[dependencies]
+anyhow = { workspace = true }
+cache = { path = "../cache" }
+const_format = { workspace = true }
+fs-err = { workspace = true }
+interpreter = { path = "../interpreter" }
+pex = { path = "../pex" }
+pexrs = { path = "../pexrs" }
+platform = { path = "../platform" }
+zip = { workspace = true }

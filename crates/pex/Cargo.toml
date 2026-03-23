@@ -15,7 +15,7 @@ log = { workspace = true }
 logging_timer = { workspace = true }
 pep440_rs = { workspace = true }
 pep508_rs = { workspace = true }
-python = { path = "../python" }
+resources = { path = "../resources" }
 python-pkginfo = { workspace = true }
 rayon = { workspace = true }
 serde = { workspace = true }
@@ -24,9 +24,14 @@ url = { workspace = true }
 zip = { workspace = true }
 
 [dev-dependencies]
-ctor = { workspace = true }
 glob = { workspace = true }
+indexmap = { workspace = true }
+interpreter = { path = "../interpreter" }
+pep440_rs = { workspace = true }
+pep508_rs = { workspace = true }
+resources = { path = "../resources" }
 rstest = { workspace = true }
-target-lexicon = { workspace = true }
 tempfile = { workspace = true }
 testing = { path = "../testing" }
+url = { workspace = true }
+zip = { workspace = true }
