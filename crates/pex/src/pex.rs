@@ -527,7 +527,7 @@ mod tests {
                 .unwrap();
         let file_options =
             SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
-        resources.inject_zip(&mut zip, file_options).unwrap();
+        resources.inject_scripts(&mut zip, file_options).unwrap();
         zip.finish().unwrap();
 
         pex
