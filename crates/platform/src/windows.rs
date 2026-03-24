@@ -7,7 +7,11 @@ use std::path::Path;
 use fs_err as fs;
 use is_executable::IsExecutable;
 
-pub fn link_or_copy(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> anyhow::Result<()> {
+pub fn link_or_copy(
+    src: impl AsRef<Path>,
+    dst: impl AsRef<Path>,
+    _relative: bool,
+) -> anyhow::Result<()> {
     fs::hard_link(&src, &dst)
         .or_else(|_| fs::copy(src, dst).map(|_| ()))
         .map_err(anyhow::Error::new)

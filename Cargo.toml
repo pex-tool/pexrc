@@ -118,6 +118,7 @@ log = "0.4"
 logging_timer = "1.1"
 nix = {  version = "0.31", features = ["fs"] }
 owo-colors = "4.3"
+pathdiff = "0.2"
 pep440_rs = "0.7"
 pep508_rs = "0.9"
 python-pkginfo = "0.6"

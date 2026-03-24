@@ -14,5 +14,6 @@ itertools = { workspace = true }
 log = { workspace = true }
 logging_timer = { workspace = true }
 pex = { path = "../pex" }
+platform = { path = "../platform" }
 regex = { workspace = true }
 venv = { path = "../venv" }

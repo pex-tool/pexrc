@@ -129,7 +129,11 @@ fn create_pep_405_venv<'a>(
     )?;
     let scripts_dir = path.join(SCRIPTS_DIR);
     fs::create_dir_all(&scripts_dir)?;
-    link_or_copy(&base_interpreter.realpath, scripts_dir.join(PYTHON_EXE))?;
+    link_or_copy(
+        &base_interpreter.realpath,
+        scripts_dir.join(PYTHON_EXE),
+        false,
+    )?;
     let site_packages_relpath = site_packages_relpath(&base_interpreter);
     fs::create_dir_all(path.join(site_packages_relpath.as_ref()))?;
     Ok(site_packages_relpath)
