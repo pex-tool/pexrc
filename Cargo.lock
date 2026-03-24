@@ -1460,6 +1460,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d211803b9b6b570f68772237e415a029d5a50c65d382910b879fb19d3271f94d"
 
 [[package]]
+name = "pathdiff"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df94ce210e5bc13cb6651479fa48d14f601d9858cfe0467f43ae157023b938d3"
+
+[[package]]
 name = "pep440_rs"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1594,6 +1600,7 @@ dependencies = [
  "log",
  "logging_timer",
  "pex",
+ "platform",
  "regex",
  "venv",
 ]
@@ -1630,6 +1637,7 @@ dependencies = [
  "fs-err",
  "is_executable",
  "nix",
+ "pathdiff",
 ]
 
 [[package]]

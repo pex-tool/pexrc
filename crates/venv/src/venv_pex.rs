@@ -263,7 +263,7 @@ if __name__ == "__main__":
         )
     )?;
     mark_executable(main_py_fp.file_mut())?;
-    link_or_copy(&main_py, venv.prefix().join("pex"))
+    link_or_copy(&main_py, venv.prefix().join("pex"), true)
 }
 
 fn write_repl<'a>(

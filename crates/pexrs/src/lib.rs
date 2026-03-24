@@ -112,9 +112,10 @@ fn prepare_venv<'a>(
         #[cfg(unix)]
         if let Some(sh_boot_seed_dir) = sh_boot_seed_dir {
             fs::create_dir_all(&sh_boot_seed_dir)?;
-            std::os::unix::fs::symlink(
+            platform::unix::symlink(
                 venv_dir.join("pex"),
                 sh_boot_seed_dir.join(venv_interpreter.most_specific_exe_name()),
+                true,
             )?;
         }
         Virtualenv::enclosing(venv_interpreter)

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #[cfg(unix)]
-mod unix;
+pub mod unix;
 
 #[cfg(windows)]
 mod windows;
