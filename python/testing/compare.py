@@ -1,7 +1,7 @@
 # Copyright 2026 Pex project contributors.
 # SPDX-License-Identifier: Apache-2.0
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function
 
 import os
 import subprocess
@@ -34,16 +34,26 @@ class ProcessResult(object):
             exit_code=self.exit_code, stderr=self.stderr
         )
 
+    def assert_failure(self):
+        assert self.exit_code != 0
+
 
 def execute_pex(
     pex,  # type: str
-    *args,  # type: str
+    python_args=(),  # type: Iterable[str]
+    args=(),  # type: Iterable[str]
     **env,  # type: str
 ):
     # type" (...) -> ProcessResult
+
+    cmd = [sys.executable]
+    cmd.extend(python_args)
+    cmd.append(pex)
+    cmd.extend(args)
+
     start = time.time()
     process = subprocess.Popen(
-        args=[sys.executable, pex] + list(args),
+        args=cmd,
         env=dict(os.environ, **env),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -88,14 +98,15 @@ def _compare_results(
 
 def compare(
     pex,  # type: str
-    args=None,  # type: Optional[Iterable[str]]
+    python_args=(),  # type: Iterable[str]
+    args=(),  # type: Iterable[str]
     env=None,  # type: Optional[Mapping[str, str]]
     test_result=None,  # type: Optional[Callable[[ProcessResult, bool], None]]
     compare_results=None,  # type: Optional[Callable[[ProcessResult, ProcessResult], None]]
 ):
-    # type: (...) -> None
+    # type: (...) -> str
 
-    traditional_result = execute_pex(pex, *(args or ()), **(env or {}))
+    traditional_result = execute_pex(pex, python_args, args, **(env or {}))
     _test_result(traditional_result, True, test_result=test_result)
     print(
         "Traditional PEX run took {elapsed:.5}ms".format(elapsed=traditional_result.elapsed * 1000),
@@ -103,7 +114,7 @@ def compare(
     )
 
     injected_pex = pexrc_inject(pex)
-    injected_result = execute_pex(injected_pex, *(args or ()), **(env or {}))
+    injected_result = execute_pex(injected_pex, python_args, args, **(env or {}))
     _test_result(injected_result, False, test_result=test_result)
     print(
         "Injected PEXRC run took {elapsed:.5}ms".format(elapsed=injected_result.elapsed * 1000),
@@ -123,3 +134,4 @@ def compare(
         file=sys.stderr,
     )
     _compare_results(traditional_result, injected_result, compare_results=compare_results)
+    return injected_pex

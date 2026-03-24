@@ -1,7 +1,7 @@
 # Copyright 2026 Pex project contributors.
 # SPDX-License-Identifier: Apache-2.0
 
-from __future__ import absolute_import, print_function
+from __future__ import absolute_import
 
 import os.path
 import subprocess
