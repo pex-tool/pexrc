@@ -1,7 +1,7 @@
 # Copyright 2026 Pex project contributors.
 # SPDX-License-Identifier: Apache-2.0
 
-from __future__ import absolute_import, print_function
+from __future__ import absolute_import
 
 import os.path
 import subprocess
@@ -29,13 +29,15 @@ def test_python_args_forwarded(tmpdir):
         fp.write(
             dedent(
                 """\
+                from __future__ import print_function
+
                 import sys
 
                 import colors
 
 
                 assert False, colors.red("Failed")
-                print(colors.green("Worked: {}".format(" ".join(sys.argv[1:]))))
+                print(colors.green("Worked: {}".format(" ".join(sys.argv[1:]))), end="")
                 """
             )
         )
@@ -59,7 +61,7 @@ def test_python_args_forwarded(tmpdir):
     ):
         # type: (...) -> None
         result.assert_success()
-        assert colors.green("Worked: Slartibartfast Ford") == result.stdout.strip()
+        assert colors.green("Worked: Slartibartfast Ford") == result.stdout
 
     injected_pex = compare(
         pex,
