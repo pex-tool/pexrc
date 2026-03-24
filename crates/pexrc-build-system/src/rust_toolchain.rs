@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::borrow::Cow;
-use std::env;
 
 use itertools::Itertools;
 use serde::Deserialize;
+use target_lexicon::HOST;
 
 use crate::metadata::Glibc;
 
@@ -91,7 +91,7 @@ impl<'a> ClassifiedTargets<'a> {
     }
 
     pub fn is_just_current(&'a self) -> anyhow::Result<Option<&'a str>> {
-        let current_target = env::var("TARGET")?;
+        let current_target = HOST.to_string();
         let mut all_targets_iter = self.iter_all_targets();
         if let Some(target) = all_targets_iter.next()
             && target.as_str() == current_target
