@@ -13,6 +13,7 @@ use const_format::concatcp;
 use fs_err::File;
 use strum::{EnumCount, IntoEnumIterator};
 use strum_macros::{EnumCount, EnumIter};
+use target_lexicon::HOST;
 use which::which_in_global;
 
 use crate::downloads::ensure_download;
@@ -317,8 +318,8 @@ fn binstall(
     {
         eprintln!("Found cargo-binstall at {exe}", exe = exe.display());
     } else {
-        let target = env::var("TARGET")?;
-        if let Some(download) = cargo_binstall.download_for(&target)? {
+        let current_target = HOST.to_string();
+        if let Some(download) = cargo_binstall.download_for(&current_target)? {
             let cargo_binstall = ensure_download(&download, &install_dirs.download_dir)?
                 .join(CARGO_BINSTALL_FILE_NAME);
             let cargo_binstall_fp = File::open(&cargo_binstall)?;

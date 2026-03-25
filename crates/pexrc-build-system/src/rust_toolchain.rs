@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::borrow::Cow;
-use std::env;
 
 use itertools::Itertools;
 use serde::Deserialize;
+use target_lexicon::HOST;
 
 use crate::metadata::Glibc;
 
@@ -91,7 +91,7 @@ impl<'a> ClassifiedTargets<'a> {
     }
 
     pub fn is_just_current(&'a self) -> anyhow::Result<Option<&'a str>> {
-        let current_target = env::var("TARGET")?;
+        let current_target = HOST.to_string();
         let mut all_targets_iter = self.iter_all_targets();
         if let Some(target) = all_targets_iter.next()
             && target.as_str() == current_target
@@ -103,7 +103,7 @@ impl<'a> ClassifiedTargets<'a> {
         }
     }
 
-    pub fn iter_zigbuild_targets(&'a self) -> impl Iterator<Item = &'a str> {
+    pub fn iter_zigbuild_targets(&'a self) -> impl ExactSizeIterator<Item = &'a str> {
         self.zigbuild_targets.iter().map(|target| {
             if let Target::GnuLinux(gnu_linux) = target {
                 gnu_linux.zigbuild_target.as_str()
@@ -113,7 +113,7 @@ impl<'a> ClassifiedTargets<'a> {
         })
     }
 
-    pub fn iter_xwin_targets(&'a self) -> impl Iterator<Item = &'a str> {
+    pub fn iter_xwin_targets(&'a self) -> impl ExactSizeIterator<Item = &'a str> {
         self.xwin_targets.iter().map(Target::as_str)
     }
 
@@ -129,6 +129,10 @@ pub(crate) struct Toolchain<'a> {
 }
 
 impl<'a> Toolchain<'a> {
+    pub(crate) fn into_targets(self) -> Vec<String> {
+        self.targets.into_iter().map(str::to_string).collect()
+    }
+
     pub(crate) fn classify_targets(&self, glibc: &'a Glibc<'a>) -> ClassifiedTargets<'a> {
         ClassifiedTargets::parse(self.targets.iter().copied(), glibc)
     }

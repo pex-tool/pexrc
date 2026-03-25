@@ -8,6 +8,7 @@ members = [
     "crates/cache",
     "crates/clib",
     "crates/interpreter",
+    "crates/package",
     "crates/pex",
     "crates/pexrc-build-system",
     "crates/pexrs",
@@ -98,7 +99,7 @@ anyhow = "1.0"
 base64 = "0.22"
 bstr = "1.12"
 build-target = "0.8"
-clap = {  version = "4.5", features = ["derive"] }
+clap = {  version = "4.5", features = ["derive", "string"] }
 clap-verbosity-flag = "3.0"
 colorchoice-clap = "1.0"
 const_format = { version = "0.2", features = ["rust_1_64"] }

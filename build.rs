@@ -1,7 +1,6 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::borrow::Cow;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -15,8 +14,6 @@ use pexrc_build_system::{
     ClassifiedTargets,
     ClibConfiguration,
     FoundTool,
-    InstallDirs,
-    ToolInstallation,
     classify_targets,
     ensure_tools_installed,
 };
@@ -27,57 +24,19 @@ fn main() -> anyhow::Result<()> {
     env_logger::init();
 
     let cargo: PathBuf = env::var("CARGO")?.into();
-
+    let cargo_manifest_contents = {
+        let manifest_path = env::var("CARGO_MANIFEST_PATH")?;
+        println!("cargo::rerun-if-changed={manifest_path}");
+        fs::read_to_string(manifest_path)?
+    };
     let target_dir: PathBuf = if let Some(custom_target_dir) = env::var_os("CARGO_TARGET_DIR") {
         custom_target_dir.into()
     } else {
         PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("target")
     };
 
-    let install_dirs = InstallDirs::system("pexrc-dev").unwrap_or_else(|| {
-        let cache_base_dir = target_dir.join(".pexrc-dev");
-        println!(
-            "cargo::warning=Failed to discover the user cache dir; using {cache_base_dir}",
-            cache_base_dir = cache_base_dir.display()
-        );
-        InstallDirs::new(cache_base_dir)
-    });
-
-    let cargo_manifest_contents = {
-        let manifest_path = env::var("CARGO_MANIFEST_PATH")?;
-        println!("cargo::rerun-if-changed={manifest_path}");
-        fs::read_to_string(manifest_path)?
-    };
-
-    println!("cargo::rerun-if-env-changed=PEXRC_INSTALL_TOOLS");
-    let install_missing_tools = env::var_os("PEXRC_INSTALL_TOOLS").unwrap_or_default() == "1";
-
-    let tool_installation = ensure_tools_installed(
-        &cargo,
-        &cargo_manifest_contents,
-        install_dirs,
-        install_missing_tools,
-    )?;
-    let (mut clib, glibc, found_tools) = match tool_installation {
-        ToolInstallation::Success(results) => results,
-        ToolInstallation::Failure((zig, missing_binstall_tools, tool_search_path)) => {
-            bail!(
-                "The following tools are required but are not installed: {tools}\n\
-                Searched PATH: {search_path}\n\
-                Re-run with PEXRC_INSTALL_TOOLS=1 to let the build script install these tools.",
-                tools = missing_binstall_tools
-                    .iter()
-                    .map(|tool| Cow::Borrowed(tool.binary_name()))
-                    .chain(
-                        zig.missing_version()
-                            .iter()
-                            .map(|version| Cow::Owned(format!("zig@{version}")))
-                    )
-                    .join(" "),
-                search_path = tool_search_path.display()
-            );
-        }
-    };
+    let (mut clib, glibc, found_tools) =
+        ensure_tools_installed(&cargo, &cargo_manifest_contents, &target_dir, true)?;
     println!("cargo::rerun-if-env-changed=PROFILE");
     let profile = env::var("PROFILE")?;
     let clib = clib.configuration_for(&profile);
