@@ -18,8 +18,7 @@ jobs:
     steps:
       - name: Noop
         if: false
-        run: |
-          echo "This is a dummy step that will never run."
+        run: echo "This is a dummy step that will never run."
 
   checks:
     name: "Check Formatting and Lints"
@@ -38,13 +37,31 @@ jobs:
     name: "Cross-build pexrc"
     needs: setup
     runs-on: ubuntu-22.04-arm
+    # N.B.: We break these up just to save wall time; they all can be built on 1 machine in ~40
+    # minutes.
+    strategy:
+      matrix:
+        include:
+          - targets: >-
+              --target aarch64-unknown-linux-gnu 
+              --target aarch64-unknown-linux-musl 
+              --target armv7-unknown-linux-gnueabihf 
+              --target powerpc64le-unknown-linux-gnu
+          - targets: >-
+              --target riscv64gc-unknown-linux-gnu
+              --target s390x-unknown-linux-gnu
+              --target x86_64-unknown-linux-gnu
+              --target x86_64-unknown-linux-musl
+          - targets: >-
+              --target aarch64-apple-darwin
+              --target x86_64-apple-darwin
+              --target aarch64-pc-windows-gnullvm
+              --target x86_64-pc-windows-gnu
     steps:
       - name: Checkout Pexrc
         uses: actions/checkout@v6
       - name: Build pexrc binary for all targets.
-        run: |
-          cargo run -p package -- --profile release --target all
-          target/aarch64-unknown-linux-gnu/release/pexrc info
+        run: cargo run -p package -- --profile release ${{ matrix.targets }}
 
   tests:
     name: "${{ matrix.name }} tests"
@@ -80,7 +97,7 @@ jobs:
       - checks
       - cross-build
       - tests
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-slim
     steps:
       - name: Check Non-Success
         if: |

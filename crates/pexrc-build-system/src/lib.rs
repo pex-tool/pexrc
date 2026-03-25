@@ -29,6 +29,11 @@ pub fn download_virtualenv(
     ensure_download(&metadata.build.virtualenv, &install_dirs.download_dir)
 }
 
+pub fn all_targets(rust_toolchain_contents: &str) -> anyhow::Result<Vec<String>> {
+    let toolchain: Toolchain = parse_toolchain(rust_toolchain_contents)?;
+    Ok(toolchain.into_targets())
+}
+
 pub fn classify_targets<'a>(
     rust_toolchain_contents: &'a str,
     glibc: &'a Glibc,

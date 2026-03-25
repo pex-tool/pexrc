@@ -1469,8 +1469,6 @@ dependencies = [
  "clap-verbosity-flag",
  "colorchoice-clap",
  "env_logger",
- "itertools 0.14.0",
- "log",
  "owo-colors",
  "pexrc-build-system",
 ]
