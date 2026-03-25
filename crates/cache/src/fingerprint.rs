@@ -25,6 +25,11 @@ impl Fingerprint {
     pub fn base64_digest(&self) -> String {
         URL_SAFE_NO_PAD.encode(&self.0)
     }
+
+    #[time("debug", "Fingerprint.{}")]
+    pub fn hex_digest(&self) -> String {
+        hex::encode(&self.0)
+    }
 }
 
 impl Display for Fingerprint {

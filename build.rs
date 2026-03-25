@@ -14,6 +14,7 @@ use pexrc_build_system::{
     ClassifiedTargets,
     ClibConfiguration,
     FoundTool,
+    Target,
     classify_targets,
     ensure_tools_installed,
 };
@@ -91,14 +92,14 @@ fn main() -> anyhow::Result<()> {
             &["zigbuild", "--target-dir", tgt_arg],
             clib.profile,
             &found_tools,
-            targets.iter_zigbuild_targets(),
+            targets.iter_zigbuild_targets().map(Target::zigbuild_target),
         )?;
         custom_cargo_build(
             &cargo,
             &["xwin", "build", "--target-dir", tgt_arg],
             clib.profile,
             &found_tools,
-            targets.iter_xwin_targets(),
+            targets.iter_xwin_targets().map(Target::as_str),
         )?;
         collect_clibs(&targets, &tgt_path, clib, &clibs_dir, true)
     } else {
@@ -182,7 +183,7 @@ fn collect_clibs<'a>(
         }
         let mut dst = File::create(clibs_dir.join(format!(
             "{target}.{clib_name}",
-            target = target.python_identifier()
+            target = target.simplified_target_triple()
         )))?;
         if compress {
             let encoder = zstd::Encoder::new(dst, clib.compression_level)?;

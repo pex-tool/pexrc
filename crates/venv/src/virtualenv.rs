@@ -12,7 +12,7 @@ use anyhow::{anyhow, bail};
 use const_format::concatcp;
 use interpreter::Interpreter;
 use logging_timer::time;
-use platform::link_or_copy;
+use platform::symlink_or_link_or_copy;
 use resources::{InterpreterIdentificationScript, Resources, VendoredVirtualenvScript};
 use target_lexicon::{HOST, OperatingSystem};
 
@@ -129,7 +129,7 @@ fn create_pep_405_venv<'a>(
     )?;
     let scripts_dir = path.join(SCRIPTS_DIR);
     fs::create_dir_all(&scripts_dir)?;
-    link_or_copy(
+    symlink_or_link_or_copy(
         &base_interpreter.realpath,
         scripts_dir.join(PYTHON_EXE),
         false,

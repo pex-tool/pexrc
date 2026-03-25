@@ -5,9 +5,13 @@ edition = "2024"
 [dependencies]
 anstream = { workspace = true }
 anyhow = { workspace = true }
+cache = { path = "../cache" }
 clap = { workspace = true }
 clap-verbosity-flag = { workspace = true }
 colorchoice-clap = { workspace = true }
 env_logger = { workspace = true }
+fs-err = { workspace = true }
 owo-colors = { workspace = true }
 pexrc-build-system = { path = "../pexrc-build-system" }
+platform = { path = "../platform" }
+sha2 = { workspace = true }

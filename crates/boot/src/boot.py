@@ -99,15 +99,11 @@ class OperatingSystem(object):
     def __init__(
         self,
         name,
-        vendor,  # type: str
         lib_extension,  # type: str
         lib_prefix="",  # type: str
-        alt_os=None,  # type: Optional[str]
     ):
         # type: (...) -> None
         self.name = name
-        self._os = alt_os or name
-        self._vendor = vendor
         self._lib_prefix = lib_prefix
         self._lib_extension = lib_extension
 
@@ -117,9 +113,7 @@ class OperatingSystem(object):
         abi=None,  # type: Optional[ABI]
     ):
         # type: (...) -> str
-        return "{arch}-{vendor}-{os}{abi}".format(
-            arch=arch, vendor=self._vendor, os=self._os, abi="-" + abi.name if abi else ""
-        )
+        return "{arch}-{os}{abi}".format(arch=arch, os=self.name, abi="-" + abi.name if abi else "")
 
     def library_file_name(self, lib_name):
         # type: (str) -> str
@@ -132,11 +126,9 @@ class OperatingSystem(object):
         return self.name
 
 
-LINUX = OperatingSystem("linux", vendor="unknown", lib_prefix="lib", lib_extension="so")
-MACOS = OperatingSystem(
-    "macos", vendor="apple", alt_os="darwin", lib_prefix="lib", lib_extension="dylib"
-)
-WINDOWS = OperatingSystem("windows", vendor="pc", lib_extension="dll")
+LINUX = OperatingSystem("linux", lib_prefix="lib", lib_extension="so")
+MACOS = OperatingSystem("macos", lib_prefix="lib", lib_extension="dylib")
+WINDOWS = OperatingSystem("windows", lib_extension="dll")
 
 CURRENT_OS = OperatingSystem.current()
 

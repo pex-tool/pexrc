@@ -1,5 +1,6 @@
 # Rust build
 /target/
+/dist/
 
 # Python "build"
 *.py[cdo]
@@ -8,4 +9,3 @@ __pycache__/
 /.pytest_cache/
 /.ruff_cache/
 /.venv/
-/python/pexrc/__pex__/
