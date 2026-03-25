@@ -30,7 +30,7 @@ pub fn display() -> anyhow::Result<()> {
         digest.write_all(clib.contents())?;
         let fingerprint = Fingerprint::new(digest);
         anstream::println!(
-            "{idx:>3}. {path} {pad}{size:<7} bytes {alg}:{fingerprint}",
+            "{idx:>3}. {path} {pad}{size:<8} bytes {alg}:{fingerprint}",
             idx = (idx + 1).yellow(),
             path = path.blue(),
             pad = " ".repeat(max_width - path.len()),

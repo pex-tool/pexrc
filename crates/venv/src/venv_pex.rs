@@ -12,7 +12,7 @@ use indexmap::{IndexMap, IndexSet};
 use log::warn;
 use logging_timer::time;
 use pex::{BinPath, InheritPath, Pex, PexInfo};
-use platform::{link_or_copy, mark_executable, path_as_bytes, path_as_str};
+use platform::{mark_executable, path_as_bytes, path_as_str, symlink_or_link_or_copy};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use resources::{Resources, VenvPexReplScript, VenvPexScript};
 use zip::ZipArchive;
@@ -263,7 +263,7 @@ if __name__ == "__main__":
         )
     )?;
     mark_executable(main_py_fp.file_mut())?;
-    link_or_copy(&main_py, venv.prefix().join("pex"), true)
+    symlink_or_link_or_copy(&main_py, venv.prefix().join("pex"), true)
 }
 
 fn write_repl<'a>(

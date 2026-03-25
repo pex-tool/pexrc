@@ -225,6 +225,7 @@ dependencies = [
  "base64",
  "dirs",
  "fs-err",
+ "hex",
  "logging_timer",
  "sha2",
  "tempfile",
@@ -1465,12 +1466,16 @@ version = "0.0.0"
 dependencies = [
  "anstream 1.0.0",
  "anyhow",
+ "cache",
  "clap",
  "clap-verbosity-flag",
  "colorchoice-clap",
  "env_logger",
+ "fs-err",
  "owo-colors",
  "pexrc-build-system",
+ "platform",
+ "sha2",
 ]
 
 [[package]]

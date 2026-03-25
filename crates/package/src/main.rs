@@ -6,13 +6,17 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::string::ToString;
 use std::sync::LazyLock;
-use std::{env, fs};
+use std::{cmp, env, io};
 
 use anyhow::{anyhow, bail};
+use cache::Fingerprint;
 use clap::builder::Str;
 use clap::{ArgAction, Parser};
+use fs_err as fs;
+use fs_err::File;
 use owo_colors::OwoColorize;
-use pexrc_build_system::{all_targets, classify_targets, ensure_tools_installed};
+use pexrc_build_system::{Target, all_targets, classify_targets, ensure_tools_installed};
+use sha2::{Digest, Sha256};
 
 static CARGO: LazyLock<PathBuf> = LazyLock::new(|| env!("CARGO").into());
 
@@ -87,6 +91,9 @@ struct Cli {
     #[arg(action=ArgAction::Append)]
     #[arg(value_parser=clap::builder::PossibleValuesParser::new(AVAILABLE_TARGETS.iter()))]
     targets: Vec<String>,
+
+    #[arg(short = 'o', long)]
+    dist_dir: Option<PathBuf>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -118,43 +125,51 @@ fn main() -> anyhow::Result<()> {
     let classified_targets = classify_targets(&rust_toolchain_contents, &glibc)?;
 
     let profile = cli.profile.as_deref().unwrap_or("dev");
+    let (profile_dir_name, profile_target_suffix) = if profile == "dev" {
+        ("debug", Some("-debug"))
+    } else {
+        (profile, None)
+    };
 
-    if cli.targets.is_empty() {
+    let built = if cli.targets.is_empty() {
         let result = Command::new(cargo)
             .args(["build", "--profile", profile])
+            .env("PEXRC_TARGETS", "all")
             .spawn()?
             .wait()?;
         if !result.success() {
             bail!("Build via cargo build failed!");
         }
+        let current_target = Target::current(&glibc);
+        vec![(
+            target_dir
+                .join(profile_dir_name)
+                .join(current_target.binary_name("pexrc", None).as_ref()),
+            current_target.fully_qualified_binary_name("pexrc", profile_target_suffix),
+        )]
     } else {
         let targeted: HashSet<String> = if cli.targets.contains(&ALL_TARGETS) {
             AVAILABLE_TARGETS.iter().map(Str::to_string).collect()
         } else {
             cli.targets.into_iter().collect()
         };
+        let mut built: Vec<(PathBuf, String)> = Vec::with_capacity(targeted.len());
         let zigbuild_targets = classified_targets
             .iter_zigbuild_targets()
-            .filter(|target| {
-                // Strip the `.{glibc-version}` suffix from `*-gnu.{glibc-version}` targets.
-                // TODO: Encode classified targets such that we don't need to use string parsing
-                //  here to undo earlier string concatenation of the glibc-version when classifying
-                //  the targets.
-                let target = if target.contains("-gnu.")
-                    && let Some(target) = target.splitn(2, ".").take(1).next()
-                {
-                    target
-                } else {
-                    target
-                };
-                targeted.contains(target)
-            })
+            .filter(|target| targeted.contains(target.as_str()))
             .collect::<Vec<_>>();
         if !zigbuild_targets.is_empty() {
             let mut command = Command::new(cargo);
             command.args(["zigbuild", "--profile", profile]);
             for target in zigbuild_targets {
-                command.args(["--target", target]);
+                command.args(["--target", target.zigbuild_target()]);
+                built.push((
+                    target_dir
+                        .join(target.as_str())
+                        .join(profile_dir_name)
+                        .join(target.binary_name("pexrc", None).as_ref()),
+                    target.fully_qualified_binary_name("pexrc", profile_target_suffix),
+                ));
             }
             command.env("PEXRC_TARGETS", "all");
             for found_tool in &found_tools {
@@ -168,13 +183,20 @@ fn main() -> anyhow::Result<()> {
 
         let xwin_targets = classified_targets
             .iter_xwin_targets()
-            .filter(|target| targeted.contains(*target))
+            .filter(|target| targeted.contains(target.as_str()))
             .collect::<Vec<_>>();
         if !xwin_targets.is_empty() {
             let mut command = Command::new(cargo);
             command.args(["xwin", "build", "--profile", profile]);
             for target in xwin_targets {
-                command.args(["--target", target]);
+                command.args(["--target", target.as_str()]);
+                built.push((
+                    target_dir
+                        .join(target.as_str())
+                        .join(profile_dir_name)
+                        .join(target.binary_name("pexrc", None).as_ref()),
+                    target.fully_qualified_binary_name("pexrc", profile_target_suffix),
+                ));
             }
             command.env("PEXRC_TARGETS", "all");
             for found_tool in &found_tools {
@@ -185,8 +207,53 @@ fn main() -> anyhow::Result<()> {
                 bail!("Cross-build via cargo-xwin failed!");
             }
         }
-    }
+        built
+    };
 
-    anstream::println!("{}", "Build complete!".green());
+    if let Some(dist_dir) = cli.dist_dir {
+        let mut max_width = 0;
+        for (_, dst_file_name) in &built {
+            max_width = cmp::max(max_width, dst_file_name.len());
+        }
+        fs::create_dir_all(&dist_dir)?;
+        let count = built.len();
+        anstream::println!(
+            "Built {count} {binaries} to {dist_dir}:",
+            binaries = if count == 1 { "binary" } else { "binaries" },
+            dist_dir = dist_dir.display()
+        );
+        let dist_dir = dist_dir.canonicalize()?;
+        for (idx, (src, dst_file_name)) in built.iter().enumerate() {
+            let dst = dist_dir.join(dst_file_name);
+            if dst.exists() {
+                fs::remove_file(&dst)?;
+            }
+            let (size, fingerprint) = hash_file(src)?;
+            platform::link_or_copy(src, &dst)?;
+            fs::write(
+                dst.with_added_extension("sha256"),
+                format!(
+                    "{hex_digest} *{dst_file_name}",
+                    hex_digest = fingerprint.hex_digest()
+                ),
+            )?;
+            anstream::println!(
+                "{idx:>3}. {path} {pad}{size:<9} bytes {alg}:{fingerprint}",
+                idx = (idx + 1).yellow(),
+                path = dst_file_name.blue(),
+                pad = " ".repeat(max_width - dst_file_name.len()),
+                alg = "sha256-base64".green(),
+                fingerprint = fingerprint.base64_digest().green(),
+            )
+        }
+    } else {
+        anstream::println!("{}", "Build complete!".green());
+    }
     Ok(())
+}
+
+fn hash_file(path: &Path) -> anyhow::Result<(u64, Fingerprint)> {
+    let mut digest = Sha256::new();
+    let size = io::copy(&mut File::open(path)?, &mut digest)?;
+    Ok((size, Fingerprint::new(digest)))
 }

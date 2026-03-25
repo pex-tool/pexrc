@@ -12,7 +12,7 @@ use nix::errno::Errno;
 use nix::unistd;
 use nix::unistd::AccessFlags;
 
-pub fn link_or_copy(
+pub fn symlink_or_link_or_copy(
     src: impl AsRef<Path>,
     dst: impl AsRef<Path>,
     relative: bool,
