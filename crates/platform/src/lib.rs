@@ -7,7 +7,7 @@ pub mod unix;
 #[cfg(windows)]
 mod windows;
 
-use std::fs;
+use fs_err as fs;
 use std::path::Path;
 
 use anyhow::anyhow;
