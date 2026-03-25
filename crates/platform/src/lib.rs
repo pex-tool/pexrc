@@ -7,10 +7,10 @@ pub mod unix;
 #[cfg(windows)]
 mod windows;
 
-use fs_err as fs;
 use std::path::Path;
 
 use anyhow::anyhow;
+use fs_err as fs;
 #[cfg(unix)]
 pub use unix::{is_executable, mark_executable, path_as_bytes, symlink_or_link_or_copy};
 #[cfg(windows)]
