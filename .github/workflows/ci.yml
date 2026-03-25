@@ -38,23 +38,26 @@ jobs:
     needs: setup
     runs-on: ubuntu-22.04-arm
     # N.B.: We break these up just to save wall time; they all can be built on 1 machine in ~40
-    # minutes.
+    # minutes; this gets us to a ~20 minute long-pole.
     strategy:
       matrix:
         include:
           - targets: >-
-              --target aarch64-unknown-linux-gnu 
-              --target aarch64-unknown-linux-musl 
-              --target armv7-unknown-linux-gnueabihf 
+              --target aarch64-unknown-linux-gnu
+              --target aarch64-unknown-linux-musl
+          - targets: >-
+              --target armv7-unknown-linux-gnueabihf
               --target powerpc64le-unknown-linux-gnu
           - targets: >-
               --target riscv64gc-unknown-linux-gnu
               --target s390x-unknown-linux-gnu
+          - targets: >-
               --target x86_64-unknown-linux-gnu
               --target x86_64-unknown-linux-musl
           - targets: >-
               --target aarch64-apple-darwin
               --target x86_64-apple-darwin
+          - targets: >-
               --target aarch64-pc-windows-gnullvm
               --target x86_64-pc-windows-gnu
     steps:
