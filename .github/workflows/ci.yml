@@ -84,7 +84,7 @@ jobs:
           - name: Mac aarch64
             os: macos-14
           - name: Mac x86_64
-            os: macos-15-intel
+            os: macos-x86_64
           - name: Windows aarch64
             os: windows-11-arm
           - name: Windows x86_64
