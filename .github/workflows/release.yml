@@ -94,7 +94,9 @@ jobs:
 
   github-release:
     name: "Create Github Release"
-    needs: determine-tag
+    needs:
+      - cross-build
+      - determine-tag
     runs-on: ubuntu-24.04-arm
     environment: Release
     permissions:
