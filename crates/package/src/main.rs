@@ -218,7 +218,7 @@ fn main() -> anyhow::Result<()> {
         fs::create_dir_all(&dist_dir)?;
         let count = built.len();
         anstream::println!(
-            "Built {count} {binaries} to {dist_dir}:",
+            "Packaging {count} {binaries} in {dist_dir}:",
             binaries = if count == 1 { "binary" } else { "binaries" },
             dist_dir = dist_dir.display()
         );
@@ -229,7 +229,7 @@ fn main() -> anyhow::Result<()> {
                 fs::remove_file(&dst)?;
             }
             let (size, fingerprint) = hash_file(src)?;
-            platform::link_or_copy(src, &dst)?;
+            platform::symlink_or_link_or_copy(src, &dst, true)?;
             fs::write(
                 dst.with_added_extension("sha256"),
                 format!(
