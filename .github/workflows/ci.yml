@@ -65,7 +65,9 @@ jobs:
       - name: Checkout Pexrc
         uses: actions/checkout@v6
       - name: Build pexrc binary for all targets.
-        run: cargo run -p package -- --profile release -o dist ${{ matrix.targets }}
+        run: cargo run -p package -- --color always --profile release -o dist ${{ matrix.targets }}
+      - name: Generate Release Hashes Manifest.
+        run: uv run dev-cmd generate-release-hashes -- -i dist
 
   tests:
     name: "${{ matrix.name }} tests"

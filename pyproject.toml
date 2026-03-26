@@ -31,15 +31,23 @@ check-fmt = ["ruff", "format", "--diff"]
 lint = ["ruff", "check", "--fix"]
 check-lint = ["ruff", "check"]
 
-[tool.dev-cmd.commands.type-check.factors]
+[tool.dev-cmd.commands.type-check-pexrc.factors]
 py = "The Python version to type check in <major>.<minor> form; i.e.: 3.13."
-[tool.dev-cmd.commands.type-check]
+[tool.dev-cmd.commands.type-check-pexrc]
 args = [
     "mypy",
     "--python-version", "{-py:{markers.python_version}}",
     "--cache-dir", ".mypy_cache_{markers.python_version}",
     "python",
 ]
+
+[tool.dev-cmd.commands.type-check-scripts]
+args = ["mypy", "scripts"]
+
+[tool.dev-cmd.commands.generate-release-hashes]
+when = "python_version >= '3.10'"
+args = ["scripts/generate-release-hashes.py"]
+accepts-extra-args = true
 
 [tool.dev-cmd.commands.test]
 args = ["python/scripts/run-tests.py"]
@@ -52,14 +60,14 @@ steps = [
     "lint",
     # Parallelizing the type checks is safe (they don't modify files), and it nets a ~3x
     # speedup over running them all serially.
-    ["type-check-py3.{8..14}"],
+    ["type-check-pexrc-py3.{8..14}", "type-check-scripts"],
     "test",
 ]
 
 [tool.dev-cmd.tasks.ci]
 description = "Runs all checks used for CI."
 # None of the CI checks modify files; so they can all be run in parallel which nets a ~1.5x speedup.
-steps = [["check-fmt", "check-lint", "type-check", "test"]]
+steps = [["check-fmt", "check-lint", "type-check-pexrc", "type-check-scripts", "test"]]
 
 [tool.dev-cmd]
 default = "checks"

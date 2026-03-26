@@ -1,0 +1,142 @@
+name: Release
+on:
+  push:
+    tags:
+      - v[0-9]+.[0-9]+.[0-9]+
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The tag to manually run a deploy for.
+        required: true
+defaults:
+  run:
+    shell: bash
+env:
+  PEXRC_INSTALL_TOOLS: 1
+
+jobs:
+  setup:
+    name: Check GitHub Organization
+    if: github.repository_owner == 'pex-tool'
+    runs-on: ubuntu-slim
+    steps:
+      - name: Noop
+        if: false
+        run: echo "This is a dummy step that will never run."
+
+  cross-build:
+    name: "Cross-build pexrc"
+    needs: setup
+    runs-on: ubuntu-24.04-arm
+    # N.B.: We break these up just to save wall time; they all can be built on 1 machine in ~40
+    # minutes; this gets us to a ~20 minute long-pole.
+    strategy:
+      matrix:
+        include:
+          - artifact-name: pexrc-shard1
+            targets: >-
+              --target aarch64-unknown-linux-gnu
+              --target aarch64-unknown-linux-musl
+          - artifact-name: pexrc-shard2
+            targets: >-
+              --target armv7-unknown-linux-gnueabihf
+              --target powerpc64le-unknown-linux-gnu
+          - artifact-name: pexrc-shard3
+            targets: >-
+              --target riscv64gc-unknown-linux-gnu
+              --target s390x-unknown-linux-gnu
+          - artifact-name: pexrc-shard4
+            targets: >-
+              --target x86_64-unknown-linux-gnu
+              --target x86_64-unknown-linux-musl
+          - artifact-name: pexrc-shard5
+            targets: >-
+              --target aarch64-apple-darwin
+              --target x86_64-apple-darwin
+          - artifact-name: pexrc-shard6
+            targets: >-
+              --target aarch64-pc-windows-gnullvm
+              --target x86_64-pc-windows-gnu
+    steps:
+      - name: Checkout Pexrc
+        uses: actions/checkout@v6
+      - name: Build pexrc binary for all targets.
+        run: cargo run -p package -- --color always -o dist --profile release ${{ matrix.targets }}
+      - name: Upload pexrc artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact-name }}
+          path: dist/pexrc*
+
+  determine-tag:
+    name: Determine the release tag to operate against.
+    needs: setup
+    runs-on: ubuntu-slim
+    outputs:
+      release-tag: ${{ steps.determine-tag.outputs.release-tag }}
+      release-version: ${{ steps.determine-tag.outputs.release-version }}
+    steps:
+      - name: Determine Tag
+        id: determine-tag
+        run: |
+          if [[ -n "${{ github.event.inputs.tag }}" ]]; then
+            RELEASE_TAG=${{ github.event.inputs.tag }}
+          else
+            RELEASE_TAG=${GITHUB_REF#refs/tags/}
+          fi
+          if [[ "${RELEASE_TAG}" =~ ^v[0-9]+.[0-9]+.[0-9]+$ ]]; then
+            echo "release-tag=${RELEASE_TAG}" >> $GITHUB_OUTPUT
+            echo "release-version=${RELEASE_TAG#v}" >> $GITHUB_OUTPUT
+          else
+            echo "::error::Release tag '${RELEASE_TAG}' must match 'v\d+.\d+.\d+'."
+            exit 1
+          fi
+
+  github-release:
+    name: "Create Github Release"
+    needs:
+      - cross-build
+      - determine-tag
+    runs-on: ubuntu-24.04-arm
+    environment: Release
+    permissions:
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+      contents: write
+      discussions: write
+    steps:
+      - name: Checkout Pexrc
+        uses: actions/checkout@v6
+      - uses: actions/download-artifact@v7
+        with:
+          merge-multiple: true
+      - name: Generate Release Hashes Manifest.
+        run: uv run dev-cmd generate-release-hashes -- -i dist -o dist/hashes.md
+      - name: Generate pexrc ${{ needs.determine-tag.outputs.release-tag }} artifact attestations
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/pexrc*
+      - name: Prepare Changelog
+        id: prepare-changelog
+        uses: a-scie/actions/changelog@v1.6
+        with:
+          changelog-file: ${{ github.workspace }}/CHANGES.md
+          version: ${{ needs.determine-tag.outputs.release-version }}
+      - name: Append Hashes to Changelog
+        run: |
+          changelog_tmp="$(mktemp)"
+          cat "${{ steps.prepare-changelog.outputs.changelog-file }}" <(echo '***') dist/hashes.md \
+            > "${changelog_tmp}"
+          mv "${changelog_tmp}" "${{ steps.prepare-changelog.outputs.changelog-file }}"
+      - name: Create ${{ needs.determine-tag.outputs.release-tag }} Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.determine-tag.outputs.release-tag }}
+          name: pexrc ${{ needs.determine-tag.outputs.release-version }}
+          body_path: ${{ steps.prepare-changelog.outputs.changelog-file }}
+          draft: false
+          prerelease: false
+          files: dist/pexrc*
+          fail_on_unmatched_files: true
+          discussion_category_name: Announcements
