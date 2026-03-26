@@ -111,7 +111,7 @@ jobs:
       - uses: actions/download-artifact@v7
         with:
           merge-multiple: true
-      - name: Generate Hashes Manifest.
+      - name: Generate Release Hashes Manifest.
         run: uv run dev-cmd generate-release-hashes -- -i dist -o dist/hashes.md
       - name: Generate pexrc ${{ needs.determine-tag.outputs.release-tag }} artifact attestations
         uses: actions/attest@v4
