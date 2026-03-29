@@ -115,8 +115,9 @@ def test_packed_sh_boot(tmpdir):
     pex = create_cowsay_pex(tmpdir, "--layout", "packed", "--sh-boot")
     assert os.path.isdir(pex)
     pex_script = os.path.join(pex, "pex")
-    expected_shebang = read_shebang(pex_script)
-    assert expected_shebang == "#!/bin/sh\n"
+    # N.B.: Pex incorrectly uses the host line ending here, which we tolerate for the purposes of
+    # this test. A /bin/sh script, though, should always use \n line endings.
+    assert "#!/bin/sh{eol}".format(eol=os.linesep) == read_shebang(pex_script)
 
     injected_pex = compare(
         pex,
@@ -126,7 +127,7 @@ def test_packed_sh_boot(tmpdir):
     )
     assert os.path.isdir(injected_pex)
     injected_pex_script = os.path.join(injected_pex, "pex")
-    assert expected_shebang == read_shebang(injected_pex_script)
+    assert "#!/bin/sh\n" == read_shebang(injected_pex_script)
 
     # N.B.: The above uses compare which executes python against the PEX, which just proves the
     # `--sh-boot` shebang does not interfere with that. As long as we're not on Windows, we can run
