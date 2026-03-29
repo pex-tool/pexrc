@@ -6,6 +6,6 @@ mod pex_info;
 mod pex_path;
 mod wheel;
 
-pub use pex::{LoosePex, PackedPex, Pex, WheelResolver, ZipAppPex};
+pub use pex::{Layout, Pex};
 pub use pex_info::{BinPath, InheritPath, InterpreterSelectionStrategy, PexInfo};
 pub use pex_path::PexPath;

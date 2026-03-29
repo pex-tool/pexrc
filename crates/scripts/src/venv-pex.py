@@ -314,8 +314,8 @@ def boot(
             self,
             seed=(),  # type: Union[Mapping[str, Any], Iterable[Tuple[str, Any]]]
             safe=False,  # type: bool
-            **kwargs,  # type: Any
-        ):
+            **kwargs  # type: Any
+        ):  # fmt: skip
             # type: (...) -> None
             self.__dict__.update(seed)
             self.__dict__.update(kwargs)
@@ -414,7 +414,15 @@ def boot(
                 with open(file_path) as fp:
                     content = fp.read()
 
-            ast = compile(content, filename, "exec", flags=0, dont_inherit=1)
+            # N.B.: MyPy doesn't track the union type of content above correctly across all versions
+            # of Python we support.
+            ast = compile(
+                content,
+                filename,
+                "exec",
+                flags=0,
+                dont_inherit=1,
+            )  # type: ignore[call-overload]
             globals_map = globals().copy()
             globals_map["__name__"] = "__main__"
             globals_map["__file__"] = filename

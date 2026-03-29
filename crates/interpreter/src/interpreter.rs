@@ -14,7 +14,7 @@ use fs_err as fs;
 use log::debug;
 use logging_timer::time;
 use pep508_rs::MarkerEnvironment;
-use resources::{InterpreterIdentificationScript, Resources};
+use scripts::{IdentifyInterpreter, Scripts};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
@@ -84,7 +84,7 @@ static LINUX_INFO: Mutex<Option<String>> = Mutex::new(None);
 impl Interpreter {
     fn identify(
         python_exe: impl AsRef<Path>,
-        identification_script: &InterpreterIdentificationScript,
+        identification_script: &IdentifyInterpreter,
     ) -> anyhow::Result<Vec<u8>> {
         let mut script = tempfile::Builder::new()
             .prefix("virtualenv.")
@@ -131,7 +131,7 @@ impl Interpreter {
 
     pub fn load_uncached(
         python_exe: impl AsRef<Path>,
-        identification_script: &InterpreterIdentificationScript,
+        identification_script: &IdentifyInterpreter,
     ) -> anyhow::Result<Self> {
         let json_bytes = Self::identify(python_exe.as_ref(), identification_script)?;
         serde_json::from_slice(&json_bytes).map_err(|err| {
@@ -226,11 +226,11 @@ impl Interpreter {
         }
     }
 
-    fn at_prefix<'a>(
+    fn at_prefix(
         prefix: impl AsRef<Path>,
         version: PythonVersion,
         pypy_version: Option<PyPyVersion>,
-        resources: &mut impl Resources<'a>,
+        scripts: &mut Scripts,
         re_cache_version_mismatch: bool,
     ) -> anyhow::Result<Self> {
         let check_pypy_version = |interpreter: &Interpreter| match (
@@ -245,7 +245,7 @@ impl Interpreter {
             (None, None) => true,
             _ => false,
         };
-        let identification_script = InterpreterIdentificationScript::read(resources)?;
+        let identification_script = IdentifyInterpreter::read(scripts)?;
         let candidate_rel_paths = Self::candidate_rel_paths(&version, pypy_version.as_ref());
         let mut re_cache_candidates: Vec<Self> = Vec::with_capacity(candidate_rel_paths.len());
         for rel_path in candidate_rel_paths {
@@ -292,7 +292,7 @@ impl Interpreter {
     #[time("debug", "Interpreter.{}")]
     pub fn load(
         python_exe: impl AsRef<Path>,
-        identification_script: &InterpreterIdentificationScript,
+        identification_script: &IdentifyInterpreter,
     ) -> anyhow::Result<Self> {
         let interpreter_info = Self::interpreter_info(python_exe.as_ref())?;
         Self::load_internal(interpreter_info, python_exe, identification_script)
@@ -301,7 +301,7 @@ impl Interpreter {
     fn load_internal(
         interpreter_info: impl AsRef<Path>,
         python_exe: impl AsRef<Path>,
-        identification_script: &InterpreterIdentificationScript,
+        identification_script: &IdentifyInterpreter,
     ) -> anyhow::Result<Self> {
         let file = atomic_file(interpreter_info.as_ref(), |file| {
             let json_bytes = Self::identify(python_exe.as_ref(), identification_script)?;
@@ -316,10 +316,7 @@ impl Interpreter {
         })
     }
 
-    fn reload(
-        self,
-        identification_script: &InterpreterIdentificationScript,
-    ) -> anyhow::Result<Self> {
+    fn reload(self, identification_script: &IdentifyInterpreter) -> anyhow::Result<Self> {
         let interpreter_info = Self::interpreter_info(self.path.as_path())?;
         fs::remove_file(&interpreter_info)?;
         Self::load_internal(&interpreter_info, self.path, identification_script)
@@ -347,19 +344,14 @@ impl Interpreter {
     #[time("debug", "Interpreter.{}")]
     pub fn resolve_base_interpreter<'a>(
         self,
-        resources: &mut impl Resources<'a>,
+        scripts: &mut Scripts,
     ) -> anyhow::Result<Interpreter> {
         if let Some(base_prefix) = self.base_prefix.as_ref()
             && base_prefix != &self.prefix
         {
-            let resolved = Self::at_prefix(
-                base_prefix,
-                self.version,
-                self.pypy_version,
-                resources,
-                true,
-            )?;
-            return resolved.resolve_base_interpreter(resources);
+            let resolved =
+                Self::at_prefix(base_prefix, self.version, self.pypy_version, scripts, true)?;
+            return resolved.resolve_base_interpreter(scripts);
         }
         Ok(self)
     }
@@ -372,10 +364,10 @@ mod tests {
     use std::process::{Command, Stdio};
 
     use anyhow::Context;
-    use resources::{InterpreterIdentificationScript, Resources};
     use rstest::rstest;
+    use scripts::{IdentifyInterpreter, Scripts};
     use testing::{
-        embedded_resources,
+        embedded_scripts,
         interpreter_identification_script,
         python_exe,
         venv_python_exe,
@@ -387,7 +379,7 @@ mod tests {
     #[rstest]
     fn test_tags_same_as_packaging(
         venv_python_exe: PathBuf,
-        interpreter_identification_script: InterpreterIdentificationScript,
+        interpreter_identification_script: IdentifyInterpreter,
     ) {
         assert!(
             Command::new(&venv_python_exe)
@@ -435,10 +427,9 @@ mod tests {
     fn test_resolve_base_interpreter(
         python_exe: &Path,
         venv_python_exe: PathBuf,
-        mut embedded_resources: impl Resources<'static>,
+        mut embedded_scripts: Scripts,
     ) {
-        let identification_script =
-            InterpreterIdentificationScript::read(&mut embedded_resources).unwrap();
+        let identification_script = IdentifyInterpreter::read(&mut embedded_scripts).unwrap();
         let venv_interpreter = Interpreter::load(&venv_python_exe, &identification_script)
             .with_context(|| {
                 format!(
@@ -450,7 +441,7 @@ mod tests {
         assert_eq!(
             python_exe,
             venv_interpreter
-                .resolve_base_interpreter(&mut embedded_resources)
+                .resolve_base_interpreter(&mut embedded_scripts)
                 .unwrap()
                 .path
         )

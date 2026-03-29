@@ -6,6 +6,7 @@ from __future__ import absolute_import
 import os.path
 import subprocess
 
+from testing import IS_WINDOWS
 from testing.compare import compare
 
 TYPE_CHECKING = False
@@ -84,3 +85,52 @@ def test_sh_boot(tmpdir):
         test_result=assert_result,
     )
     assert expected_shebang == read_shebang(injected_pex)
+
+    # N.B.: The above uses compare which executes python against the PEX, which just proves the
+    # `--sh-boot` shebang does not interfere with that. As long as we're not on Windows, we can run
+    # the `--sh-boot` shebang directly.
+    if not IS_WINDOWS:
+        assert b"| Moo! |" in subprocess.check_output(args=[pex, "Moo!"])
+        assert b"| Moo! |" in subprocess.check_output(args=[injected_pex, "Moo!"])
+
+
+def test_packed(tmpdir):
+    # type: (Any) -> None
+
+    pex = create_cowsay_pex(tmpdir, "--layout", "packed")
+    assert os.path.isdir(pex)
+
+    injected_pex = compare(
+        pex=pex,
+        args=["Moo!"],
+        env=dict(PEXRC_ROOT=os.path.join(str(tmpdir), "pexrc-root")),
+        test_result=assert_result,
+    )
+    assert os.path.isdir(injected_pex)
+
+
+def test_packed_sh_boot(tmpdir):
+    # type: (Any) -> None
+
+    pex = create_cowsay_pex(tmpdir, "--layout", "packed", "--sh-boot")
+    assert os.path.isdir(pex)
+    pex_script = os.path.join(pex, "pex")
+    expected_shebang = read_shebang(pex_script)
+    assert expected_shebang == "#!/bin/sh\n"
+
+    injected_pex = compare(
+        pex,
+        args=["Moo!"],
+        env=dict(PEXRC_ROOT=os.path.join(str(tmpdir), "pexrc-root")),
+        test_result=assert_result,
+    )
+    assert os.path.isdir(injected_pex)
+    injected_pex_script = os.path.join(injected_pex, "pex")
+    assert expected_shebang == read_shebang(injected_pex_script)
+
+    # N.B.: The above uses compare which executes python against the PEX, which just proves the
+    # `--sh-boot` shebang does not interfere with that. As long as we're not on Windows, we can run
+    # the `--sh-boot` shebang directly.
+    if not IS_WINDOWS:
+        assert b"| Moo! |" in subprocess.check_output(args=[pex_script, "Moo!"])
+        assert b"| Moo! |" in subprocess.check_output(args=[injected_pex_script, "Moo!"])

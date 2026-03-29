@@ -34,8 +34,8 @@ enum Commands {
         #[arg(value_parser=clap::builder::PossibleValuesParser::new(CLIB_BY_TARGET.keys()))]
         targets: Vec<String>,
 
-        #[arg(value_name = "FILE")]
-        pex: PathBuf,
+        #[arg(value_name = "FILE", required = true)]
+        pexes: Vec<PathBuf>,
     },
     /// Provide information about the supported target runtimes.
     Info,
@@ -50,7 +50,7 @@ fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Commands::Inject {
-            pex,
+            pexes,
             compression_level,
             targets,
         } => {
@@ -69,7 +69,10 @@ fn main() -> anyhow::Result<()> {
             } else {
                 None
             };
-            inject::inject(&pex, compression_level, clibs)
+            for pex in pexes {
+                inject::inject(&pex, compression_level, clibs.as_ref())?;
+            }
+            Ok(())
         }
         Commands::Info => info::display(),
     }

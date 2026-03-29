@@ -7,6 +7,7 @@ pub mod unix;
 #[cfg(windows)]
 mod windows;
 
+use std::ffi::OsStr;
 use std::path::Path;
 
 use anyhow::anyhow;
@@ -21,6 +22,15 @@ pub fn path_as_str(path: &Path) -> anyhow::Result<&str> {
         anyhow!(
             "Failed to convert non-UTF8 path to str: {path}",
             path = path.display()
+        )
+    })
+}
+
+pub fn os_str_as_str(text: &OsStr) -> anyhow::Result<&str> {
+    text.to_str().ok_or_else(|| {
+        anyhow!(
+            "Failed to convert non-UTF8 text to str: {text}",
+            text = text.display()
         )
     })
 }

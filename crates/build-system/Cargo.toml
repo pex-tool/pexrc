@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 [package]
-name = "pexrc-build-system"
+name = "build-system"
 edition = "2024"
 
 [dependencies]

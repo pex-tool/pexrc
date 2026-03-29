@@ -1,15 +1,19 @@
 #!/bin/sh
+# -*- coding: utf-8 -*-
+# Copyright 2026 Pex project contributors.
+# SPDX-License-Identifier: Apache-2.0
+# --- split --- #
 
 # N.B.: This script should stick to syntax defined for POSIX `sh` and avoid non-builtins.
 # See: https://pubs.opengroup.org/onlinepubs/9699919799/idx/shell.html
 set -eu
 
-# --- vars --- #
+# --- split --- #
 # N.B.: These vars are templated in by pexrc when it injects a PEX with its runtime.
 RAW_DEFAULT_PEXRC_ROOT="{pexrc_root}"
 VENV_RELPATH="{venv_relpath}"
 PYTHONS="{pythons}"
-# --- vars --- #
+# --- split --- #
 
 # N.B.: The SC2116 warning suppressions below are in place to ensure tilde-expansion of the
 # DEFAULT_PEX_ROOT value which is necessary for the -x check of the venv pex to succeed when it

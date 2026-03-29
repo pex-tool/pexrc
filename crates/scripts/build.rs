@@ -1,10 +1,11 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::env;
 use std::path::PathBuf;
-use std::{env, fs};
 
-use pexrc_build_system::{InstallDirs, download_virtualenv};
+use build_system::{InstallDirs, download_virtualenv};
+use fs_err as fs;
 
 fn main() -> anyhow::Result<()> {
     env_logger::init();

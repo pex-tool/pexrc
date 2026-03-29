@@ -1,6 +1,6 @@
+# -*- coding: utf-8 -*-
 # Copyright 2026 Pex project contributors.
 # SPDX-License-Identifier: Apache-2.0
-# -*- coding: utf-8 -*-
 
 from __future__ import print_function
 
@@ -437,22 +437,38 @@ SHOULD_EXECUTE = __name__ == "__main__"
 def _load_pexrc():
     # type: () -> Pexrc
 
-    dll = None  # type: Optional[Pexrc]
+    prefix = ".clib" if __name__ == "__pex__" else os.path.join("__pex__", ".clib")
     target_triple = CURRENT_OS.target_triple(arch=CURRENT_ARCH, abi=CURRENT_ABI)
     library_file_name = CURRENT_OS.library_file_name(lib_name="pexrc")
+    library_file_relpath = os.path.join(
+        prefix,
+        "{target_triple}.{library_file_name}".format(
+            target_triple=target_triple, library_file_name=library_file_name
+        ),
+    )
+    if __file__ and os.path.isfile(__file__):
+        # We're in a either a loose or packed PEX.
+        library_file_path = os.path.join(os.path.dirname(__file__), library_file_relpath)
+        if not os.path.exists(library_file_path):
+            raise RuntimeError(
+                "Pexrc is not supported on {target_triple}: no pexrc library found.".format(
+                    target_triple=target_triple,
+                )
+            )
+        try:
+            return cdll.LoadLibrary(library_file_path)  # type: Pexrc
+        except OSError as e:
+            raise RuntimeError(
+                "Failed to load pexrc library from {library_file_path}: {err}".format(
+                    library_file_path=library_file_path, err=e
+                )
+            )
+
+    dll = None  # type: Optional[Pexrc]
     tmp_dir = tempfile.mkdtemp()
-    library_file_path = os.path.join(tmp_dir, os.path.basename(library_file_name))
+    library_file_path = os.path.join(tmp_dir, library_file_name)
     try:
-        prefix = ".clib" if __name__ == "__pex__" else os.path.join("__pex__", ".clib")
-        pexrc_data = pkgutil.get_data(
-            __name__,
-            os.path.join(
-                prefix,
-                "{target_triple}.{library_file_name}".format(
-                    target_triple=target_triple, library_file_name=library_file_name
-                ),
-            ),
-        )
+        pexrc_data = pkgutil.get_data(__name__, library_file_relpath)
         if pexrc_data is None:
             raise RuntimeError(
                 "Pexrc is not supported on {target_triple}: no pexrc library found.".format(

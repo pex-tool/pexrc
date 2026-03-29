@@ -1,7 +1,7 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::ffi::OsStr;
+use std::fmt::{Display, Formatter, Write};
 use std::io;
 use std::io::{Read, Seek};
 use std::path::Path;
@@ -9,6 +9,7 @@ use std::str::FromStr;
 
 use anyhow::{anyhow, bail};
 use fs_err::File;
+use indexmap::IndexSet;
 use itertools::Itertools;
 use pep440_rs::{Version, VersionSpecifiers};
 use pep508_rs::{PackageName, Requirement};
@@ -50,16 +51,6 @@ pub struct WheelFile<'a> {
 }
 
 impl<'a> WheelFile<'a> {
-    pub fn parse(path: &'a Path) -> anyhow::Result<Self> {
-        let file_name = path.file_name().and_then(OsStr::to_str).ok_or_else(|| {
-            anyhow!(
-                "Could not determine wheel filename from path: {path}",
-                path = path.display()
-            )
-        })?;
-        Self::parse_file_name(file_name)
-    }
-
     pub(crate) fn parse_file_name(file_name: &'a str) -> anyhow::Result<Self> {
         // See: https://packaging.python.org/en/latest/specifications/binary-distribution-format/#file-name-convention
         // {distribution}-{version}(-{build tag})?-{python tag}-{abi tag}-{platform tag}.whl
@@ -113,6 +104,46 @@ impl<'a> WheelFile<'a> {
             tags,
         })
     }
+
+    fn write_tag_component(
+        &self,
+        f: &mut Formatter<'_>,
+        extract_tag_component: impl Fn(&Tag<'a>) -> &'a str,
+    ) -> std::fmt::Result {
+        f.write_char('-')?;
+        for (idx, python) in self
+            .tags
+            .iter()
+            .map(extract_tag_component)
+            .collect::<IndexSet<_>>()
+            .into_iter()
+            .enumerate()
+        {
+            if idx > 0 {
+                f.write_char('.')?;
+            }
+            f.write_str(python)?;
+        }
+        Ok(())
+    }
+}
+
+impl<'a> Display for WheelFile<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{project_name}-{version}",
+            project_name = self.raw_project_name,
+            version = self.raw_version
+        )?;
+        if let Some(build_tag) = self.build_tag {
+            write!(f, "-{build_tag}")?;
+        }
+        self.write_tag_component(f, |tag| tag.python)?;
+        self.write_tag_component(f, |tag| tag.abi)?;
+        self.write_tag_component(f, |tag| tag.platform)?;
+        Ok(())
+    }
 }
 
 pub struct WheelMetadata<'a> {
@@ -154,21 +185,6 @@ impl<R: Read + Seek> MetadataReader for WhlMetadataReader<R> {
 }
 
 impl<'a> WheelMetadata<'a> {
-    pub fn try_from_path(path: &'a Path) -> anyhow::Result<Self> {
-        let file_name = path.file_name().and_then(OsStr::to_str).ok_or_else(|| {
-            anyhow!(
-                "Could not determine wheel filename from path: {path}",
-                path = path.display()
-            )
-        })?;
-        let wheel_file = WheelFile::parse_file_name(file_name)?;
-        if path.is_dir() {
-            Self::parse(wheel_file, DirMetadataReader(path))
-        } else {
-            Self::parse(wheel_file, WhlMetadataReader::new(path)?)
-        }
-    }
-
     pub fn parse(
         wheel_file: WheelFile<'a>,
         mut metadata_reader: impl MetadataReader,
@@ -202,7 +218,7 @@ impl<'a> WheelMetadata<'a> {
 
 #[cfg(test)]
 mod tests {
-
+    use std::ffi::OsStr;
     use std::path::{Path, PathBuf};
     use std::process::Command;
     use std::str::FromStr;
@@ -214,7 +230,7 @@ mod tests {
     use testing::{tmp_dir, venv_python_exe};
     use zip::ZipArchive;
 
-    use crate::wheel::{Tag, WheelFile, WheelMetadata};
+    use crate::wheel::{DirMetadataReader, Tag, WheelFile, WheelMetadata, WhlMetadataReader};
 
     #[test]
     fn test_parse_wheel_file_name_simple() {
@@ -322,7 +338,13 @@ mod tests {
     }
 
     fn assert_requests_2_32_5_whl(wheel: &Path) {
-        let wheel = WheelMetadata::try_from_path(wheel).unwrap();
+        let file_name = wheel.file_name().and_then(OsStr::to_str).unwrap();
+        let wheel_file = WheelFile::parse_file_name(file_name).unwrap();
+        let wheel = if wheel.is_dir() {
+            WheelMetadata::parse(wheel_file, DirMetadataReader(wheel)).unwrap()
+        } else {
+            WheelMetadata::parse(wheel_file, WhlMetadataReader::new(wheel).unwrap()).unwrap()
+        };
         assert_eq!("requests", wheel.wheel_file.raw_project_name);
         assert_eq!("2.32.5", wheel.wheel_file.raw_version);
         assert_eq!(
