@@ -1,10 +1,10 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use sha2::{Digest, Sha256};
+use digest::Digest;
+use sha2::Sha256;
 
 use crate::fingerprint::digest_file;
 use crate::{Fingerprint, HashOptions};
@@ -13,7 +13,7 @@ pub struct Key<D: Digest = Sha256> {
     digest: D,
 }
 
-impl<D: Digest + Write> Key<D> {
+impl<D: Digest> Key<D> {
     pub fn new() -> Self {
         Self { digest: D::new() }
     }
@@ -75,7 +75,7 @@ impl Default for Key {
     }
 }
 
-impl<D: Digest + Write> From<Key<D>> for PathBuf {
+impl<D: Digest> From<Key<D>> for PathBuf {
     fn from(value: Key<D>) -> Self {
         PathBuf::from(value.fingerprint().base64_digest())
     }

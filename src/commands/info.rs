@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::cmp;
-use std::io::Write;
 
 use cache::Fingerprint;
+use digest::Digest;
 use owo_colors::OwoColorize;
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
 
 use crate::clibs::CLIBS_DIR;
 
@@ -27,7 +27,7 @@ pub fn display() -> anyhow::Result<()> {
     );
     for (idx, (clib, path)) in CLIBS_DIR.files().zip(paths).enumerate() {
         let mut digest = Sha256::new();
-        digest.write_all(clib.contents())?;
+        digest.update(clib.contents());
         let fingerprint = Fingerprint::new(digest);
         anstream::println!(
             "{idx:>3}. {path} {pad}{size:<8} bytes {alg}:{fingerprint}",

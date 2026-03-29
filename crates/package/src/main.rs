@@ -6,15 +6,14 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::string::ToString;
 use std::sync::LazyLock;
-use std::{cmp, env, io};
+use std::{cmp, env};
 
 use anyhow::{anyhow, bail};
 use build_system::{Target, all_targets, classify_targets, ensure_tools_installed};
-use cache::Fingerprint;
+use cache::fingerprint_file;
 use clap::builder::Str;
 use clap::{ArgAction, Parser};
 use fs_err as fs;
-use fs_err::File;
 use owo_colors::OwoColorize;
 use sha2::{Digest, Sha256};
 
@@ -228,7 +227,7 @@ fn main() -> anyhow::Result<()> {
             if dst.exists() {
                 fs::remove_file(&dst)?;
             }
-            let (size, fingerprint) = hash_file(src)?;
+            let (size, fingerprint) = fingerprint_file(src, Sha256::new())?;
             platform::symlink_or_link_or_copy(src, &dst, true)?;
             fs::write(
                 dst.with_added_extension("sha256"),
@@ -250,10 +249,4 @@ fn main() -> anyhow::Result<()> {
         anstream::println!("{}", "Build complete!".green());
     }
     Ok(())
-}
-
-fn hash_file(path: &Path) -> anyhow::Result<(u64, Fingerprint)> {
-    let mut digest = Sha256::new();
-    let size = io::copy(&mut File::open(path)?, &mut digest)?;
-    Ok((size, Fingerprint::new(digest)))
 }

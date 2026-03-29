@@ -141,3 +141,18 @@ def test_packed_sh_boot(tmpdir):
         assert b"| Moo! |" in subprocess.check_output(
             args=[injected_pex_script, "Moo!"], env=pexrc_env
         )
+
+
+def test_loose(tmpdir):
+    # type: (Any) -> None
+
+    pex = create_cowsay_pex(tmpdir, "--layout", "loose")
+    assert os.path.isdir(pex)
+
+    injected_pex = compare(
+        pex=pex,
+        args=["Moo!"],
+        env=dict(PEXRC_ROOT=os.path.join(str(tmpdir), "pexrc-root")),
+        test_result=assert_result,
+    )
+    assert os.path.isdir(injected_pex)

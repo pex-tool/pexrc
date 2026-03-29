@@ -2,17 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::fmt::{Display, Formatter};
-use std::io;
-use std::io::Write;
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::time::SystemTime;
 
 use base64::Engine;
 use base64::display::Base64Display;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use digest::Digest;
 use fs_err::File;
 use logging_timer::time;
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
 
 pub struct Fingerprint(Vec<u8>);
 
@@ -90,7 +90,7 @@ pub(crate) fn digest_file<D>(
     digest: &mut D,
 ) -> anyhow::Result<()>
 where
-    D: Digest + Write,
+    D: Digest,
 {
     if options.path {
         digest.update(b"path:");
@@ -115,7 +115,35 @@ where
     }
     if options.contents {
         digest.update(b"contents:");
-        io::copy(&mut File::open(path)?, digest)?;
+        digest_path(path, digest)?;
     }
     Ok(())
+}
+
+pub fn fingerprint_file<D>(path: &Path, mut digest: D) -> anyhow::Result<(usize, Fingerprint)>
+where
+    D: Digest,
+{
+    let size = digest_path(path, &mut digest)?;
+    Ok((size, Fingerprint::new(digest)))
+}
+
+fn digest_path<D>(path: &Path, digest: &mut D) -> anyhow::Result<usize>
+where
+    D: Digest,
+{
+    let mut size: usize = 0;
+    let mut reader = BufReader::new(File::open(path)?);
+    loop {
+        let amount_read = {
+            let buf = reader.fill_buf()?;
+            if buf.is_empty() {
+                return Ok(size);
+            }
+            digest.update(buf);
+            buf.len()
+        };
+        size += amount_read;
+        reader.consume(amount_read);
+    }
 }

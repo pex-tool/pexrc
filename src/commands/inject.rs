@@ -28,13 +28,12 @@ pub fn inject(
 ) -> anyhow::Result<()> {
     let pex = Pex::load(pex)?;
     match pex.layout {
-        Layout::Loose => todo!("Loose PEX injection."),
-        Layout::Packed => inject_packed_pex(pex.path, clibs),
+        Layout::Loose | Layout::Packed => inject_pex_dir(pex.path, clibs),
         Layout::ZipApp => inject_pex_zip(pex.path, compression_level, clibs),
     }
 }
 
-fn inject_packed_pex(pex: &Path, clibs: Option<&HashSet<&Path>>) -> anyhow::Result<()> {
+fn inject_pex_dir(pex: &Path, clibs: Option<&HashSet<&Path>>) -> anyhow::Result<()> {
     // Make sure we have a shebang early. This partially validates the pex to inject is a valid one
     // before expending too much effort copying files below.
     let shebang = if let Some(sh_boot_shebang) = sh_boot_shebang(pex, true)? {
@@ -110,7 +109,6 @@ fn inject_packed_pex(pex: &Path, clibs: Option<&HashSet<&Path>>) -> anyhow::Resu
     }
 
     write_boot(dest_pex.path(), &shebang)?;
-    Layout::Packed.record(dest_pex.path())?;
 
     if dst.is_dir() {
         fs::remove_dir_all(&dst)?;
