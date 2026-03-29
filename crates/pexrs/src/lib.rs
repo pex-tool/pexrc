@@ -9,7 +9,6 @@ use std::process::Command;
 
 use anyhow::anyhow;
 use cache::{CacheDir, HashOptions, Key, atomic_dir};
-use fs_err as fs;
 use interpreter::SearchPath;
 use itertools::Itertools;
 use log::{debug, warn};
@@ -44,6 +43,7 @@ fn prepare_boot(
     let venv = prepare_venv(
         python,
         pex.as_ref(),
+        #[cfg(unix)]
         env::var_os("_PEXRC_SH_BOOT_SEED_DIR").map(PathBuf::from),
     )?;
     let mut command = Command::new(&venv.interpreter.path);
@@ -77,14 +77,20 @@ fn exec(command: &mut Command) -> anyhow::Result<i32> {
 
 #[time("debug", "{}")]
 pub fn mount(python: impl AsRef<Path>, pex: impl AsRef<Path>) -> anyhow::Result<PathBuf> {
-    prepare_venv(python, pex.as_ref(), None).map(|venv| venv.site_packages_path())
+    prepare_venv(
+        python,
+        pex.as_ref(),
+        #[cfg(unix)]
+        None,
+    )
+    .map(|venv| venv.site_packages_path())
 }
 
 #[time("debug", "{}")]
 fn prepare_venv<'a>(
     python: impl AsRef<Path>,
     pex: &'a Path,
-    sh_boot_seed_dir: Option<PathBuf>,
+    #[cfg(unix)] sh_boot_seed_dir: Option<PathBuf>,
 ) -> anyhow::Result<Virtualenv<'a>> {
     let pex = Pex::load(pex)?;
     let pex_path = PexPath::from_pex_info(&pex.info, true);
@@ -111,7 +117,7 @@ fn prepare_venv<'a>(
         venv_interpreter.store()?;
         #[cfg(unix)]
         if let Some(sh_boot_seed_dir) = sh_boot_seed_dir {
-            fs::create_dir_all(&sh_boot_seed_dir)?;
+            fs_err::create_dir_all(&sh_boot_seed_dir)?;
             platform::unix::symlink(
                 venv_dir.join("pex"),
                 sh_boot_seed_dir.join(venv_interpreter.most_specific_exe_name()),

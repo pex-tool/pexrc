@@ -4,7 +4,6 @@
 use std::fs::File;
 use std::path::Path;
 
-use fs_err as fs;
 use is_executable::IsExecutable;
 
 pub fn symlink_or_link_or_copy(

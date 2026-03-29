@@ -6,12 +6,10 @@ use std::fmt::{Display, Formatter};
 use std::io::{BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::Mutex;
 
 use anyhow::{anyhow, bail};
 use cache::{CacheDir, HashOptions, atomic_file, hash_file};
 use fs_err as fs;
-use log::debug;
 use logging_timer::time;
 use pep508_rs::MarkerEnvironment;
 use scripts::{IdentifyInterpreter, Scripts};
@@ -79,7 +77,7 @@ pub struct Interpreter {
 }
 
 #[cfg(target_os = "linux")]
-static LINUX_INFO: Mutex<Option<String>> = Mutex::new(None);
+static LINUX_INFO: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
 impl Interpreter {
     fn identify(
@@ -95,6 +93,8 @@ impl Interpreter {
         command.arg("-sE").arg(script.path());
         #[cfg(target_os = "linux")]
         {
+            use log::debug;
+
             let mut linux_info = LINUX_INFO
                 .lock()
                 .map_err(|err| anyhow!("Failed to obtain lock on Linux platform info: {err}"))?;
