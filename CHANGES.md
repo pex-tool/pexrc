@@ -1,5 +1,9 @@
 # Release Notes
 
+## 0.3.0
+
+Add support for injecting `--layout loose` PEXes.
+
 ## 0.2.0
 
 Add support for injecting `--layout packed` PEXes.

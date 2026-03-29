@@ -2,20 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::fmt::{Display, Formatter, Write};
-use std::io;
-use std::io::{Read, Seek};
-use std::path::Path;
 use std::str::FromStr;
 
 use anyhow::{anyhow, bail};
-use fs_err::File;
 use indexmap::IndexSet;
-use itertools::Itertools;
 use pep440_rs::{Version, VersionSpecifiers};
 use pep508_rs::{PackageName, Requirement};
 use python_pkginfo::Metadata;
 use url::Url;
-use zip::ZipArchive;
 
 #[derive(Debug, Eq, Hash, PartialEq)]
 pub struct Tag<'a> {
@@ -42,6 +36,7 @@ impl<'a> Tag<'a> {
 }
 
 pub struct WheelFile<'a> {
+    pub(crate) file_name: &'a str,
     pub(crate) raw_project_name: &'a str,
     pub(crate) project_name: PackageName,
     pub(crate) raw_version: &'a str,
@@ -96,6 +91,7 @@ impl<'a> WheelFile<'a> {
         let project_name = PackageName::from_str(raw_project_name)?;
         let version = Version::from_str(raw_version)?;
         Ok(Self {
+            file_name,
             raw_project_name,
             project_name,
             raw_version,
@@ -146,48 +142,21 @@ impl<'a> Display for WheelFile<'a> {
     }
 }
 
-pub struct WheelMetadata<'a> {
-    pub(crate) wheel_file: WheelFile<'a>,
+pub struct WheelMetadata {
+    pub(crate) project_name: PackageName,
+    pub(crate) version: Version,
     pub(crate) requires_dists: Vec<Requirement<Url>>,
     pub(crate) requires_python: Option<VersionSpecifiers>,
 }
 
 pub trait MetadataReader {
-    fn reader(&mut self, path_components: &[&str]) -> anyhow::Result<impl Read>;
+    fn read(&mut self, wheel_file_name: &str, path_components: &[&str]) -> anyhow::Result<String>;
 }
 
-pub struct DirMetadataReader<'a>(&'a Path);
-
-impl<'a> MetadataReader for DirMetadataReader<'a> {
-    fn reader(&mut self, path_components: &[&str]) -> anyhow::Result<impl Read> {
-        let mut read_path = self.0.to_owned();
-        for component in path_components {
-            read_path.push(component);
-        }
-        File::open(read_path).map_err(anyhow::Error::new)
-    }
-}
-
-pub struct WhlMetadataReader<R>(ZipArchive<R>);
-
-impl WhlMetadataReader<File> {
-    pub fn new(path: impl AsRef<Path>) -> anyhow::Result<Self> {
-        Ok(Self(ZipArchive::new(File::open(path.as_ref())?)?))
-    }
-}
-
-impl<R: Read + Seek> MetadataReader for WhlMetadataReader<R> {
-    fn reader(&mut self, path_components: &[&str]) -> anyhow::Result<impl Read> {
-        self.0
-            .by_name(&path_components.iter().join("/"))
-            .map_err(anyhow::Error::new)
-    }
-}
-
-impl<'a> WheelMetadata<'a> {
+impl WheelMetadata {
     pub fn parse(
-        wheel_file: WheelFile<'a>,
-        mut metadata_reader: impl MetadataReader,
+        wheel_file: WheelFile,
+        metadata_reader: &mut impl MetadataReader,
     ) -> anyhow::Result<Self> {
         let dist_info_dir = format!(
             "{project_name}-{version}.dist-info",
@@ -195,8 +164,11 @@ impl<'a> WheelMetadata<'a> {
             version = wheel_file.raw_version
         );
         let components = [&dist_info_dir, "METADATA"];
-        let metadata_reader = metadata_reader.reader(&components)?;
-        let metadata = Metadata::parse(io::read_to_string(metadata_reader)?.as_bytes())?;
+        let metadata = Metadata::parse(
+            metadata_reader
+                .read(wheel_file.file_name, &components)?
+                .as_bytes(),
+        )?;
         let mut requires_dists: Vec<Requirement<Url>> =
             Vec::with_capacity(metadata.requires_dist.len());
         for requires_dist in metadata.requires_dist {
@@ -209,7 +181,8 @@ impl<'a> WheelMetadata<'a> {
         };
 
         Ok(Self {
-            wheel_file,
+            project_name: wheel_file.project_name,
+            version: wheel_file.version,
             requires_dists,
             requires_python,
         })
@@ -219,6 +192,7 @@ impl<'a> WheelMetadata<'a> {
 #[cfg(test)]
 mod tests {
     use std::ffi::OsStr;
+    use std::io;
     use std::path::{Path, PathBuf};
     use std::process::Command;
     use std::str::FromStr;
@@ -230,7 +204,7 @@ mod tests {
     use testing::{tmp_dir, venv_python_exe};
     use zip::ZipArchive;
 
-    use crate::wheel::{DirMetadataReader, Tag, WheelFile, WheelMetadata, WhlMetadataReader};
+    use crate::wheel::{MetadataReader, Tag, WheelFile, WheelMetadata};
 
     #[test]
     fn test_parse_wheel_file_name_simple() {
@@ -337,16 +311,34 @@ mod tests {
         wheel.unwrap()
     }
 
-    fn assert_requests_2_32_5_whl(wheel: &Path) {
-        let file_name = wheel.file_name().and_then(OsStr::to_str).unwrap();
+    #[rstest]
+    fn test_parse_wheel_chroot(requests_2_32_5_whl: &Path) {
+        let file_name = requests_2_32_5_whl
+            .file_name()
+            .and_then(OsStr::to_str)
+            .unwrap();
         let wheel_file = WheelFile::parse_file_name(file_name).unwrap();
-        let wheel = if wheel.is_dir() {
-            WheelMetadata::parse(wheel_file, DirMetadataReader(wheel)).unwrap()
-        } else {
-            WheelMetadata::parse(wheel_file, WhlMetadataReader::new(wheel).unwrap()).unwrap()
-        };
-        assert_eq!("requests", wheel.wheel_file.raw_project_name);
-        assert_eq!("2.32.5", wheel.wheel_file.raw_version);
+        assert_eq!("requests", wheel_file.raw_project_name);
+        assert_eq!("2.32.5", wheel_file.raw_version);
+
+        struct RequestsMetadataReader(ZipArchive<File>);
+        impl MetadataReader for RequestsMetadataReader {
+            fn read(&mut self, _: &str, path_components: &[&str]) -> anyhow::Result<String> {
+                Ok(io::read_to_string(
+                    self.0.by_name(&path_components.join("/"))?,
+                )?)
+            }
+        }
+        let mut metadata_reader = RequestsMetadataReader(
+            ZipArchive::new(File::open(requests_2_32_5_whl).unwrap()).unwrap(),
+        );
+
+        let wheel = WheelMetadata::parse(wheel_file, &mut metadata_reader).unwrap();
+        assert_eq!(
+            PackageName::new("requests".into()).unwrap(),
+            wheel.project_name
+        );
+        assert_eq!(Version::new([2, 32, 5]), wheel.version);
         assert_eq!(
             Some(VersionSpecifiers::from_str(">=3.9").unwrap()),
             wheel.requires_python
@@ -363,21 +355,5 @@ mod tests {
             ],
             wheel.requires_dists
         );
-    }
-
-    #[rstest]
-    fn test_parse_wheel_zip(requests_2_32_5_whl: &Path) {
-        assert_requests_2_32_5_whl(requests_2_32_5_whl);
-    }
-
-    #[rstest]
-    fn test_parse_wheel_chroot(requests_2_32_5_whl: &Path) {
-        let tmp_dir = tempfile::tempdir().unwrap();
-        let extract_dir = tmp_dir
-            .path()
-            .join(requests_2_32_5_whl.file_name().unwrap());
-        let mut zip = ZipArchive::new(File::open(requests_2_32_5_whl).unwrap()).unwrap();
-        zip.extract(&extract_dir).unwrap();
-        assert_requests_2_32_5_whl(&extract_dir);
     }
 }

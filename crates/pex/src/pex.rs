@@ -4,7 +4,8 @@
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
 use std::ffi::OsStr;
-use std::io::{BufReader, Read};
+use std::io;
+use std::io::BufReader;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
@@ -26,23 +27,7 @@ use url::Url;
 use zip::ZipArchive;
 
 use crate::PexInfo;
-use crate::wheel::{MetadataReader, Tag, WheelFile, WheelMetadata, WhlMetadataReader};
-
-struct ZipAppPexMetadataReader<'a> {
-    zip: &'a mut ZipArchive<File>,
-    wheel_file_name: &'a str,
-}
-
-impl<'a> MetadataReader for ZipAppPexMetadataReader<'a> {
-    fn reader(&mut self, path_components: &[&str]) -> anyhow::Result<impl Read> {
-        Ok(self.zip.by_name(
-            &[".deps", self.wheel_file_name]
-                .iter()
-                .chain(path_components.iter())
-                .join("/"),
-        )?)
-    }
-}
+use crate::wheel::{MetadataReader, Tag, WheelFile, WheelMetadata};
 
 #[derive(AsRefStr, EnumString)]
 pub enum Layout {
@@ -55,15 +40,27 @@ pub enum Layout {
 }
 
 impl Layout {
-    pub fn try_load(pex_dir: &Path) -> anyhow::Result<Self> {
-        Ok(Layout::from_str(
-            fs::read_to_string(pex_dir.join("PEX-LAYOUT"))?.trim(),
-        )?)
-    }
-
-    pub fn record(&self, pex_dir: &Path) -> anyhow::Result<()> {
-        fs::write(pex_dir.join("PEX-LAYOUT"), self.as_ref())?;
-        Ok(())
+    pub fn load(pex: &Path) -> anyhow::Result<Self> {
+        let layout = if pex.is_file() {
+            Layout::ZipApp
+        } else {
+            let deps_dir = pex.join(".deps");
+            if deps_dir.is_dir()
+                && let Some(wheel) = fs::read_dir(&deps_dir)?
+                    .filter_map(|entry| {
+                        entry
+                            .ok()
+                            .filter(|e| e.path().extension() == Some(OsStr::new("whl")))
+                    })
+                    .next()
+                && wheel.path().is_file()
+            {
+                Layout::Packed
+            } else {
+                Layout::Loose
+            }
+        };
+        Ok(layout)
     }
 }
 
@@ -76,49 +73,33 @@ pub struct Pex<'a> {
 impl<'a> Pex<'a> {
     #[time("debug", "Pex.{}")]
     pub fn load(path: &'a Path) -> anyhow::Result<Self> {
-        if path.is_file() {
-            let zip_fp = File::open(path)?;
-            let mut zip = {
-                let _timer = timer!(Level::Debug; "Open PEX zip", "{}", path.display());
-                ZipArchive::new(BufReader::new(zip_fp))?
-            };
-            let pex_info =
-                PexInfo::parse(zip.by_name("PEX-INFO")?, Some(|| Cow::Borrowed("PEX-INFO")))?;
-            Ok(Self {
-                path,
-                info: pex_info,
-                layout: Layout::ZipApp,
-            })
-        } else {
-            let layout = match Layout::try_load(path) {
-                Ok(layout) => layout,
-                _ => {
-                    let deps_dir = path.join(".deps");
-                    if deps_dir.is_dir()
-                        && let Some(wheel) = fs::read_dir(&deps_dir)?
-                            .filter_map(|entry| {
-                                entry
-                                    .ok()
-                                    .filter(|e| e.path().extension() == Some(OsStr::new("whl")))
-                            })
-                            .next()
-                        && wheel.path().is_file()
-                    {
-                        Layout::Packed
-                    } else {
-                        Layout::Loose
-                    }
-                }
-            };
-            let pex_info_path = path.join("PEX-INFO");
-            let pex_info_fp = File::open(&pex_info_path)?;
-            let pex_info = PexInfo::parse(pex_info_fp, Some(|| pex_info_path.to_string_lossy()))?;
+        match Layout::load(path)? {
+            layout @ (Layout::Loose | Layout::Packed) => {
+                let pex_info_path = path.join("PEX-INFO");
+                let pex_info_fp = File::open(&pex_info_path)?;
+                let pex_info =
+                    PexInfo::parse(pex_info_fp, Some(|| pex_info_path.to_string_lossy()))?;
 
-            Ok(Self {
-                path,
-                info: pex_info,
-                layout,
-            })
+                Ok(Self {
+                    path,
+                    info: pex_info,
+                    layout,
+                })
+            }
+            Layout::ZipApp => {
+                let zip_fp = File::open(path)?;
+                let mut zip = {
+                    let _timer = timer!(Level::Debug; "Open PEX zip", "{}", path.display());
+                    ZipArchive::new(BufReader::new(zip_fp))?
+                };
+                let pex_info =
+                    PexInfo::parse(zip.by_name("PEX-INFO")?, Some(|| Cow::Borrowed("PEX-INFO")))?;
+                Ok(Self {
+                    path,
+                    info: pex_info,
+                    layout: Layout::ZipApp,
+                })
+            }
         }
     }
 
@@ -171,11 +152,11 @@ impl<'a> Pex<'a> {
             HashMap::with_capacity(wheels.len());
         for (file_name, wheel, rank) in wheels {
             wheels_by_project_name
-                .entry(wheel.wheel_file.project_name)
+                .entry(wheel.project_name)
                 .or_default()
                 .push(WheelInfo(
                     file_name,
-                    wheel.wheel_file.version,
+                    wheel.version,
                     wheel.requires_dists,
                     rank,
                 ))
@@ -409,64 +390,92 @@ impl<'a> Pex<'a> {
         &'a self,
         interpreter: &Interpreter,
         wheel_files: Vec<(&'a str, WheelFile<'a>, usize)>,
-    ) -> anyhow::Result<Vec<(&'a str, WheelMetadata<'a>, usize)>> {
+    ) -> anyhow::Result<Vec<(&'a str, WheelMetadata, usize)>> {
         let python_version = Version::new([
             u64::from(interpreter.version.major),
             u64::from(interpreter.version.minor),
             u64::from(interpreter.version.micro),
         ]);
         match self.layout {
-            Layout::Loose => todo!("Loose PEX wheel metadata reading."),
-            Layout::Packed => self.yyy(python_version, wheel_files),
-            Layout::ZipApp => self.xxx(python_version, wheel_files),
+            Layout::Loose => read_wheel_metadata(
+                python_version,
+                wheel_files,
+                LoosePexMetadataReader(self.path),
+            ),
+            Layout::Packed => read_wheel_metadata(
+                python_version,
+                wheel_files,
+                PackedPexMetadataReader(self.path),
+            ),
+            Layout::ZipApp => read_wheel_metadata(
+                python_version,
+                wheel_files,
+                ZipAppPexMetadataReader::new(self.path)?,
+            ),
         }
     }
+}
 
-    fn xxx(
-        &'a self,
-        python_version: Version,
-        wheel_files: Vec<(&'a str, WheelFile<'a>, usize)>,
-    ) -> anyhow::Result<Vec<(&'a str, WheelMetadata<'a>, usize)>> {
-        let mut wheels = Vec::with_capacity(wheel_files.len());
-        let mut zip = ZipArchive::new(File::open(self.path)?)?;
-        for (file_name, wheel_file, rank) in wheel_files {
-            let wheel = WheelMetadata::parse(
-                wheel_file,
-                ZipAppPexMetadataReader {
-                    zip: &mut zip,
-                    wheel_file_name: file_name,
-                },
-            )?;
-            if let Some(requires_python) = &wheel.requires_python
-                && !requires_python.contains(&python_version)
-            {
-                continue;
-            }
-            wheels.push((file_name, wheel, rank));
-        }
-        Ok(wheels)
-    }
+struct ZipAppPexMetadataReader(ZipArchive<File>);
 
-    fn yyy(
-        &'a self,
-        python_version: Version,
-        wheel_files: Vec<(&'a str, WheelFile<'a>, usize)>,
-    ) -> anyhow::Result<Vec<(&'a str, WheelMetadata<'a>, usize)>> {
-        let mut wheels = Vec::with_capacity(wheel_files.len());
-        for (file_name, wheel_file, rank) in wheel_files {
-            let wheel = WheelMetadata::parse(
-                wheel_file,
-                WhlMetadataReader::new(self.path.join(".deps").join(file_name))?,
-            )?;
-            if let Some(requires_python) = &wheel.requires_python
-                && !requires_python.contains(&python_version)
-            {
-                continue;
-            }
-            wheels.push((file_name, wheel, rank));
-        }
-        Ok(wheels)
+impl ZipAppPexMetadataReader {
+    fn new(path: impl AsRef<Path>) -> anyhow::Result<Self> {
+        Ok(Self(ZipArchive::new(File::open(path.as_ref())?)?))
     }
+}
+
+impl MetadataReader for ZipAppPexMetadataReader {
+    fn read(&mut self, wheel_file_name: &str, path_components: &[&str]) -> anyhow::Result<String> {
+        Ok(io::read_to_string(
+            self.0.by_name(
+                &[".deps", wheel_file_name]
+                    .iter()
+                    .chain(path_components.iter())
+                    .join("/"),
+            )?,
+        )?)
+    }
+}
+
+struct LoosePexMetadataReader<'a>(&'a Path);
+
+impl<'a> MetadataReader for LoosePexMetadataReader<'a> {
+    fn read(&mut self, wheel_file_name: &str, path_components: &[&str]) -> anyhow::Result<String> {
+        let mut read_path = self.0.join(".deps").join(wheel_file_name);
+        for component in path_components {
+            read_path.push(component);
+        }
+        Ok(fs::read_to_string(read_path)?)
+    }
+}
+
+struct PackedPexMetadataReader<'a>(&'a Path);
+
+impl<'a> MetadataReader for PackedPexMetadataReader<'a> {
+    fn read(&mut self, wheel_file_name: &str, path_components: &[&str]) -> anyhow::Result<String> {
+        let mut zip = ZipArchive::new(File::open(self.0.join(".deps").join(wheel_file_name))?)?;
+        Ok(io::read_to_string(
+            zip.by_name(&path_components.iter().join("/"))?,
+        )?)
+    }
+}
+
+fn read_wheel_metadata<'a>(
+    python_version: Version,
+    wheel_files: Vec<(&'a str, WheelFile<'a>, usize)>,
+    mut metadata_reader: impl MetadataReader,
+) -> anyhow::Result<Vec<(&'a str, WheelMetadata, usize)>> {
+    let mut wheels = Vec::with_capacity(wheel_files.len());
+    for (file_name, wheel_file, rank) in wheel_files {
+        let wheel = WheelMetadata::parse(wheel_file, &mut metadata_reader)?;
+        if let Some(requires_python) = &wheel.requires_python
+            && !requires_python.contains(&python_version)
+        {
+            continue;
+        }
+        wheels.push((file_name, wheel, rank));
+    }
+    Ok(wheels)
 }
 
 #[cfg(test)]

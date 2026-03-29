@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::anyhow;
 use fs_err as fs;
-use fs_err::{DirEntry, File};
+use fs_err::File;
 use indexmap::{IndexMap, IndexSet};
 use log::warn;
 use logging_timer::time;
@@ -21,7 +21,95 @@ use zip::ZipArchive;
 
 use crate::virtualenv::Virtualenv;
 
-fn populate_wheel(wheel: &Path, site_packages_path: &Path) -> anyhow::Result<()> {
+fn populate_from_loose_pex<'a>(
+    venv: &Virtualenv,
+    loose_pex: &'a Pex<'a>,
+    selected_wheels: &IndexSet<&str>,
+    populate_pex_info: bool,
+) -> anyhow::Result<()> {
+    let site_packages_path = venv.site_packages_path();
+    collect_wheels_from_directory_pex(loose_pex, selected_wheels)?
+        .into_par_iter()
+        .try_for_each(|wheel_dir| populate_wheel_dir(&wheel_dir, &site_packages_path))?;
+    populate_user_code_from_directory_pex(
+        loose_pex,
+        venv.prefix(),
+        &site_packages_path,
+        populate_pex_info,
+    )?;
+    Ok(())
+}
+
+fn collect_wheels_from_directory_pex(
+    pex: &Pex,
+    selected_wheels: &IndexSet<&str>,
+) -> anyhow::Result<Vec<PathBuf>> {
+    let mut wheels = Vec::with_capacity(selected_wheels.len());
+    let deps_dir = pex.path.join(".deps");
+    if deps_dir.is_dir() {
+        for entry in fs::read_dir(deps_dir)? {
+            let entry = entry?;
+            if let Ok(wheel_file_name) = platform::os_str_as_str(&entry.file_name())
+                && selected_wheels.contains(wheel_file_name)
+            {
+                wheels.push(entry.path())
+            }
+        }
+    }
+    Ok(wheels)
+}
+
+fn populate_wheel_dir(wheel: &Path, site_packages_path: &Path) -> anyhow::Result<()> {
+    let user_code = walkdir::WalkDir::new(wheel)
+        .min_depth(1)
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()?;
+    user_code.into_par_iter().try_for_each(|entry| {
+        let dst_path = site_packages_path.join(entry.path().strip_prefix(wheel).expect(
+            "Walked unpacked wheel paths should be child paths of the unpacked wheel root dir.",
+        ));
+        if entry.path().is_dir() {
+            fs::create_dir_all(&dst_path)
+        } else {
+            if let Some(parent_dir) = dst_path.parent() {
+                fs::create_dir_all(parent_dir)?;
+            }
+            match File::create_new(&dst_path) {
+                Ok(mut dst_file) => {
+                    let mut src = File::open(entry.path())?;
+                    io::copy(&mut src, &mut dst_file)?;
+                }
+                Err(_) => {
+                    // TODO: Track provenance.
+                    warn!("Collision for {dst_path}", dst_path = dst_path.display());
+                }
+            }
+            Ok(())
+        }
+    })?;
+    Ok(())
+}
+
+fn populate_from_packed_pex<'a>(
+    venv: &Virtualenv,
+    packed_pex: &'a Pex<'a>,
+    selected_wheels: &IndexSet<&str>,
+    populate_pex_info: bool,
+) -> anyhow::Result<()> {
+    let site_packages_path = venv.site_packages_path();
+    collect_wheels_from_directory_pex(packed_pex, selected_wheels)?
+        .into_par_iter()
+        .try_for_each(|wheel_zip| populate_wheel_zip(&wheel_zip, &site_packages_path))?;
+    populate_user_code_from_directory_pex(
+        packed_pex,
+        venv.prefix(),
+        &site_packages_path,
+        populate_pex_info,
+    )?;
+    Ok(())
+}
+
+fn populate_wheel_zip(wheel: &Path, site_packages_path: &Path) -> anyhow::Result<()> {
     let whl_zip = ZipArchive::new(File::open(wheel)?)?;
     let metadata = whl_zip.metadata();
     (0..whl_zip.len()).into_par_iter().try_for_each(|index| {
@@ -32,29 +120,12 @@ fn populate_wheel(wheel: &Path, site_packages_path: &Path) -> anyhow::Result<()>
     })
 }
 
-fn populate_from_packed_pex<'a>(
-    venv: &Virtualenv,
-    packed_pex: &'a Pex<'a>,
-    selected_wheels: &IndexSet<&str>,
+fn populate_user_code_from_directory_pex<'a>(
+    directory_pex: &'a Pex<'a>,
+    venv_dir: &Path,
+    site_packages_path: &Path,
     populate_pex_info: bool,
 ) -> anyhow::Result<()> {
-    let site_packages_path = venv.site_packages_path();
-
-    let deps_dir = packed_pex.path.join(".deps");
-    if deps_dir.is_dir() {
-        let wheels = fs::read_dir(deps_dir)?
-            .filter(|result| match result {
-                Ok(entry) => platform::os_str_as_str(&entry.file_name())
-                    .map(|whl| selected_wheels.contains(whl))
-                    .unwrap_or_default(),
-                Err(_) => true,
-            })
-            .collect::<Result<Vec<DirEntry>, _>>()?;
-        wheels
-            .into_par_iter()
-            .try_for_each(|wheel| populate_wheel(&wheel.path(), &site_packages_path))?;
-    }
-
     let excludes: HashSet<PathBuf> = [
         ".bootstrap",
         ".deps",
@@ -67,14 +138,14 @@ fn populate_from_packed_pex<'a>(
         "PEX-LAYOUT",
     ]
     .into_iter()
-    .map(|rel_path| packed_pex.path.join(rel_path))
+    .map(|rel_path| directory_pex.path.join(rel_path))
     .collect();
     let _pex_info_exclude = if populate_pex_info {
         None
     } else {
-        Some(packed_pex.path.join("PEX-INFO"))
+        Some(directory_pex.path.join("PEX-INFO"))
     };
-    let user_code = walkdir::WalkDir::new(packed_pex.path)
+    let user_code = walkdir::WalkDir::new(directory_pex.path)
         .min_depth(1)
         .into_iter()
         .filter_entry(|entry| !excludes.contains(entry.path()))
@@ -86,8 +157,9 @@ fn populate_from_packed_pex<'a>(
             if let Some(parent) = entry.path().parent() {
                 fs::create_dir_all(parent)?;
             }
-            let dst = site_packages_path.join(entry.path().strip_prefix(packed_pex.path).expect(
-                "Walked packed PEX paths should be child paths of the packed PEX root dir.",
+            let dst = site_packages_path
+                .join(entry.path().strip_prefix(directory_pex.path).expect(
+                "Walked directory PEX paths should be child paths of the directory PEX root dir.",
             ));
             fs::copy(entry.path(), dst).map(|_| ())
         }
@@ -95,11 +167,10 @@ fn populate_from_packed_pex<'a>(
 
     if populate_pex_info {
         fs::copy(
-            packed_pex.path.join("PEX-INFO"),
-            venv.prefix().join("PEX-INFO"),
+            directory_pex.path.join("PEX-INFO"),
+            venv_dir.join("PEX-INFO"),
         )?;
     }
-
     Ok(())
 }
 
@@ -158,7 +229,7 @@ pub fn populate_user_code_and_wheels<'a>(
     populate_pex_info: bool,
 ) -> anyhow::Result<()> {
     match pex.layout {
-        Layout::Loose => todo!("Loose PEX venv population."),
+        Layout::Loose => populate_from_loose_pex(venv, pex, selected_wheels, populate_pex_info),
         Layout::Packed => populate_from_packed_pex(venv, pex, selected_wheels, populate_pex_info),
         Layout::ZipApp => populate_from_zip_app(venv, pex, selected_wheels, populate_pex_info),
     }

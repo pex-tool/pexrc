@@ -9,6 +9,7 @@ edition = "2024"
 anyhow = { workspace = true }
 base64 = { workspace = true }
 dirs = { workspace = true }
+digest = { workspace = true }
 fs-err = { workspace = true }
 hex = { workspace = true }
 logging_timer = { workspace = true }
