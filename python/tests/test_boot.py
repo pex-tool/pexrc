@@ -5,7 +5,6 @@ from __future__ import absolute_import
 
 import os.path
 import subprocess
-import sys
 
 from testing import IS_WINDOWS, pexrc_inject
 from testing.compare import compare
@@ -126,22 +125,18 @@ def test_packed_sh_boot(tmpdir):
     injected_pex_script = os.path.join(injected_pex, "pex")
     assert "#!/bin/sh\n" == read_shebang(injected_pex_script)
 
-    pexrc_env = dict(PEXRC_ROOT=os.path.join(str(tmpdir), "pexrc-root"))
-    if IS_WINDOWS:
+    if not IS_WINDOWS:
+        pexrc_env = dict(PEXRC_ROOT=os.path.join(str(tmpdir), "pexrc-root"))
+
         # N.B.: The `--layout packed --sh-boot` PEXes Pex builds are broken on Windows; so we just
-        # test the injected Pex here.
-        assert b"| Moo! |" in subprocess.check_output(
-            args=[sys.executable, injected_pex_script, "Moo!"], env=pexrc_env
-        )
-    else:
+        # run the comparison on unix.
         compare(
             pex, args=["Moo!"], env=pexrc_env, test_result=assert_result, injected_pex=injected_pex
         )
 
-    # N.B.: The above uses compare which executes python against the PEX, which just proves the
-    # `--sh-boot` shebang does not interfere with that. As long as we're not on Windows, we can run
-    # the `--sh-boot` shebang directly.
-    if not IS_WINDOWS:
+        # N.B.: The above uses `compare` which executes python against the PEX, which just proves
+        # the `--sh-boot` shebang does not interfere with that. As long as we're not on Windows, we
+        # can run the `--sh-boot` shebang directly.
         assert b"| Moo! |" in subprocess.check_output(args=[pex_script, "Moo!"])
         assert b"| Moo! |" in subprocess.check_output(
             args=[injected_pex_script, "Moo!"], env=pexrc_env
