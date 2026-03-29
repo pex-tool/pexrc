@@ -1,11 +1,12 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::io;
 use std::io::{ErrorKind, Read};
 use std::path::{Path, PathBuf};
-use std::{fs, io};
 
 use anyhow::{anyhow, bail};
+use fs_err as fs;
 use fs_err::File;
 use sha2::{Digest, Sha256};
 

@@ -25,11 +25,11 @@ line-length = 100
 extend-select = ["I"]
 
 [tool.dev-cmd.commands]
-fmt = ["ruff", "format"]
-check-fmt = ["ruff", "format", "--diff"]
+fmt = ["ruff", "format", "crates/scripts", "python"]
+check-fmt = ["ruff", "format", "--diff", "crates/scripts", "python"]
 
-lint = ["ruff", "check", "--fix"]
-check-lint = ["ruff", "check"]
+lint = ["ruff", "check", "--fix", "crates/scripts", "python"]
+check-lint = ["ruff", "check", "crates/scripts", "python"]
 
 [tool.dev-cmd.commands.type-check-pexrc.factors]
 py = "The Python version to type check in <major>.<minor> form; i.e.: 3.13."
@@ -38,6 +38,7 @@ args = [
     "mypy",
     "--python-version", "{-py:{markers.python_version}}",
     "--cache-dir", ".mypy_cache_{markers.python_version}",
+    "crates/scripts",
     "python",
 ]
 
@@ -50,7 +51,7 @@ args = ["scripts/generate-release-hashes.py"]
 accepts-extra-args = true
 
 [tool.dev-cmd.commands.test]
-args = ["python/scripts/run-tests.py"]
+args = ["python/testing/bin/run-tests.py"]
 accepts-extra-args = true
 
 [tool.dev-cmd.tasks.checks]

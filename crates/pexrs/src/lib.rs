@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::borrow::Cow;
+use std::env;
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::{env, fs};
 
 use anyhow::anyhow;
 use cache::{CacheDir, HashOptions, Key, atomic_dir};
@@ -15,7 +15,7 @@ use log::{debug, warn};
 use logging_timer::time;
 use pex::{Pex, PexPath};
 use regex::bytes::Regex;
-use venv::{Virtualenv, populate, populate_wheels};
+use venv::{Virtualenv, populate, populate_user_code_and_wheels};
 
 #[time("debug", "{}")]
 pub fn boot(
@@ -43,6 +43,7 @@ fn prepare_boot(
     let venv = prepare_venv(
         python,
         pex.as_ref(),
+        #[cfg(unix)]
         env::var_os("_PEXRC_SH_BOOT_SEED_DIR").map(PathBuf::from),
     )?;
     let mut command = Command::new(&venv.interpreter.path);
@@ -76,18 +77,23 @@ fn exec(command: &mut Command) -> anyhow::Result<i32> {
 
 #[time("debug", "{}")]
 pub fn mount(python: impl AsRef<Path>, pex: impl AsRef<Path>) -> anyhow::Result<PathBuf> {
-    prepare_venv(python, pex.as_ref(), None).map(|venv| venv.site_packages_path())
+    prepare_venv(
+        python,
+        pex.as_ref(),
+        #[cfg(unix)]
+        None,
+    )
+    .map(|venv| venv.site_packages_path())
 }
 
 #[time("debug", "{}")]
 fn prepare_venv<'a>(
     python: impl AsRef<Path>,
     pex: &'a Path,
-    sh_boot_seed_dir: Option<PathBuf>,
+    #[cfg(unix)] sh_boot_seed_dir: Option<PathBuf>,
 ) -> anyhow::Result<Virtualenv<'a>> {
     let pex = Pex::load(pex)?;
-    let pex_info = pex.info();
-    let pex_path = PexPath::from_pex_info(pex_info, true);
+    let pex_path = PexPath::from_pex_info(&pex.info, true);
     let additional_pexes = pex_path.load_pexes()?;
     let search_path = SearchPath::from_env()?;
     let venv_dir = venv_dir(Some(python.as_ref()), &pex, &search_path, &additional_pexes)?;
@@ -98,11 +104,11 @@ fn prepare_venv<'a>(
             interpreter,
             Cow::Borrowed(work_dir),
             &mut resources,
-            pex_info.venv_system_site_packages,
+            pex.info.venv_system_site_packages,
         )?;
         populate(&venv, &venv_dir, &pex, &selected_wheels, &mut resources)?;
         for (additional_pex, selected_wheels) in additional_pexes {
-            populate_wheels(&venv, additional_pex, &selected_wheels, false)?;
+            populate_user_code_and_wheels(&venv, additional_pex, &selected_wheels, false)?;
         }
         Ok(venv.interpreter)
     })? {
@@ -111,7 +117,7 @@ fn prepare_venv<'a>(
         venv_interpreter.store()?;
         #[cfg(unix)]
         if let Some(sh_boot_seed_dir) = sh_boot_seed_dir {
-            fs::create_dir_all(&sh_boot_seed_dir)?;
+            fs_err::create_dir_all(&sh_boot_seed_dir)?;
             platform::unix::symlink(
                 venv_dir.join("pex"),
                 sh_boot_seed_dir.join(venv_interpreter.most_specific_exe_name()),
@@ -134,17 +140,16 @@ pub fn venv_dir(
     search_path: &SearchPath,
     additional_pexes: &[Pex],
 ) -> anyhow::Result<PathBuf> {
-    let pex_info = pex.info();
     let mut key = Key::default();
 
     // The primary PEX hash covers its user code contents, distributions and ICs.
-    key.property("pex_hash", &pex_info.pex_hash);
+    key.property("pex_hash", &pex.info.pex_hash);
 
     // We hash just the distributions of additional PEXes since those are the only items used from
     // PEX_PATH adjoined PEX files; i.e.: neither the entry_point nor any other PEX file data or
     // metadata is used.
     for additional_pex in additional_pexes {
-        key.object("additional_pex", additional_pex.info().distributions.iter());
+        key.object("additional_pex", additional_pex.info.distributions.iter());
     }
 
     let mut imprecise_pex_python: Option<&OsStr> = None;
@@ -152,7 +157,7 @@ pub fn venv_dir(
 
     // If there are no restrictions on interpreter, whatever we derive from the ambient python is
     // our opaque choice, which we can keep.
-    if pex_info.interpreter_constraints.is_empty()
+    if pex.info.interpreter_constraints.is_empty()
         && search_path.is_empty()
         && let Some(python_exe) = ambient_python
     {
@@ -166,7 +171,7 @@ pub fn venv_dir(
         if let Some(python) = search_path.pex_python() {
             let value = python.as_encoded_bytes();
             key.property("PEX_PYTHON", value);
-            if pex_info.emit_warnings
+            if pex.info.emit_warnings
                 && !Regex::new(r"^(?:[Pp]ython|pypy)\d+\.\d+[^\d]?(?:\.exe)$")?.is_match(value)
             {
                 imprecise_pex_python = Some(python);
@@ -177,7 +182,7 @@ pub fn venv_dir(
                 "PEX_PYTHON_PATH",
                 path.iter().map(|path| path.as_os_str().as_encoded_bytes()),
             );
-            if pex_info.emit_warnings {
+            if pex.info.emit_warnings {
                 imprecise_pex_python_path = Some(env::join_paths(path)?);
             }
         }
@@ -200,7 +205,7 @@ pub fn venv_dir(
             with `--no-emit-warnings` or re-run the PEX with PEX_EMIT_WARNINGS=False.\n\
             ",
             pex_python = pex_python.display(),
-            pex_file = pex.path().display(),
+            pex_file = pex.path.display(),
             venv_dir = venv_dir.display()
         )
     }
@@ -220,7 +225,7 @@ pub fn venv_dir(
             with PEX_EMIT_WARNINGS=False.\n\
             ",
             ppp = pex_python_path.display(),
-            pex_file = pex.path().display(),
+            pex_file = pex.path.display(),
             venv_dir = venv_dir.display()
         )
     }

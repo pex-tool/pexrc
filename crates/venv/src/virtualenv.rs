@@ -2,18 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::borrow::Cow;
+use std::env;
 use std::env::consts::EXE_SUFFIX;
 use std::io::Write;
 use std::path::{MAIN_SEPARATOR_STR, Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::{env, fs};
 
 use anyhow::{anyhow, bail};
 use const_format::concatcp;
+use fs_err as fs;
 use interpreter::Interpreter;
 use logging_timer::time;
 use platform::symlink_or_link_or_copy;
-use resources::{InterpreterIdentificationScript, Resources, VendoredVirtualenvScript};
+use scripts::{IdentifyInterpreter, Scripts, VendoredVirtualenv};
 use target_lexicon::{HOST, OperatingSystem};
 
 const SCRIPTS_DIR: &str = env!("SCRIPTS_DIR");
@@ -38,8 +39,8 @@ impl<'a> Virtualenv<'a> {
     }
 
     #[time("debug", "Virtualenv.{}")]
-    pub fn load(path: Cow<'a, Path>, resources: &mut impl Resources<'a>) -> anyhow::Result<Self> {
-        let identification_script = InterpreterIdentificationScript::read(resources)?;
+    pub fn load(path: Cow<'a, Path>, scripts: &mut Scripts) -> anyhow::Result<Self> {
+        let identification_script = IdentifyInterpreter::read(scripts)?;
         let interpreter = Interpreter::load(
             path.as_ref().join(VENV_PYTHON_RELPATH),
             &identification_script,
@@ -64,7 +65,7 @@ impl<'a> Virtualenv<'a> {
     pub fn create(
         interpreter: Interpreter,
         path: Cow<'a, Path>,
-        resources: &mut impl Resources<'a>,
+        scripts: &mut Scripts,
         include_system_site_packages: bool,
     ) -> anyhow::Result<Self> {
         let venv_interpreter = Self::host_interpreter(path.as_ref(), &interpreter);
@@ -75,10 +76,10 @@ impl<'a> Virtualenv<'a> {
                     interpreter,
                     path.as_ref(),
                     include_system_site_packages,
-                    resources,
+                    scripts,
                 )?
             } else {
-                let virtualenv_script = VendoredVirtualenvScript::read(resources)?;
+                let virtualenv_script = VendoredVirtualenv::read(scripts)?;
                 create_virtualenv_venv(
                     &interpreter,
                     path.as_ref(),
@@ -107,10 +108,10 @@ fn create_pep_405_venv<'a>(
     interpreter: Interpreter,
     path: &Path,
     include_system_site_packages: bool,
-    resources: &mut impl Resources<'a>,
+    scripts: &mut Scripts,
 ) -> anyhow::Result<Cow<'a, Path>> {
     // See: https://peps.python.org/pep-0405/
-    let base_interpreter = interpreter.resolve_base_interpreter(resources)?;
+    let base_interpreter = interpreter.resolve_base_interpreter(scripts)?;
     let home = base_interpreter.realpath.parent().ok_or_else(|| {
         anyhow!(
             "Failed to calculate the home dir of venv base python {path}",
@@ -142,7 +143,7 @@ fn create_pep_405_venv<'a>(
 fn create_virtualenv_venv<'a>(
     interpreter: &Interpreter,
     path: &Path,
-    virtualenv_script: VendoredVirtualenvScript<'a>,
+    virtualenv_script: VendoredVirtualenv<'a>,
     include_system_site_packages: bool,
 ) -> anyhow::Result<Cow<'a, Path>> {
     let mut script = tempfile::Builder::new()
@@ -211,20 +212,15 @@ mod tests {
     use std::path::PathBuf;
 
     use interpreter::Interpreter;
-    use resources::{InterpreterIdentificationScript, Resources};
     use rstest::rstest;
-    use testing::{embedded_resources, python_exe, tmp_dir};
+    use scripts::{IdentifyInterpreter, Scripts};
+    use testing::{embedded_scripts, python_exe, tmp_dir};
 
     use crate::virtualenv::{Path, Virtualenv};
 
     #[rstest]
-    fn test_create(
-        python_exe: &Path,
-        tmp_dir: PathBuf,
-        mut embedded_resources: impl Resources<'static>,
-    ) {
-        let identification_script =
-            InterpreterIdentificationScript::read(&mut embedded_resources).unwrap();
+    fn test_create(python_exe: &Path, tmp_dir: PathBuf, mut embedded_scripts: Scripts) {
+        let identification_script = IdentifyInterpreter::read(&mut embedded_scripts).unwrap();
         let interpreter = Interpreter::load(python_exe, &identification_script).unwrap();
         let expected_prefix = interpreter
             .base_prefix
@@ -234,7 +230,7 @@ mod tests {
         let venv = Virtualenv::create(
             interpreter,
             Cow::Owned(tmp_dir),
-            &mut embedded_resources,
+            &mut embedded_scripts,
             false,
         )
         .unwrap();

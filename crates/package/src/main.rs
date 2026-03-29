@@ -9,13 +9,13 @@ use std::sync::LazyLock;
 use std::{cmp, env, io};
 
 use anyhow::{anyhow, bail};
+use build_system::{Target, all_targets, classify_targets, ensure_tools_installed};
 use cache::Fingerprint;
 use clap::builder::Str;
 use clap::{ArgAction, Parser};
 use fs_err as fs;
 use fs_err::File;
 use owo_colors::OwoColorize;
-use pexrc_build_system::{Target, all_targets, classify_targets, ensure_tools_installed};
 use sha2::{Digest, Sha256};
 
 static CARGO: LazyLock<PathBuf> = LazyLock::new(|| env!("CARGO").into());

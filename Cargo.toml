@@ -1,6 +1,12 @@
 # Copyright 2026 Pex project contributors.
 # SPDX-License-Identifier: Apache-2.0
 
+[package]
+name = "pexrc"
+version = "0.2.0"
+edition = "2024"
+publish = false
+
 [workspace]
 members = [
     ".",
@@ -10,19 +16,13 @@ members = [
     "crates/interpreter",
     "crates/package",
     "crates/pex",
-    "crates/pexrc-build-system",
+    "crates/build-system",
     "crates/pexrs",
     "crates/platform",
-    "crates/resources",
+    "crates/scripts",
     "crates/testing",
     "crates/venv",
 ]
-
-[package]
-name = "pexrc"
-version = "0.1.0"
-edition = "2024"
-publish = false
 
 [package.metadata.build]
 zig_version = "0.15.2"
@@ -140,6 +140,7 @@ textwrap = "0.16"
 time = "0.3"
 toml = "1.0"
 url = "2.5"
+walkdir = "2.5"
 which = "8.0"
 xz2 = "0.1"
 zip = { version = "8.1", default-features = false, features = ["deflate", "zstd"] }
@@ -147,9 +148,9 @@ zstd = "0.13"
 
 [build-dependencies]
 anyhow = { workspace = true }
+build-system = { path = "crates/build-system" }
 bstr = { workspace = true }
 fs-err = { workspace = true }
-pexrc-build-system = { path = "crates/pexrc-build-system" }
 env_logger = { workspace = true }
 itertools = { workspace = true }
 zstd = { workspace = true }
@@ -173,9 +174,10 @@ owo-colors = { workspace = true }
 pex = { path = "crates/pex" }
 pexrs = { path = "crates/pexrs" }
 platform = { path = "crates/platform" }
-resources = { path = "crates/resources", features = ["embedded"] }
+scripts = { path = "crates/scripts", features = ["embedded"] }
 sha2 = { workspace = true }
 strum = { workspace = true }
 tempfile = { workspace = true }
+walkdir = { workspace = true }
 zip = { workspace = true }
 zstd = { workspace = true }

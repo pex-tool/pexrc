@@ -649,9 +649,10 @@ def cpython_abis(py_version):
 
     try:
         # N.B.: There is no importlib.machinery prior to ~3.3.
-        from importlib.machinery import EXTENSION_SUFFIXES  # type: ignore
+        from importlib.machinery import EXTENSION_SUFFIXES  # type: ignore[import-not-found]
     except ImportError:
-        import imp
+        # N.B.: There is no imp from 3.12 on.
+        import imp  # type: ignore[import-not-found]
 
         EXTENSION_SUFFIXES = [x[0] for x in imp.get_suffixes()]
         del imp

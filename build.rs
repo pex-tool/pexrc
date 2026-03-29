@@ -4,13 +4,11 @@
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::{env, fs, io, iter};
+use std::{env, io, iter};
 
 use anyhow::{anyhow, bail};
 use bstr::ByteSlice;
-use fs_err::File;
-use itertools::Itertools;
-use pexrc_build_system::{
+use build_system::{
     ClassifiedTargets,
     ClibConfiguration,
     FoundTool,
@@ -18,6 +16,9 @@ use pexrc_build_system::{
     classify_targets,
     ensure_tools_installed,
 };
+use fs_err as fs;
+use fs_err::File;
+use itertools::Itertools;
 
 fn main() -> anyhow::Result<()> {
     println!("cargo::rerun-if-changed=crates");

@@ -1,76 +1,166 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
+use std::io;
 use std::io::Write;
-use std::path::Path;
-use std::{fs, io};
+use std::path::{Path, PathBuf};
 
 use anyhow::anyhow;
-use fs_err::File;
+use fs_err as fs;
+use fs_err::{DirEntry, File};
 use indexmap::{IndexMap, IndexSet};
 use log::warn;
 use logging_timer::time;
-use pex::{BinPath, InheritPath, Pex, PexInfo};
+use pex::{BinPath, InheritPath, Layout, Pex, PexInfo};
 use platform::{mark_executable, path_as_bytes, path_as_str, symlink_or_link_or_copy};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
-use resources::{Resources, VenvPexReplScript, VenvPexScript};
+use scripts::{Scripts, VenvPex, VenvPexRepl};
 use zip::ZipArchive;
 
 use crate::virtualenv::Virtualenv;
 
+fn populate_wheel(wheel: &Path, site_packages_path: &Path) -> anyhow::Result<()> {
+    let whl_zip = ZipArchive::new(File::open(wheel)?)?;
+    let metadata = whl_zip.metadata();
+    (0..whl_zip.len()).into_par_iter().try_for_each(|index| {
+        let zip_fp = File::open(wheel)?;
+        let mut zip = unsafe { ZipArchive::unsafe_new_with_metadata(zip_fp, metadata.clone()) };
+        extract_idx(site_packages_path, index, &mut zip)?;
+        Ok(())
+    })
+}
+
+fn populate_from_packed_pex<'a>(
+    venv: &Virtualenv,
+    packed_pex: &'a Pex<'a>,
+    selected_wheels: &IndexSet<&str>,
+    populate_pex_info: bool,
+) -> anyhow::Result<()> {
+    let site_packages_path = venv.site_packages_path();
+
+    let deps_dir = packed_pex.path.join(".deps");
+    if deps_dir.is_dir() {
+        let wheels = fs::read_dir(deps_dir)?
+            .filter(|result| match result {
+                Ok(entry) => platform::os_str_as_str(&entry.file_name())
+                    .map(|whl| selected_wheels.contains(whl))
+                    .unwrap_or_default(),
+                Err(_) => true,
+            })
+            .collect::<Result<Vec<DirEntry>, _>>()?;
+        wheels
+            .into_par_iter()
+            .try_for_each(|wheel| populate_wheel(&wheel.path(), &site_packages_path))?;
+    }
+
+    let excludes: HashSet<PathBuf> = [
+        ".bootstrap",
+        ".deps",
+        "__main__.py",
+        "__pex__",
+        "__pycache__",
+        "pex",
+        "pex-repl",
+        "PEX-INFO",
+        "PEX-LAYOUT",
+    ]
+    .into_iter()
+    .map(|rel_path| packed_pex.path.join(rel_path))
+    .collect();
+    let _pex_info_exclude = if populate_pex_info {
+        None
+    } else {
+        Some(packed_pex.path.join("PEX-INFO"))
+    };
+    let user_code = walkdir::WalkDir::new(packed_pex.path)
+        .min_depth(1)
+        .into_iter()
+        .filter_entry(|entry| !excludes.contains(entry.path()))
+        .collect::<Result<Vec<_>, _>>()?;
+    user_code.into_par_iter().try_for_each(|entry| {
+        if entry.file_type().is_dir() {
+            fs::create_dir_all(entry.path())
+        } else {
+            if let Some(parent) = entry.path().parent() {
+                fs::create_dir_all(parent)?;
+            }
+            let dst = site_packages_path.join(entry.path().strip_prefix(packed_pex.path).expect(
+                "Walked packed PEX paths should be child paths of the packed PEX root dir.",
+            ));
+            fs::copy(entry.path(), dst).map(|_| ())
+        }
+    })?;
+
+    if populate_pex_info {
+        fs::copy(
+            packed_pex.path.join("PEX-INFO"),
+            venv.prefix().join("PEX-INFO"),
+        )?;
+    }
+
+    Ok(())
+}
+
+fn populate_from_zip_app<'a>(
+    venv: &Virtualenv,
+    zip_app_pex: &'a Pex<'a>,
+    selected_wheels: &IndexSet<&'a str>,
+    populate_pex_info: bool,
+) -> anyhow::Result<()> {
+    let mut pex_zip = ZipArchive::new(File::open(zip_app_pex.path)?)?;
+    let metadata = pex_zip.metadata();
+    let extract_indexes = pex_zip
+        .file_names()
+        .enumerate()
+        .filter_map(|(idx, name)| {
+            // TODO: XXX: Deal with .layout and .prefix/ in wheel chroots.
+            if [".bootstrap/", "__pex__/"]
+                .iter()
+                .any(|exclude_dir| name.starts_with(exclude_dir))
+                || ["PEX-INFO", "__main__.py", ".deps/"].contains(&name)
+                || name.starts_with(".deps/")
+                    && name[6..]
+                        .split("/")
+                        .next()
+                        .map(|whl_name| !selected_wheels.contains(whl_name))
+                        .unwrap_or(true)
+            {
+                None
+            } else {
+                Some(idx)
+            }
+        })
+        .collect::<Vec<_>>();
+    let site_packages_path = venv.site_packages_path();
+    extract_indexes
+        .into_par_iter()
+        .try_for_each(|index| -> anyhow::Result<()> {
+            let zip_fp = File::open(zip_app_pex.path)?;
+            let mut zip = unsafe { ZipArchive::unsafe_new_with_metadata(zip_fp, metadata.clone()) };
+            extract_idx(&site_packages_path, index, &mut zip)?;
+            Ok(())
+        })?;
+    if populate_pex_info {
+        let mut pex_info_src_fp = pex_zip.by_name("PEX-INFO")?;
+        let mut pex_info_dst_fp = File::create_new(venv.prefix().join("PEX-INFO"))?;
+        io::copy(&mut pex_info_src_fp, &mut pex_info_dst_fp)?;
+    }
+    Ok(())
+}
+
 #[time("debug", "{}")]
-pub fn populate_wheels<'a>(
+pub fn populate_user_code_and_wheels<'a>(
     venv: &Virtualenv,
     pex: &'a Pex<'a>,
     selected_wheels: &IndexSet<&'a str>,
     populate_pex_info: bool,
-) -> anyhow::Result<&'a PexInfo> {
-    let site_packages_path = venv.site_packages_path();
-    match pex {
-        Pex::Loose(_) => todo!("XXX: Implement loose PEX venv population."),
-        Pex::Packed(_) => todo!("XXX: Implement packed PEX venv population."),
-        Pex::ZipApp(zip_app_pex) => {
-            let mut pex_zip = ZipArchive::new(File::open(zip_app_pex.0)?)?;
-            let metadata = pex_zip.metadata();
-            let extract_indexes = pex_zip
-                .file_names()
-                .enumerate()
-                .filter_map(|(idx, name)| {
-                    // TODO: XXX: Deal with .layout and .prefix/ in wheel chroots.
-                    if [".bootstrap/", "__pex__/"]
-                        .iter()
-                        .any(|exclude_dir| name.starts_with(exclude_dir))
-                        || ["PEX-INFO", "__main__.py", ".deps/"].contains(&name)
-                        || name.starts_with(".deps/")
-                            && name[6..]
-                                .split("/")
-                                .next()
-                                .map(|whl_name| !selected_wheels.contains(whl_name))
-                                .unwrap_or(true)
-                    {
-                        None
-                    } else {
-                        Some(idx)
-                    }
-                })
-                .collect::<Vec<_>>();
-            extract_indexes
-                .into_par_iter()
-                .try_for_each(|index| -> anyhow::Result<()> {
-                    let zip_fp = File::open(zip_app_pex.0)?;
-                    let mut zip =
-                        unsafe { ZipArchive::unsafe_new_with_metadata(zip_fp, metadata.clone()) };
-                    extract_idx(&site_packages_path, index, &mut zip)?;
-                    Ok(())
-                })?;
-            if populate_pex_info {
-                let mut pex_info_src_fp = pex_zip.by_name("PEX-INFO")?;
-                let mut pex_info_dst_fp = File::create_new(venv.prefix().join("PEX-INFO"))?;
-                io::copy(&mut pex_info_src_fp, &mut pex_info_dst_fp)?;
-            }
-            Ok(&zip_app_pex.1)
-        }
+) -> anyhow::Result<()> {
+    match pex.layout {
+        Layout::Loose => todo!("Loose PEX venv population."),
+        Layout::Packed => populate_from_packed_pex(venv, pex, selected_wheels, populate_pex_info),
+        Layout::ZipApp => populate_from_zip_app(venv, pex, selected_wheels, populate_pex_info),
     }
 }
 
@@ -80,36 +170,32 @@ pub fn populate<'a>(
     resting_venv_dir: &Path,
     pex: &'a Pex<'a>,
     selected_wheels: &IndexSet<&str>,
-    resources: &mut impl Resources<'a>,
+    scripts: &mut Scripts,
 ) -> anyhow::Result<()> {
-    let path = match &pex {
-        Pex::Loose(_) => todo!("XXX: Implement loose PEX venv population."),
-        Pex::Packed(_) => todo!("XXX: Implement packed PEX venv population."),
-        Pex::ZipApp(zip_app_pex) => zip_app_pex.0,
-    };
-    let pex_info = populate_wheels(venv, pex, selected_wheels, true)?;
+    populate_user_code_and_wheels(venv, pex, selected_wheels, true)?;
+
     let interpreter_relpath = venv
         .interpreter
         .path
         .strip_prefix(&venv.interpreter.prefix)?;
     let shebang_interpreter = resting_venv_dir.join(interpreter_relpath);
-    let shebang_arg = if (pex_info.venv && pex_info.venv_hermetic_scripts)
-        || (!pex_info.venv
-            && pex_info.inherit_path.unwrap_or(InheritPath::False) == InheritPath::False)
+    let shebang_arg = if (pex.info.venv && pex.info.venv_hermetic_scripts)
+        || (!pex.info.venv
+            && pex.info.inherit_path.unwrap_or(InheritPath::False) == InheritPath::False)
     {
         Some(venv.interpreter.hermetic_args())
     } else {
         None
     };
-    write_main(venv, &shebang_interpreter, shebang_arg, pex_info, resources)?;
+    write_main(venv, &shebang_interpreter, shebang_arg, &pex.info, scripts)?;
     write_repl(
         venv,
         &shebang_interpreter,
         shebang_arg,
-        path,
-        pex_info,
+        pex.path,
+        &pex.info,
         selected_wheels,
-        resources,
+        scripts,
     )
 }
 
@@ -209,17 +295,17 @@ impl<'a> Display for PythonListTupleStrStr<'a> {
     }
 }
 
-fn write_main<'a>(
+fn write_main(
     venv: &Virtualenv,
     shebang_interpreter: &Path,
     shebang_arg: Option<&str>,
     pex_info: &PexInfo,
-    resources: &mut impl Resources<'a>,
+    scripts: &mut Scripts,
 ) -> anyhow::Result<()> {
     let main_py = venv.prefix().join("__main__.py");
     let mut main_py_fp = File::create_new(&main_py)?;
     write_shebang_bytes(&mut main_py_fp, shebang_interpreter, shebang_arg)?;
-    let venv_pex_script = VenvPexScript::read(resources)?;
+    let venv_pex_script = VenvPex::read(scripts)?;
     main_py_fp.write_all(venv_pex_script.contents().as_bytes())?;
 
     write!(
@@ -266,18 +352,18 @@ if __name__ == "__main__":
     symlink_or_link_or_copy(&main_py, venv.prefix().join("pex"), true)
 }
 
-fn write_repl<'a>(
+fn write_repl(
     venv: &Virtualenv,
     shebang_interpreter: &Path,
     shebang_arg: Option<&str>,
     pex: &Path,
     pex_info: &PexInfo,
     selected_wheels: &IndexSet<&str>,
-    resources: &mut impl Resources<'a>,
+    scripts: &mut Scripts,
 ) -> anyhow::Result<()> {
     let mut pex_repl_py_fp = File::create_new(venv.prefix().join("pex-repl"))?;
     write_shebang_bytes(&mut pex_repl_py_fp, shebang_interpreter, shebang_arg)?;
-    let venv_pex_repl_script = VenvPexReplScript::read(resources)?;
+    let venv_pex_repl_script = VenvPexRepl::read(scripts)?;
     pex_repl_py_fp.write_all(venv_pex_repl_script.contents().as_bytes())?;
 
     let activation_summary = if selected_wheels.is_empty() {

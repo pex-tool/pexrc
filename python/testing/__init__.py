@@ -4,7 +4,10 @@
 from __future__ import absolute_import
 
 import os
+import platform
 import subprocess
+
+IS_WINDOWS = platform.system().lower() == "windows"
 
 
 def pexrc():
@@ -17,5 +20,7 @@ def pexrc_inject(pex):
 
     subprocess.check_call(args=[pexrc(), "inject", pex])
     injected_pex = pex + "rc" if pex.endswith(".pex") else pex + ".pexrc"
-    assert os.path.isfile(injected_pex)
+    assert (os.path.isfile(pex) and os.path.isfile(injected_pex)) or (
+        os.path.isdir(pex) and os.path.isdir(injected_pex)
+    )
     return injected_pex

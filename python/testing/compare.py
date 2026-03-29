@@ -103,6 +103,7 @@ def compare(
     env=None,  # type: Optional[Mapping[str, str]]
     test_result=None,  # type: Optional[Callable[[ProcessResult, bool], None]]
     compare_results=None,  # type: Optional[Callable[[ProcessResult, ProcessResult], None]]
+    injected_pex=None,  # type: Optional[str]
 ):
     # type: (...) -> str
 
@@ -113,8 +114,8 @@ def compare(
         file=sys.stderr,
     )
 
-    injected_pex = pexrc_inject(pex)
-    injected_result = execute_pex(injected_pex, python_args, args, **(env or {}))
+    injected = injected_pex or pexrc_inject(pex)
+    injected_result = execute_pex(injected, python_args, args, **(env or {}))
     _test_result(injected_result, False, test_result=test_result)
     print(
         "Injected PEXRC run took {elapsed:.5}ms".format(elapsed=injected_result.elapsed * 1000),
@@ -134,4 +135,4 @@ def compare(
         file=sys.stderr,
     )
     _compare_results(traditional_result, injected_result, compare_results=compare_results)
-    return injected_pex
+    return injected

@@ -7,7 +7,7 @@ anyhow = { workspace = true }
 cache = { path = "../cache" }
 ctor = { workspace = true }
 fs-err = { workspace = true }
-resources = { path = "../resources", features = ["embedded"] }
 rstest = { workspace = true }
+scripts = { path = "../scripts", features = ["embedded"] }
 target-lexicon = { workspace = true }
 tempfile = { workspace = true }

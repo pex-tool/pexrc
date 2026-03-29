@@ -15,16 +15,17 @@ log = { workspace = true }
 logging_timer = { workspace = true }
 pex = { path = "../pex" }
 platform = { path = "../platform" }
-resources = { path = "../resources" }
 rayon = { workspace = true }
+scripts = { path = "../scripts" }
 target-lexicon = { workspace = true }
 tempfile = { workspace = true }
+walkdir = { workspace = true }
 zip = { workspace = true }
 
 [dev-dependencies]
 interpreter = { path = "../interpreter" }
-resources = { path = "../resources" }
 rstest = { workspace = true}
+scripts = { path = "../scripts" }
 testing = { path = "../testing" }
 
 [build-dependencies]

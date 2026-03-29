@@ -200,6 +200,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "build-system"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "bstr",
+ "const_format",
+ "dirs",
+ "flate2",
+ "fs-err",
+ "hex",
+ "itertools 0.14.0",
+ "reqwest",
+ "serde",
+ "sha2",
+ "strum",
+ "strum_macros",
+ "tar",
+ "target-lexicon",
+ "tempfile",
+ "toml",
+ "which",
+ "xz2",
+ "zip",
+]
+
+[[package]]
 name = "build-target"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1128,9 +1154,9 @@ dependencies = [
  "pep440_rs",
  "pep508_rs",
  "platform",
- "resources",
  "rstest",
  "same-file",
+ "scripts",
  "serde",
  "serde_json",
  "target-lexicon",
@@ -1466,6 +1492,7 @@ version = "0.0.0"
 dependencies = [
  "anstream 1.0.0",
  "anyhow",
+ "build-system",
  "cache",
  "clap",
  "clap-verbosity-flag",
@@ -1473,7 +1500,6 @@ dependencies = [
  "env_logger",
  "fs-err",
  "owo-colors",
- "pexrc-build-system",
  "platform",
  "sha2",
 ]
@@ -1541,10 +1567,12 @@ dependencies = [
  "pep508_rs",
  "python-pkginfo",
  "rayon",
- "resources",
  "rstest",
+ "scripts",
  "serde",
  "serde_json",
+ "strum",
+ "strum_macros",
  "tempfile",
  "testing",
  "url",
@@ -1553,12 +1581,13 @@ dependencies = [
 
 [[package]]
 name = "pexrc"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anstream 1.0.0",
  "anyhow",
  "boot",
  "bstr",
+ "build-system",
  "cache",
  "clap",
  "clap-verbosity-flag",
@@ -1572,41 +1601,15 @@ dependencies = [
  "log",
  "owo-colors",
  "pex",
- "pexrc-build-system",
  "pexrs",
  "platform",
- "resources",
+ "scripts",
  "sha2",
  "strum",
  "tempfile",
+ "walkdir",
  "zip",
  "zstd",
-]
-
-[[package]]
-name = "pexrc-build-system"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "bstr",
- "const_format",
- "dirs",
- "flate2",
- "fs-err",
- "hex",
- "itertools 0.14.0",
- "reqwest",
- "serde",
- "sha2",
- "strum",
- "strum_macros",
- "tar",
- "target-lexicon",
- "tempfile",
- "toml",
- "which",
- "xz2",
- "zip",
 ]
 
 [[package]]
@@ -1615,6 +1618,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "cache",
+ "fs-err",
  "interpreter",
  "itertools 0.14.0",
  "log",
@@ -1997,18 +2001,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "resources"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "env_logger",
- "pexrc-build-system",
- "strum",
- "strum_macros",
- "zip",
-]
-
-[[package]]
 name = "rfc2047-decoder"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2190,6 +2182,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "91c1b7e4904c873ef0710c1f407dde2e6287de2bebc1bbbf7d430bb7cbffd939"
 dependencies = [
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "scripts"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "build-system",
+ "env_logger",
+ "fs-err",
+ "strum",
+ "strum_macros",
+ "zip",
 ]
 
 [[package]]
@@ -2477,8 +2482,8 @@ dependencies = [
  "cache",
  "ctor",
  "fs-err",
- "resources",
  "rstest",
+ "scripts",
  "target-lexicon",
  "tempfile",
 ]
@@ -2836,11 +2841,12 @@ dependencies = [
  "pex",
  "platform",
  "rayon",
- "resources",
  "rstest",
+ "scripts",
  "target-lexicon",
  "tempfile",
  "testing",
+ "walkdir",
  "zip",
 ]
 

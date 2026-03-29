@@ -3,13 +3,14 @@
 
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
-use std::io;
-use std::io::{BufReader, Read, Seek};
+use std::ffi::OsStr;
+use std::io::{BufReader, Read};
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, bail};
+use fs_err as fs;
 use fs_err::File;
 use indexmap::{IndexMap, IndexSet};
 use interpreter::{Interpreter, InterpreterConstraints, SearchPath};
@@ -19,26 +20,13 @@ use logging_timer::{time, timer};
 use pep440_rs::Version;
 use pep508_rs::{ExtraName, PackageName, Requirement, VersionOrUrl};
 use rayon::prelude::*;
-use resources::{InterpreterIdentificationScript, ResourcePath, Resources};
+use scripts::{IdentifyInterpreter, Scripts};
+use strum_macros::{AsRefStr, EnumString};
 use url::Url;
 use zip::ZipArchive;
 
 use crate::PexInfo;
-use crate::wheel::{MetadataReader, Tag, WheelFile, WheelMetadata};
-
-pub trait WheelResolver {
-    fn resolve(&self, interpreter: &Interpreter) -> anyhow::Result<IndexSet<&str>>;
-}
-
-pub struct LoosePex<'a>(pub &'a Path, pub PexInfo);
-pub struct PackedPex<'a>(pub &'a Path, pub PexInfo);
-pub struct ZipAppPex<'a>(pub &'a Path, pub PexInfo);
-
-impl<'a> ZipAppPex<'a> {
-    pub(crate) fn resources(&self) -> anyhow::Result<impl Resources<'a>> {
-        ZipResources::new(self.0)
-    }
-}
+use crate::wheel::{MetadataReader, Tag, WheelFile, WheelMetadata, WhlMetadataReader};
 
 struct ZipAppPexMetadataReader<'a> {
     zip: &'a mut ZipArchive<File>,
@@ -56,16 +44,101 @@ impl<'a> MetadataReader for ZipAppPexMetadataReader<'a> {
     }
 }
 
-// TODO: XXX: This just uses PEX-INFO to resolve wheel file names, it is not ZipAppPex-specific.
-impl<'a> WheelResolver for ZipAppPex<'a> {
-    #[time("debug", "WheelResolver.{}")]
-    fn resolve(&self, interpreter: &Interpreter) -> anyhow::Result<IndexSet<&str>> {
-        let python_version = Version::new([
-            u64::from(interpreter.version.major),
-            u64::from(interpreter.version.minor),
-            u64::from(interpreter.version.micro),
-        ]);
+#[derive(AsRefStr, EnumString)]
+pub enum Layout {
+    #[strum(serialize = "loose")]
+    Loose,
+    #[strum(serialize = "packed")]
+    Packed,
+    #[strum(serialize = "zipapp")]
+    ZipApp,
+}
 
+impl Layout {
+    pub fn try_load(pex_dir: &Path) -> anyhow::Result<Self> {
+        Ok(Layout::from_str(
+            fs::read_to_string(pex_dir.join("PEX-LAYOUT"))?.trim(),
+        )?)
+    }
+
+    pub fn record(&self, pex_dir: &Path) -> anyhow::Result<()> {
+        fs::write(pex_dir.join("PEX-LAYOUT"), self.as_ref())?;
+        Ok(())
+    }
+}
+
+pub struct Pex<'a> {
+    pub path: &'a Path,
+    pub info: PexInfo,
+    pub layout: Layout,
+}
+
+impl<'a> Pex<'a> {
+    #[time("debug", "Pex.{}")]
+    pub fn load(path: &'a Path) -> anyhow::Result<Self> {
+        if path.is_file() {
+            let zip_fp = File::open(path)?;
+            let mut zip = {
+                let _timer = timer!(Level::Debug; "Open PEX zip", "{}", path.display());
+                ZipArchive::new(BufReader::new(zip_fp))?
+            };
+            let pex_info =
+                PexInfo::parse(zip.by_name("PEX-INFO")?, Some(|| Cow::Borrowed("PEX-INFO")))?;
+            Ok(Self {
+                path,
+                info: pex_info,
+                layout: Layout::ZipApp,
+            })
+        } else {
+            let layout = match Layout::try_load(path) {
+                Ok(layout) => layout,
+                _ => {
+                    let deps_dir = path.join(".deps");
+                    if deps_dir.is_dir()
+                        && let Some(wheel) = fs::read_dir(&deps_dir)?
+                            .filter_map(|entry| {
+                                entry
+                                    .ok()
+                                    .filter(|e| e.path().extension() == Some(OsStr::new("whl")))
+                            })
+                            .next()
+                        && wheel.path().is_file()
+                    {
+                        Layout::Packed
+                    } else {
+                        Layout::Loose
+                    }
+                }
+            };
+            let pex_info_path = path.join("PEX-INFO");
+            let pex_info_fp = File::open(&pex_info_path)?;
+            let pex_info = PexInfo::parse(pex_info_fp, Some(|| pex_info_path.to_string_lossy()))?;
+
+            Ok(Self {
+                path,
+                info: pex_info,
+                layout,
+            })
+        }
+    }
+
+    pub fn file(&self) -> Cow<'a, Path> {
+        match self.layout {
+            Layout::Loose | Layout::Packed => Cow::Owned(self.path.join("pex")),
+            Layout::ZipApp => Cow::Borrowed(self.path),
+        }
+    }
+
+    pub fn resources(&self) -> anyhow::Result<Scripts> {
+        let path = self.path.to_path_buf();
+        match self.layout {
+            Layout::Packed | Layout::Loose => Ok(Scripts::Loose(path)),
+            Layout::ZipApp => Ok(Scripts::Zipped(ZipArchive::new(File::open(&path)?)?)),
+        }
+    }
+
+    #[time("debug", "Pex.{}")]
+    fn resolve_wheels(&self, interpreter: &Interpreter) -> anyhow::Result<IndexSet<&str>> {
         let supported_tags: HashMap<Tag, usize> = interpreter
             .supported_tags
             .iter()
@@ -74,7 +147,7 @@ impl<'a> WheelResolver for ZipAppPex<'a> {
             .collect::<anyhow::Result<_>>()?;
 
         let wheel_files = self
-            .1
+            .info
             .parse_distributions()
             .collect::<Result<Vec<(&str, WheelFile)>, _>>()?;
 
@@ -90,23 +163,7 @@ impl<'a> WheelResolver for ZipAppPex<'a> {
             })
             .collect::<Vec<_>>();
 
-        let mut wheels = Vec::with_capacity(wheel_files.len());
-        let mut zip = ZipArchive::new(File::open(self.0)?)?;
-        for (file_name, wheel_file, rank) in wheel_files {
-            let wheel = WheelMetadata::parse(
-                wheel_file,
-                ZipAppPexMetadataReader {
-                    zip: &mut zip,
-                    wheel_file_name: file_name,
-                },
-            )?;
-            if let Some(requires_python) = &wheel.requires_python
-                && !requires_python.contains(&python_version)
-            {
-                continue;
-            }
-            wheels.push((file_name, wheel, rank));
-        }
+        let wheels = self.load_wheel_metadata(interpreter, wheel_files)?;
 
         struct WheelInfo<'b>(&'b str, Version, Vec<Requirement<Url>>, usize);
 
@@ -131,7 +188,7 @@ impl<'a> WheelResolver for ZipAppPex<'a> {
             IndexMap::with_capacity(wheels_by_project_name.len());
         let mut indexed_extras: Vec<Vec<ExtraName>> = vec![Vec::new()];
         let mut to_resolve: VecDeque<(Requirement<Url>, usize)> = self
-            .1
+            .info
             .requirements
             .iter()
             .map(|requirement| {
@@ -152,7 +209,7 @@ impl<'a> WheelResolver for ZipAppPex<'a> {
                 .remove(&requirement.name)
                 .ok_or_else(|| {
                     let inapplicable_wheels = self
-                        .1
+                        .info
                         .parse_distributions()
                         .filter_map(|result| match result {
                             Ok((file_name, wheel_file))
@@ -183,7 +240,7 @@ impl<'a> WheelResolver for ZipAppPex<'a> {
                         "The PEX at {path} has requirement {requirement} that cannot be satisfied \
                         for the interpreter at {python_exe}.\n\
                         {reason}",
-                        path = self.0.display(),
+                        path = self.path.display(),
                         python_exe = interpreter.path.display(),
                         reason = reason,
                     )
@@ -199,7 +256,7 @@ impl<'a> WheelResolver for ZipAppPex<'a> {
                         VersionOrUrl::Url(url) => bail!(
                             "A PEX should never contain an URL requirement.\
                             The PEX at {path} requires: {url}",
-                            path = self.0.display()
+                            path = self.path.display()
                         ),
                     }
                 }
@@ -219,98 +276,6 @@ impl<'a> WheelResolver for ZipAppPex<'a> {
         }
         Ok(resolved_by_project_name.into_values().collect())
     }
-}
-
-struct ZipResources<R> {
-    zip: ZipArchive<R>,
-}
-
-impl ZipResources<BufReader<File>> {
-    fn new(path: &Path) -> anyhow::Result<Self> {
-        let zip = ZipArchive::new(BufReader::new(File::open(path)?))?;
-        Ok(Self { zip })
-    }
-}
-
-impl<'a, R: Read + Seek> Resources<'a> for ZipResources<R> {
-    fn read(&mut self, path: ResourcePath) -> anyhow::Result<Cow<'a, str>> {
-        // TODO: XXX: The entry name logic here is shared with pexrc - centralize.
-        let entry = self
-            .zip
-            .by_name(format!("__pex__/.scripts/{script}", script = path.script_name()).as_str())?;
-        Ok(Cow::Owned(io::read_to_string(entry)?))
-    }
-}
-
-pub enum Pex<'a> {
-    Loose(LoosePex<'a>),
-    Packed(PackedPex<'a>),
-    ZipApp(ZipAppPex<'a>),
-}
-
-impl<'a> Pex<'a> {
-    #[time("debug", "Pex.{}")]
-    pub fn load(path: &'a Path) -> anyhow::Result<Self> {
-        if path.is_file() {
-            let zip_fp = File::open(path)?;
-            let mut zip = {
-                let _timer = timer!(Level::Debug; "Open PEX zip", "{}", path.display());
-                ZipArchive::new(BufReader::new(zip_fp))?
-            };
-            let pex_info =
-                PexInfo::parse(zip.by_name("PEX-INFO")?, Some(|| Cow::Borrowed("PEX-INFO")))?;
-            Ok(Pex::ZipApp(ZipAppPex(path, pex_info)))
-        } else {
-            let bootstrap = path.join(".bootstrap");
-            if !bootstrap.exists() {
-                bail!(
-                    "There is no PEX at {path}: it contains no `.bootstrap`.",
-                    path = path.display()
-                )
-            }
-            let pex_info_path = path.join("PEX-INFO");
-            let pex_info_fp = File::open(&pex_info_path)?;
-            let pex_info = PexInfo::parse(pex_info_fp, Some(|| pex_info_path.to_string_lossy()))?;
-            if bootstrap.is_dir() {
-                Ok(Pex::Loose(LoosePex(path, pex_info)))
-            } else {
-                Ok(Pex::Packed(PackedPex(path, pex_info)))
-            }
-        }
-    }
-
-    pub fn path(&self) -> &Path {
-        match self {
-            Pex::Loose(pex) => pex.0,
-            Pex::Packed(pex) => pex.0,
-            Pex::ZipApp(pex) => pex.0,
-        }
-    }
-
-    pub fn info(&self) -> &PexInfo {
-        match self {
-            Pex::Loose(pex) => &pex.1,
-            Pex::Packed(pex) => &pex.1,
-            Pex::ZipApp(pex) => &pex.1,
-        }
-    }
-
-    pub fn resources(&self) -> anyhow::Result<impl Resources<'a>> {
-        match self {
-            Pex::Loose(_) => todo!("XXX: Implement loose PEX resource resolution."),
-            Pex::Packed(_) => todo!("XXX: Implement packed PEX resource resolution."),
-            Pex::ZipApp(zip_app) => zip_app.resources(),
-        }
-    }
-
-    fn resolve_wheels(&self, interpreter: &Interpreter) -> anyhow::Result<IndexSet<&str>> {
-        let zip_app_pex = match self {
-            Pex::Loose(_) => todo!("XXX: Implement loose PEX wheel resolution."),
-            Pex::Packed(_) => todo!("XXX: Implement packed PEX wheel resolution."),
-            Pex::ZipApp(zip_app) => zip_app,
-        };
-        zip_app_pex.resolve(interpreter)
-    }
 
     #[time("debug", "Pex.{}")]
     pub fn resolve(
@@ -321,28 +286,21 @@ impl<'a> Pex<'a> {
     ) -> anyhow::Result<(
         Interpreter,
         IndexSet<&'a str>,
-        impl Resources<'a>,
+        Scripts,
         Vec<(&'a Pex<'a>, IndexSet<&'a str>)>,
     )> {
-        let zip_app_pex = match self {
-            Pex::Loose(_) => todo!("XXX: Implement loose PEX wheel resolution."),
-            Pex::Packed(_) => todo!("XXX: Implement packed PEX wheel resolution."),
-            Pex::ZipApp(zip_app) => zip_app,
-        };
+        let mut resources = self.resources()?;
+        let identification_script = IdentifyInterpreter::read(&mut resources)?;
 
-        let mut resources = zip_app_pex.resources()?;
-        let identification_script = InterpreterIdentificationScript::read(&mut resources)?;
-
-        let pex_info = self.info();
         let interpreter_constraints =
-            InterpreterConstraints::try_from(&pex_info.interpreter_constraints)?;
+            InterpreterConstraints::try_from(&self.info.interpreter_constraints)?;
         let mut errors = Vec::new();
         if let Some(python_exe) = python_exe
             && let Ok(interpreter) = Interpreter::load(python_exe, &identification_script)
             && interpreter_constraints.contains(&interpreter)
             && search_path.contains(python_exe)
         {
-            match zip_app_pex.resolve(&interpreter) {
+            match self.resolve_wheels(&interpreter) {
                 Ok(selected_wheels) => {
                     let additional_resolves = additional_pexes
                         .map(|pex| pex.resolve_wheels(&interpreter).map(|wheels| (pex, wheels)))
@@ -355,7 +313,7 @@ impl<'a> Pex<'a> {
 
         let interpreters_to_try = interpreter_constraints
             .iter_possibly_compatible_python_exes(
-                pex_info.interpreter_selection_strategy.into(),
+                self.info.interpreter_selection_strategy.into(),
                 search_path,
             )?
             .collect::<Vec<_>>();
@@ -374,7 +332,7 @@ impl<'a> Pex<'a> {
                 },
             )
             .filter(|interpreter| interpreter_constraints.contains(interpreter))
-            .map(|interpreter| match zip_app_pex.resolve(&interpreter) {
+            .map(|interpreter| match self.resolve_wheels(&interpreter) {
                 Ok(selected_wheels) => Ok((interpreter, selected_wheels)),
                 Err(err) => Err((interpreter, err)),
             });
@@ -403,7 +361,7 @@ impl<'a> Pex<'a> {
             return Ok((interpreter, selected_wheels, resources, additional_resolves));
         }
 
-        let reqs = &self.info().requirements;
+        let reqs = &self.info.requirements;
         let requirement_count = reqs.len();
         let requirements = if requirement_count == 1 {
             "requirement"
@@ -415,7 +373,7 @@ impl<'a> Pex<'a> {
             anyhow!(
                 "Failed to resolve requirements for PEX {path} and resolve errors were obfuscated \
                 by a poisoned lock: {err}",
-                path = zip_app_pex.0.display()
+                path = self.path.display()
             )
         })?;
         let error_count = errors.len();
@@ -433,7 +391,7 @@ impl<'a> Pex<'a> {
             \n\
             Tried resolving using {error_count} {interpreters}:\n\
             {errors}",
-            path = self.path().display(),
+            path = self.path.display(),
             reqs = reqs.iter().map(|req| format!("+ {req}")).join("\n"),
             errors = errors
                 .iter()
@@ -445,6 +403,69 @@ impl<'a> Pex<'a> {
                 ))
                 .join("\n")
         )
+    }
+
+    fn load_wheel_metadata(
+        &'a self,
+        interpreter: &Interpreter,
+        wheel_files: Vec<(&'a str, WheelFile<'a>, usize)>,
+    ) -> anyhow::Result<Vec<(&'a str, WheelMetadata<'a>, usize)>> {
+        let python_version = Version::new([
+            u64::from(interpreter.version.major),
+            u64::from(interpreter.version.minor),
+            u64::from(interpreter.version.micro),
+        ]);
+        match self.layout {
+            Layout::Loose => todo!("Loose PEX wheel metadata reading."),
+            Layout::Packed => self.yyy(python_version, wheel_files),
+            Layout::ZipApp => self.xxx(python_version, wheel_files),
+        }
+    }
+
+    fn xxx(
+        &'a self,
+        python_version: Version,
+        wheel_files: Vec<(&'a str, WheelFile<'a>, usize)>,
+    ) -> anyhow::Result<Vec<(&'a str, WheelMetadata<'a>, usize)>> {
+        let mut wheels = Vec::with_capacity(wheel_files.len());
+        let mut zip = ZipArchive::new(File::open(self.path)?)?;
+        for (file_name, wheel_file, rank) in wheel_files {
+            let wheel = WheelMetadata::parse(
+                wheel_file,
+                ZipAppPexMetadataReader {
+                    zip: &mut zip,
+                    wheel_file_name: file_name,
+                },
+            )?;
+            if let Some(requires_python) = &wheel.requires_python
+                && !requires_python.contains(&python_version)
+            {
+                continue;
+            }
+            wheels.push((file_name, wheel, rank));
+        }
+        Ok(wheels)
+    }
+
+    fn yyy(
+        &'a self,
+        python_version: Version,
+        wheel_files: Vec<(&'a str, WheelFile<'a>, usize)>,
+    ) -> anyhow::Result<Vec<(&'a str, WheelMetadata<'a>, usize)>> {
+        let mut wheels = Vec::with_capacity(wheel_files.len());
+        for (file_name, wheel_file, rank) in wheel_files {
+            let wheel = WheelMetadata::parse(
+                wheel_file,
+                WhlMetadataReader::new(self.path.join(".deps").join(file_name))?,
+            )?;
+            if let Some(requires_python) = &wheel.requires_python
+                && !requires_python.contains(&python_version)
+            {
+                continue;
+            }
+            wheels.push((file_name, wheel, rank));
+        }
+        Ok(wheels)
     }
 }
 
@@ -458,15 +479,15 @@ mod tests {
     use indexmap::{IndexSet, indexset};
     use interpreter::{Interpreter, SearchPath};
     use pep508_rs::{Requirement, VersionOrUrl};
-    use resources::{InterpreterIdentificationScript, Resources};
     use rstest::{fixture, rstest};
-    use testing::{embedded_resources, interpreter_identification_script, python_exe, tmp_dir};
+    use scripts::{IdentifyInterpreter, Scripts};
+    use testing::{embedded_scripts, interpreter_identification_script, python_exe, tmp_dir};
     use url::Url;
     use zip::write::SimpleFileOptions;
     use zip::{CompressionMethod, ZipWriter};
 
     use crate::wheel::WheelFile;
-    use crate::{Pex, PexPath, WheelResolver};
+    use crate::{Pex, PexPath};
 
     const EXPECTED_ANSICOLORS_PEX_WHEELS: [&str; 1] = ["ansicolors==1.1.8"];
 
@@ -502,7 +523,7 @@ mod tests {
         tmp_dir: PathBuf,
         python_exe: &Path,
         ansicolors_pex: PathBuf,
-        mut embedded_resources: impl Resources<'static>,
+        mut embedded_scripts: Scripts,
     ) -> PathBuf {
         let pex = tmp_dir.join("requests.pex");
         assert!(
@@ -526,7 +547,7 @@ mod tests {
                 .unwrap();
         let file_options =
             SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
-        embedded_resources
+        embedded_scripts
             .inject_scripts(&mut zip, file_options)
             .unwrap();
         zip.finish().unwrap();
@@ -566,23 +587,19 @@ mod tests {
     fn test_resolve_single(
         requests_pex: PathBuf,
         python_exe: &Path,
-        interpreter_identification_script: InterpreterIdentificationScript,
+        interpreter_identification_script: IdentifyInterpreter,
     ) {
-        let pex = match Pex::load(&requests_pex).unwrap() {
-            Pex::ZipApp(zip_app_pex) => zip_app_pex,
-            _ => panic!("Unexpected pex type"),
-        };
+        let pex = Pex::load(&requests_pex).unwrap();
         let interpreter =
             Interpreter::load(python_exe, &interpreter_identification_script).unwrap();
-        let wheels = pex.resolve(&interpreter).unwrap();
-
+        let wheels = pex.resolve_wheels(&interpreter).unwrap();
         assert_wheels(wheels, EXPECTED_REQUESTS_PEX_WHEELS);
     }
 
     #[rstest]
     fn test_resolve_additional(requests_pex: PathBuf, python_exe: &Path) {
         let pex = Pex::load(&requests_pex).unwrap();
-        let pex_path = PexPath::from_pex_info(pex.info(), false);
+        let pex_path = PexPath::from_pex_info(&pex.info, false);
         let additional_pexes = pex_path.load_pexes().unwrap();
         let search_path = SearchPath::known(indexset![python_exe.to_path_buf()]);
         let (_, wheels, _, additional_resolves) = pex
