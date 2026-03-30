@@ -1,6 +1,8 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
+#![deny(clippy::all)]
+
 mod downloads;
 mod metadata;
 mod rust_toolchain;
