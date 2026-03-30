@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::string::ToString;
 use std::sync::LazyLock;
-use std::{cmp, env, io};
+use std::{cmp, env};
 
 use anyhow::{anyhow, bail};
 use build_system::{Target, all_targets, classify_targets, ensure_tools_installed};
@@ -149,8 +149,10 @@ fn main() -> anyhow::Result<()> {
                 }
             }
             PrintFormat::Json => {
-                let stdout = io::stdout().lock();
-                serde_json::to_writer(stdout, &all_targets)?;
+                println!(
+                    "{target_array}",
+                    target_array = serde_json::to_string(&all_targets)?
+                );
             }
         }
         return Ok(());
