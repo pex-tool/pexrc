@@ -34,33 +34,49 @@ jobs:
           cargo +nightly fmt --check --all
           cargo --color always clippy --locked --all
 
-  cross-build:
-    name: "Cross-build pexrc"
-    needs: setup
+  setup-cross-build:
+    name: "Determine Cross-build Targets"
     runs-on: ubuntu-24.04-arm
-    # N.B.: We break these up just to save wall time; they all can be built on 1 machine in ~40
-    # minutes; this gets us to a ~8 minute long-pole.
-    strategy:
-      matrix:
-        include:
-          - target: aarch64-apple-darwin
-          - target: aarch64-pc-windows-gnullvm
-          - target: aarch64-unknown-linux-gnu
-          - target: aarch64-unknown-linux-musl
-          - target: armv7-unknown-linux-gnueabihf
-          - target: powerpc64le-unknown-linux-gnu
-          - target: riscv64gc-unknown-linux-gnu
-          - target: s390x-unknown-linux-gnu
-          - target: x86_64-apple-darwin
-          - target: x86_64-pc-windows-gnu
-          - target: x86_64-unknown-linux-gnu
-          - target: x86_64-unknown-linux-musl
+    needs: setup
+    outputs:
+      targets: ${{ steps.determine-targets.outputs.targets }}
     steps:
       - name: Checkout Pexrc
         uses: actions/checkout@v6
+      - name: Build Package Tool
+        run: cargo --color always build --release -p package
+      - name: Upload package binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: package
+          path: |
+            target/release/package
+            .gitignore
+      - name: Determine Targets
+        id: determine-targets
+        run: echo targets="$(target/release/package --print-targets json)" >> "$GITHUB_OUTPUT"
+
+  cross-build:
+    name: "Cross-build pexrc"
+    needs: setup-cross-build
+    runs-on: ubuntu-24.04-arm
+    # N.B.: We break these up just to save wall time; they all can be built on 1 machine in ~40
+    # minutes; this gets us to a ~12 minute long-pole.
+    strategy:
+      matrix:
+        target: ${{ fromJSON(needs.setup-cross-build.outputs.targets) }}
+    steps:
+      - name: Checkout Pexrc
+        uses: actions/checkout@v6
+      - name: Download package binary
+        uses: actions/download-artifact@v7
+        with:
+          name: package
       - name: Build pexrc binary for all targets.
         run: |
-          cargo --color always run -p package -- \
+          chmod +x target/release/package
+          export CARGO="$(command -v cargo)"
+          target/release/package \
             --color always --profile release -o dist --target ${{ matrix.target }}
       - name: Generate Release Hashes Manifest.
         run: uv run dev-cmd --color always generate-release-hashes -- -i dist

@@ -1507,6 +1507,7 @@ dependencies = [
  "fs-err",
  "owo-colors",
  "platform",
+ "serde_json",
  "sha2",
 ]
 

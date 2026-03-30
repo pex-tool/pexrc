@@ -351,6 +351,8 @@ fn binstall(
     let result = Command::new(cargo)
         .env("PATH", search_path)
         .args(["binstall", "--no-confirm", spec])
+        // N.B.: binstall logs to stdout :/; so we squelch.
+        .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()?
         .wait_with_output()?;

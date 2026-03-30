@@ -8,18 +8,22 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::string::ToString;
 use std::sync::LazyLock;
-use std::{cmp, env};
+use std::{cmp, env, io};
 
 use anyhow::{anyhow, bail};
 use build_system::{Target, all_targets, classify_targets, ensure_tools_installed};
 use cache::fingerprint_file;
 use clap::builder::Str;
-use clap::{ArgAction, Parser};
+use clap::{ArgAction, Parser, ValueEnum};
 use fs_err as fs;
 use owo_colors::OwoColorize;
 use sha2::{Digest, Sha256};
 
-static CARGO: LazyLock<PathBuf> = LazyLock::new(|| env!("CARGO").into());
+static CARGO: LazyLock<PathBuf> = LazyLock::new(|| {
+    env::var_os("CARGO")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| env!("CARGO").into())
+});
 
 static CARGO_MANIFEST_PATH: LazyLock<anyhow::Result<PathBuf>> = LazyLock::new(|| {
     let process = Command::new(CARGO.as_path())
@@ -75,6 +79,12 @@ static AVAILABLE_TARGETS: LazyLock<Vec<Str>> = LazyLock::new(|| {
     available_targets
 });
 
+#[derive(Clone, ValueEnum)]
+enum PrintFormat {
+    Text,
+    Json,
+}
+
 /// Pexrc Packaging System.
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -95,12 +105,17 @@ struct Cli {
 
     #[arg(short = 'o', long)]
     dist_dir: Option<PathBuf>,
+
+    /// Print the available targets to stdout and exit.
+    #[arg(long, value_enum)]
+    print_targets: Option<PrintFormat>,
 }
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     env_logger::Builder::new()
         .filter_level(cli.verbosity.into())
+        .target(env_logger::Target::Stderr)
         .init();
     cli.color.write_global();
 
@@ -124,6 +139,26 @@ fn main() -> anyhow::Result<()> {
 
     let rust_toolchain_contents = fs::read_to_string(cargo_manifest_dir.join("rust-toolchain"))?;
     let classified_targets = classify_targets(&rust_toolchain_contents, &glibc)?;
+
+    if let Some(print_format) = cli.print_targets {
+        let mut all_targets = classified_targets
+            .iter_all_targets()
+            .map(Target::as_str)
+            .collect::<Vec<_>>();
+        all_targets.sort();
+        match print_format {
+            PrintFormat::Text => {
+                for target in all_targets {
+                    println!("{target}");
+                }
+            }
+            PrintFormat::Json => {
+                let stdout = io::stdout().lock();
+                serde_json::to_writer(stdout, &all_targets)?;
+            }
+        }
+        return Ok(());
+    }
 
     let profile = cli.profile.as_deref().unwrap_or("dev");
     let (profile_dir_name, profile_target_suffix) = if profile == "dev" {
