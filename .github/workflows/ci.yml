@@ -46,7 +46,7 @@ jobs:
       - name: Determine Targets
         run: |
           cargo --color always build --release -p package
-          target/release/package --print-targets json >> "$GITHUB_OUTPUT"
+          target/release/package --print-targets json 2>/dev/null >> "$GITHUB_OUTPUT"
       - name: Upload package binary
         uses: actions/upload-artifact@v7
         with:
