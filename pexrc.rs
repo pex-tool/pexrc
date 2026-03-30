@@ -47,6 +47,7 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     env_logger::Builder::new()
         .filter_level(cli.verbosity.into())
+        .target(env_logger::Target::Stderr)
         .init();
     cli.color.write_global();
 
