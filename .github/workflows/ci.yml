@@ -34,27 +34,28 @@ jobs:
           cargo +nightly fmt --check --all
           cargo --color always clippy --locked --all
 
+  setup-cross-build:
+    name: "Determine Cross-build Targets"
+    runs-on: ubuntu-24.04-arm
+    needs: setup
+    outputs:
+      targets: ${{ steps.determine-targets.outputs.targets }}
+    steps:
+      - name: Checkout Pexrc
+        uses: actions/checkout@v6
+      - name: Determine Targets
+        run: |
+          cargo --color always run -p package -- --print-targets json >> "$GITHUB_OUTPUT"
+
   cross-build:
     name: "Cross-build pexrc"
-    needs: setup
+    needs: setup-cross-build
     runs-on: ubuntu-24.04-arm
     # N.B.: We break these up just to save wall time; they all can be built on 1 machine in ~40
-    # minutes; this gets us to a ~8 minute long-pole.
+    # minutes; this gets us to a ~12 minute long-pole.
     strategy:
       matrix:
-        include:
-          - target: aarch64-apple-darwin
-          - target: aarch64-pc-windows-gnullvm
-          - target: aarch64-unknown-linux-gnu
-          - target: aarch64-unknown-linux-musl
-          - target: armv7-unknown-linux-gnueabihf
-          - target: powerpc64le-unknown-linux-gnu
-          - target: riscv64gc-unknown-linux-gnu
-          - target: s390x-unknown-linux-gnu
-          - target: x86_64-apple-darwin
-          - target: x86_64-pc-windows-gnu
-          - target: x86_64-unknown-linux-gnu
-          - target: x86_64-unknown-linux-musl
+        target: ${{ fromJSON(needs.setup-cross-build.outputs.targets) }}
     steps:
       - name: Checkout Pexrc
         uses: actions/checkout@v6
