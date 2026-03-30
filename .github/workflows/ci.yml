@@ -74,6 +74,7 @@ jobs:
           name: package
       - name: Build pexrc binary for all targets.
         run: |
+          chmod +x target/release/package
           target/release/package \
             --color always --profile release -o dist --target ${{ matrix.target }}
       - name: Generate Release Hashes Manifest.
