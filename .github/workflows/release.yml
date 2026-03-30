@@ -29,43 +29,33 @@ jobs:
     needs: setup
     runs-on: ubuntu-24.04-arm
     # N.B.: We break these up just to save wall time; they all can be built on 1 machine in ~40
-    # minutes; this gets us to a ~20 minute long-pole.
+    # minutes; this gets us to a ~8 minute long-pole.
     strategy:
       matrix:
         include:
-          - artifact-name: pexrc-shard1
-            targets: >-
-              --target aarch64-unknown-linux-gnu
-              --target aarch64-unknown-linux-musl
-          - artifact-name: pexrc-shard2
-            targets: >-
-              --target armv7-unknown-linux-gnueabihf
-              --target powerpc64le-unknown-linux-gnu
-          - artifact-name: pexrc-shard3
-            targets: >-
-              --target riscv64gc-unknown-linux-gnu
-              --target s390x-unknown-linux-gnu
-          - artifact-name: pexrc-shard4
-            targets: >-
-              --target x86_64-unknown-linux-gnu
-              --target x86_64-unknown-linux-musl
-          - artifact-name: pexrc-shard5
-            targets: >-
-              --target aarch64-apple-darwin
-              --target x86_64-apple-darwin
-          - artifact-name: pexrc-shard6
-            targets: >-
-              --target aarch64-pc-windows-gnullvm
-              --target x86_64-pc-windows-gnu
+          - target: aarch64-apple-darwin
+          - target: aarch64-pc-windows-gnullvm
+          - target: aarch64-unknown-linux-gnu
+          - target: aarch64-unknown-linux-musl
+          - target: armv7-unknown-linux-gnueabihf
+          - target: powerpc64le-unknown-linux-gnu
+          - target: riscv64gc-unknown-linux-gnu
+          - target: s390x-unknown-linux-gnu
+          - target: x86_64-apple-darwin
+          - target: x86_64-pc-windows-gnu
+          - target: x86_64-unknown-linux-gnu
+          - target: x86_64-unknown-linux-musl
     steps:
       - name: Checkout Pexrc
         uses: actions/checkout@v6
       - name: Build pexrc binary for all targets.
-        run: cargo run -p package -- --color always -o dist --profile release ${{ matrix.targets }}
+        run: |
+          cargo --color always run -p package -- \
+            --color always -o dist --profile release --target ${{ matrix.target }}
       - name: Upload pexrc artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.artifact-name }}
+          name: ${{ matrix.target }}
           path: |
             dist/pexrc*
             .gitignore
@@ -116,7 +106,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v7
       - name: Generate Release Hashes Manifest.
-        run: uv run dev-cmd generate-release-hashes -- -i dist -o dist/hashes.md
+        run: uv run dev-cmd --color always generate-release-hashes -- -i dist -o dist/hashes.md
       - name: Generate pexrc ${{ needs.determine-tag.outputs.release-tag }} artifact attestations
         uses: actions/attest@v4
         with:
