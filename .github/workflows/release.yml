@@ -41,7 +41,7 @@ jobs:
           (
             echo 'targets<<EOF'
             target/release/package --print-targets json
-            echo EOF
+            echo -e '\nEOF'
           ) >> "$GITHUB_OUTPUT"
       - name: Upload package binary
         uses: actions/upload-artifact@v7
