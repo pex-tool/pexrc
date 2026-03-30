@@ -54,12 +54,7 @@ jobs:
             .gitignore
       - name: Determine Targets
         id: determine-targets
-        run: |
-          (
-            echo 'targets<<EOF'
-            target/release/package -q --print-targets json
-            echo -e '\nEOF'
-          ) >> "$GITHUB_OUTPUT"
+        run: echo targets="$(target/release/package --print-targets json)" >> "$GITHUB_OUTPUT"
 
   cross-build:
     name: "Cross-build pexrc"
