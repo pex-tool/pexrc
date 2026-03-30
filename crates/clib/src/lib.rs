@@ -1,6 +1,8 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
+#![deny(clippy::all)]
+
 use std::borrow::Cow;
 use std::ffi::{CStr, CString, c_char, c_int};
 use std::path::Path;

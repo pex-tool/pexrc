@@ -1,6 +1,8 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
+#![deny(clippy::all)]
+
 use std::io::{ErrorKind, Read, Seek, Write};
 use std::path::Path;
 

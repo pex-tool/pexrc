@@ -151,17 +151,17 @@ fn populate_user_code_from_directory_pex<'a>(
         .filter_entry(|entry| !excludes.contains(entry.path()))
         .collect::<Result<Vec<_>, _>>()?;
     user_code.into_par_iter().try_for_each(|entry| {
-        if entry.file_type().is_dir() {
-            fs::create_dir_all(entry.path())
-        } else {
-            if let Some(parent) = entry.path().parent() {
-                fs::create_dir_all(parent)?;
-            }
-            let dst = site_packages_path
-                .join(entry.path().strip_prefix(directory_pex.path).expect(
+        let dst_path =
+            site_packages_path.join(entry.path().strip_prefix(directory_pex.path).expect(
                 "Walked directory PEX paths should be child paths of the directory PEX root dir.",
             ));
-            fs::copy(entry.path(), dst).map(|_| ())
+        if entry.file_type().is_dir() {
+            fs::create_dir_all(dst_path)
+        } else {
+            if let Some(parent) = dst_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::copy(entry.path(), dst_path).map(|_| ())
         }
     })?;
 
