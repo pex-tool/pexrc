@@ -57,7 +57,7 @@ jobs:
         run: |
           (
             echo 'targets<<EOF'
-            target/release/package --print-targets json
+            target/release/package -q --print-targets json
             echo -e '\nEOF'
           ) >> "$GITHUB_OUTPUT"
 
