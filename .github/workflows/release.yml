@@ -33,10 +33,11 @@ jobs:
     steps:
       - name: Checkout Pexrc
         uses: actions/checkout@v6
+      - name: Build Package Tool
+        run: cargo --color always build --release -p package
       - name: Determine Targets
-        run: |
-          cargo --color always build --release -p package
-          target/release/package --print-targets json 2>/dev/null >> "$GITHUB_OUTPUT"
+        id: determine-targets
+        run: target/release/package --print-targets json >> "$GITHUB_OUTPUT"
       - name: Upload package binary
         uses: actions/upload-artifact@v7
         with:
