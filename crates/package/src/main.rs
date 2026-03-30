@@ -19,7 +19,11 @@ use fs_err as fs;
 use owo_colors::OwoColorize;
 use sha2::{Digest, Sha256};
 
-static CARGO: LazyLock<PathBuf> = LazyLock::new(|| env!("CARGO").into());
+static CARGO: LazyLock<PathBuf> = LazyLock::new(|| {
+    env::var_os("CARGO")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| env!("CARGO").into())
+});
 
 static CARGO_MANIFEST_PATH: LazyLock<anyhow::Result<PathBuf>> = LazyLock::new(|| {
     let process = Command::new(CARGO.as_path())
