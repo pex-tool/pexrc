@@ -154,21 +154,26 @@ impl<'a> Display for WheelFile<'a> {
     }
 }
 
-pub struct WheelMetadata {
+pub struct WheelMetadata<'a> {
+    pub(crate) file_name: &'a str,
     pub(crate) project_name: PackageName,
     pub(crate) version: Version,
     pub(crate) requires_dists: Vec<Requirement<Url>>,
     pub(crate) requires_python: Option<VersionSpecifiers>,
 }
 
-pub trait MetadataReader {
-    fn read(&mut self, wheel_file_name: &str, path_components: &[&str]) -> anyhow::Result<String>;
+pub trait MetadataReader<'a> {
+    fn read(
+        &mut self,
+        wheel_file_name: &'a str,
+        path_components: &[&str],
+    ) -> anyhow::Result<String>;
 }
 
-impl WheelMetadata {
+impl<'a> WheelMetadata<'a> {
     pub fn parse(
-        wheel_file: WheelFile,
-        metadata_reader: &mut impl MetadataReader,
+        wheel_file: WheelFile<'a>,
+        metadata_reader: &mut impl MetadataReader<'a>,
     ) -> anyhow::Result<Self> {
         let dist_info_dir = format!(
             "{project_name}-{version}.dist-info",
@@ -193,6 +198,7 @@ impl WheelMetadata {
         };
 
         Ok(Self {
+            file_name: wheel_file.file_name,
             project_name: wheel_file.project_name,
             version: wheel_file.version,
             requires_dists,
@@ -334,7 +340,7 @@ mod tests {
         assert_eq!("2.32.5", wheel_file.raw_version);
 
         struct RequestsMetadataReader(ZipArchive<File>);
-        impl MetadataReader for RequestsMetadataReader {
+        impl<'a> MetadataReader<'a> for RequestsMetadataReader {
             fn read(&mut self, _: &str, path_components: &[&str]) -> anyhow::Result<String> {
                 Ok(io::read_to_string(
                     self.0.by_name(&path_components.join("/"))?,

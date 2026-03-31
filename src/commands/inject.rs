@@ -77,10 +77,10 @@ fn inject_pex_dir(pex: &Path, clibs: Option<&HashSet<&Path>>) -> anyhow::Result<
         }
     }
 
-    let mut resources = Scripts::Embedded;
+    let mut scripts = Scripts::Embedded;
     let pex_dir = dest_pex.path().join("__pex__");
     fs::create_dir_all(&pex_dir)?;
-    resources.write_scripts(dest_pex.path())?;
+    scripts.write(dest_pex.path())?;
 
     let dst = pex.with_extension("pexrc");
     let clib_dir = pex_dir.join(".clib");
@@ -187,9 +187,8 @@ fn inject_pex_zip(
         }
     }
 
-    let mut resources = Scripts::Embedded;
     dst_zip.add_directory("__pex__", directory_options)?;
-    resources.inject_scripts(&mut dst_zip, zstd_file_options)?;
+    Scripts::Embedded.inject(&mut dst_zip, zstd_file_options)?;
 
     let deflate_options =
         SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);

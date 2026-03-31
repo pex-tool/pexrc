@@ -71,7 +71,7 @@ impl Scripts {
         }
     }
 
-    pub fn inject_scripts<'a, T: FileOptionExtension + Copy>(
+    pub fn inject<'a, T: FileOptionExtension + Copy>(
         &mut self,
         zip: &'a mut ZipWriter<impl Write + Seek>,
         file_options: FileOptions<'a, T>,
@@ -92,7 +92,7 @@ impl Scripts {
         Ok(())
     }
 
-    pub fn write_scripts(&mut self, dest_dir: &Path) -> anyhow::Result<()> {
+    pub fn write(&mut self, dest_dir: &Path) -> anyhow::Result<()> {
         let scripts_dir = dest_dir.join(HOST_REL_PATH.as_path());
         fs::create_dir_all(&scripts_dir)?;
         for resource_path in Script::iter() {

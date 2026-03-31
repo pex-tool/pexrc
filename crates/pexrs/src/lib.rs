@@ -108,15 +108,9 @@ fn prepare_venv<'a>(
             &mut resolve.scripts,
             pex.info.venv_system_site_packages,
         )?;
-        populate(
-            &venv,
-            &venv_dir,
-            &pex,
-            &resolve.selected_wheels,
-            &mut resolve.scripts,
-        )?;
-        for (additional_pex, selected_wheels) in resolve.additional_wheels {
-            populate_user_code_and_wheels(&venv, additional_pex, &selected_wheels, false)?;
+        populate(&venv, &venv_dir, &pex, resolve.wheels, &mut resolve.scripts)?;
+        for (additional_pex, resolved_wheels) in resolve.additional_wheels {
+            populate_user_code_and_wheels(&venv, additional_pex, resolved_wheels, false)?;
         }
         Ok(venv.interpreter)
     })? {
@@ -135,8 +129,8 @@ fn prepare_venv<'a>(
         Virtualenv::enclosing(venv_interpreter)
     } else {
         debug!("Loading cached venv at {path}", path = venv_dir.display());
-        let mut resources = pex.scripts()?;
-        Virtualenv::load(Cow::Owned(venv_dir), &mut resources)
+        let mut scripts = pex.scripts()?;
+        Virtualenv::load(Cow::Owned(venv_dir), &mut scripts)
     }
 }
 
