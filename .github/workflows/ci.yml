@@ -56,23 +56,23 @@ jobs:
         id: create-matrix
         run: |
           CHUNK_SIZE=2
-          echo -e "matrix<<EOF\n$(
-            target/release/package --print-targets json | \
-              jq --arg cs $CHUNK_SIZE '
-                [
-                  . | length as $len
-                  | range(0; $len; $cs | tonumber) as $idx
-                  | {
-                    shard: (
-                      ($idx / ($cs | tonumber)) + 1 | tostring
-                      + " of "
-                      + (($len / ($cs | tonumber)) | ceil | tostring)
-                    ),
-                    targets: .[$idx:$idx+($cs | tonumber)] | map("--target " + .) | join(" ")
-                  }
-                ]
-              '
-          )\nEOF" | tee -a "$GITHUB_OUTPUT"
+          echo 'matrix<<EOF' >> "$GITHUB_OUTPUT"
+          target/release/package --print-targets json | \
+            jq --arg cs $CHUNK_SIZE '
+              [
+                . | length as $len
+                | range(0; $len; $cs | tonumber) as $idx
+                | {
+                  shard: (
+                    ($idx / ($cs | tonumber)) + 1 | tostring
+                    + " of "
+                    + (($len / ($cs | tonumber)) | ceil | tostring)
+                  ),
+                  targets: .[$idx:$idx+($cs | tonumber)] | map("--target " + .) | join(" ")
+                }
+              ]
+            ' | tee -a "$GITHUB_OUTPUT"
+          echo 'EOF' >> "$GITHUB_OUTPUT"
 
   cross-build:
     name: "Cross-build pexrc - shard ${{ matrix.shard }}"
