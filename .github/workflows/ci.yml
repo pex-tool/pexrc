@@ -56,25 +56,23 @@ jobs:
         id: create-matrix
         run: |
           CHUNK_SIZE=2
-          echo matrix=$(
+          echo matrix="$(
             target/release/package --print-targets json | \
               jq -c --arg cs $CHUNK_SIZE '
-                {
-                  include: [
-                    . | length as $len
-                    | range(0; $len; $cs | tonumber) as $idx
-                    | {
-                      shard: (
-                        ($idx / ($cs | tonumber)) + 1 | tostring
-                        + " of "
-                        + (($len / ($cs | tonumber)) | ceil | tostring)
-                      ),
-                      targets: .[$idx:$idx+($cs | tonumber)] | map("--target " + .) | join(" ")
-                    }
-                  ]
-                }
+                [
+                  . | length as $len
+                  | range(0; $len; $cs | tonumber) as $idx
+                  | {
+                    shard: (
+                      ($idx / ($cs | tonumber)) + 1 | tostring
+                      + " of "
+                      + (($len / ($cs | tonumber)) | ceil | tostring)
+                    ),
+                    targets: .[$idx:$idx+($cs | tonumber)] | map("--target " + .) | join(" ")
+                  }
+                ]
               '
-          ) >> "$GITHUB_OUTPUT"
+          )" | tee -a "$GITHUB_OUTPUT"
 
   cross-build:
     name: "Cross-build pexrc - shard ${{ matrix.shard }}"
@@ -83,7 +81,8 @@ jobs:
     # N.B.: We break these up just to save wall time; they all can be built on 1 machine in ~40
     # minutes; this gets us to a ~15 minute long-pole using CHUNK_SIZE=2 in setup-cross-build.
     strategy:
-      matrix: ${{ fromJSON(needs.setup-cross-build.outputs.matrix) }}
+      matrix:
+        include: ${{ fromJSON(needs.setup-cross-build.outputs.matrix) }}
     steps:
       - name: Checkout Pexrc
         uses: actions/checkout@v6
@@ -106,15 +105,15 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        # N.B.: macos-14 is the oldest non-deprecated ARM Mac runner.
         include:
           - name: Linux aarch64
             os: ubuntu-22.04-arm
           - name: Linux x86_64
             os: ubuntu-22.04
           - name: Mac aarch64
-            os: macos-14
+            os: macos-15
           - name: Mac x86_64
+            # N.B.: also macos-15, but self-hosted.
             os: macos-x86_64
           - name: Windows aarch64
             os: windows-11-arm
