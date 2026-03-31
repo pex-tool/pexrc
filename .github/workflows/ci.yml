@@ -71,8 +71,9 @@ jobs:
                   targets: .[$idx:$idx+($cs | tonumber)] | map("--target " + .) | join(" ")
                 }
               ]
-            ' | tee -a "$GITHUB_OUTPUT"
+            ' >> "$GITHUB_OUTPUT"
           echo 'EOF' >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
 
   cross-build:
     name: "Cross-build pexrc - shard ${{ matrix.shard }}"
