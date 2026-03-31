@@ -100,16 +100,22 @@ fn prepare_venv<'a>(
     let search_path = SearchPath::from_env()?;
     let venv_dir = venv_dir(Some(python.as_ref()), &pex, &search_path, &additional_pexes)?;
     if let Some(venv_interpreter) = atomic_dir(&venv_dir, |work_dir| {
-        let (interpreter, selected_wheels, mut resources, additional_pexes) =
+        let mut resolve =
             pex.resolve(Some(python.as_ref()), additional_pexes.iter(), search_path)?;
         let venv = Virtualenv::create(
-            interpreter,
+            resolve.interpreter,
             Cow::Borrowed(work_dir),
-            &mut resources,
+            &mut resolve.scripts,
             pex.info.venv_system_site_packages,
         )?;
-        populate(&venv, &venv_dir, &pex, &selected_wheels, &mut resources)?;
-        for (additional_pex, selected_wheels) in additional_pexes {
+        populate(
+            &venv,
+            &venv_dir,
+            &pex,
+            &resolve.selected_wheels,
+            &mut resolve.scripts,
+        )?;
+        for (additional_pex, selected_wheels) in resolve.additional_selected_wheels {
             populate_user_code_and_wheels(&venv, additional_pex, &selected_wheels, false)?;
         }
         Ok(venv.interpreter)
@@ -129,7 +135,7 @@ fn prepare_venv<'a>(
         Virtualenv::enclosing(venv_interpreter)
     } else {
         debug!("Loading cached venv at {path}", path = venv_dir.display());
-        let mut resources = pex.resources()?;
+        let mut resources = pex.scripts()?;
         Virtualenv::load(Cow::Owned(venv_dir), &mut resources)
     }
 }

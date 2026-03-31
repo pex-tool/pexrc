@@ -50,19 +50,31 @@ impl<'a> WheelFile<'a> {
         // See: https://packaging.python.org/en/latest/specifications/binary-distribution-format/#file-name-convention
         // {distribution}-{version}(-{build tag})?-{python tag}-{abi tag}-{platform tag}.whl
         if !file_name.ends_with(".whl") {
-            bail!("337")
+            bail!("Not a wheel file name {file_name}")
         }
 
         let (raw_project_name, raw_version, build_tag, python_tag, abi_tag, platform_tag) = {
             let mut trailing_components = file_name[0..file_name.len() - 4].rsplitn(4, "-");
-            let platform_tag = trailing_components.next().ok_or_else(|| anyhow!("338"))?;
-            let abi_tag = trailing_components.next().ok_or_else(|| anyhow!("339"))?;
-            let python_tag = trailing_components.next().ok_or_else(|| anyhow!("340"))?;
-            let rest = trailing_components.next().ok_or_else(|| anyhow!("341"))?;
+            let platform_tag = trailing_components
+                .next()
+                .ok_or_else(|| anyhow!("Failed to parse platform tag from {file_name}"))?;
+            let abi_tag = trailing_components
+                .next()
+                .ok_or_else(|| anyhow!("Failed to parse abi tag from {file_name}"))?;
+            let python_tag = trailing_components
+                .next()
+                .ok_or_else(|| anyhow!("Failed to parse python tag from {file_name}"))?;
+            let rest = trailing_components
+                .next()
+                .ok_or_else(|| anyhow!("Failed to parse wheel tags from {file_name}"))?;
 
             let mut leading_components = rest.splitn(3, "-");
-            let project_name = leading_components.next().ok_or_else(|| anyhow!("342"))?;
-            let version = leading_components.next().ok_or_else(|| anyhow!("343"))?;
+            let project_name = leading_components
+                .next()
+                .ok_or_else(|| anyhow!("Failed to parse project name from {file_name}"))?;
+            let version = leading_components
+                .next()
+                .ok_or_else(|| anyhow!("Failed to parse version from {file_name}"))?;
             let build_tag = leading_components.next();
 
             (
