@@ -76,7 +76,7 @@ pub struct Resolve<'a> {
     pub interpreter: Interpreter,
     pub selected_wheels: IndexSet<&'a str>,
     pub scripts: Scripts,
-    pub additional_selected_wheels: Vec<(&'a Pex<'a>, IndexSet<&'a str>)>,
+    pub additional_wheels: Vec<(&'a Pex<'a>, IndexSet<&'a str>)>,
 }
 
 impl<'a> Pex<'a> {
@@ -287,14 +287,14 @@ impl<'a> Pex<'a> {
         {
             match self.resolve_wheels(&interpreter) {
                 Ok(selected_wheels) => {
-                    let additional_selected_wheels = additional_pexes
+                    let additional_wheels = additional_pexes
                         .map(|pex| pex.resolve_wheels(&interpreter).map(|wheels| (pex, wheels)))
                         .collect::<anyhow::Result<Vec<_>>>()?;
                     return Ok(Resolve {
                         interpreter,
                         selected_wheels,
                         scripts,
-                        additional_selected_wheels,
+                        additional_wheels,
                     });
                 }
                 Err(err) => errors.push((interpreter.path, err)),
@@ -345,14 +345,14 @@ impl<'a> Pex<'a> {
                 }
             })
         {
-            let additional_selected_wheels = additional_pexes
+            let additional_wheels = additional_pexes
                 .map(|pex| pex.resolve_wheels(&interpreter).map(|wheels| (pex, wheels)))
                 .collect::<anyhow::Result<Vec<_>>>()?;
             return Ok(Resolve {
                 interpreter,
                 selected_wheels,
                 scripts,
-                additional_selected_wheels,
+                additional_wheels,
             });
         }
 
@@ -631,12 +631,8 @@ mod tests {
 
         assert_wheels(resolve.selected_wheels, EXPECTED_REQUESTS_PEX_WHEELS);
 
-        assert_eq!(1, resolve.additional_selected_wheels.len());
-        let (_, additional_wheels) = resolve
-            .additional_selected_wheels
-            .into_iter()
-            .next()
-            .unwrap();
+        assert_eq!(1, resolve.additional_wheels.len());
+        let (_, additional_wheels) = resolve.additional_wheels.into_iter().next().unwrap();
         assert_wheels(additional_wheels, EXPECTED_ANSICOLORS_PEX_WHEELS);
     }
 }

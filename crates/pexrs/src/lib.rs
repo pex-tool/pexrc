@@ -115,7 +115,7 @@ fn prepare_venv<'a>(
             &resolve.selected_wheels,
             &mut resolve.scripts,
         )?;
-        for (additional_pex, selected_wheels) in resolve.additional_selected_wheels {
+        for (additional_pex, selected_wheels) in resolve.additional_wheels {
             populate_user_code_and_wheels(&venv, additional_pex, &selected_wheels, false)?;
         }
         Ok(venv.interpreter)
