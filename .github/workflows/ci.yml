@@ -56,9 +56,9 @@ jobs:
         id: create-matrix
         run: |
           CHUNK_SIZE=2
-          echo matrix="$(
+          echo -e "matrix<<EOF\n$(
             target/release/package --print-targets json | \
-              jq -c --arg cs $CHUNK_SIZE '
+              jq --arg cs $CHUNK_SIZE '
                 [
                   . | length as $len
                   | range(0; $len; $cs | tonumber) as $idx
@@ -72,7 +72,7 @@ jobs:
                   }
                 ]
               '
-          )" | tee -a "$GITHUB_OUTPUT"
+          )\nEOF" | tee -a "$GITHUB_OUTPUT"
 
   cross-build:
     name: "Cross-build pexrc - shard ${{ matrix.shard }}"
