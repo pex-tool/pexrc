@@ -1,12 +1,14 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
+#![deny(clippy::all)]
+
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
 use std::ffi::OsStr;
 use std::io;
 use std::io::BufReader;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
@@ -70,6 +72,13 @@ pub struct Pex<'a> {
     pub layout: Layout,
 }
 
+pub struct Resolve<'a> {
+    pub interpreter: Interpreter,
+    pub selected_wheels: IndexSet<&'a str>,
+    pub scripts: Scripts,
+    pub additional_wheels: Vec<(&'a Pex<'a>, IndexSet<&'a str>)>,
+}
+
 impl<'a> Pex<'a> {
     #[time("debug", "Pex.{}")]
     pub fn load(path: &'a Path) -> anyhow::Result<Self> {
@@ -110,7 +119,7 @@ impl<'a> Pex<'a> {
         }
     }
 
-    pub fn resources(&self) -> anyhow::Result<Scripts> {
+    pub fn scripts(&self) -> anyhow::Result<Scripts> {
         let path = self.path.to_path_buf();
         match self.layout {
             Layout::Packed | Layout::Loose => Ok(Scripts::Loose(path)),
@@ -264,14 +273,9 @@ impl<'a> Pex<'a> {
         python_exe: Option<&Path>,
         additional_pexes: impl Iterator<Item = &'a Pex<'a>>,
         search_path: SearchPath,
-    ) -> anyhow::Result<(
-        Interpreter,
-        IndexSet<&'a str>,
-        Scripts,
-        Vec<(&'a Pex<'a>, IndexSet<&'a str>)>,
-    )> {
-        let mut resources = self.resources()?;
-        let identification_script = IdentifyInterpreter::read(&mut resources)?;
+    ) -> anyhow::Result<Resolve<'a>> {
+        let mut scripts = self.scripts()?;
+        let identification_script = IdentifyInterpreter::read(&mut scripts)?;
 
         let interpreter_constraints =
             InterpreterConstraints::try_from(&self.info.interpreter_constraints)?;
@@ -283,12 +287,17 @@ impl<'a> Pex<'a> {
         {
             match self.resolve_wheels(&interpreter) {
                 Ok(selected_wheels) => {
-                    let additional_resolves = additional_pexes
+                    let additional_wheels = additional_pexes
                         .map(|pex| pex.resolve_wheels(&interpreter).map(|wheels| (pex, wheels)))
                         .collect::<anyhow::Result<Vec<_>>>()?;
-                    return Ok((interpreter, selected_wheels, resources, additional_resolves));
+                    return Ok(Resolve {
+                        interpreter,
+                        selected_wheels,
+                        scripts,
+                        additional_wheels,
+                    });
                 }
-                Err(err) => errors.push((interpreter, err)),
+                Err(err) => errors.push((interpreter.path, err)),
             }
         }
 
@@ -315,10 +324,10 @@ impl<'a> Pex<'a> {
             .filter(|interpreter| interpreter_constraints.contains(interpreter))
             .map(|interpreter| match self.resolve_wheels(&interpreter) {
                 Ok(selected_wheels) => Ok((interpreter, selected_wheels)),
-                Err(err) => Err((interpreter, err)),
+                Err(err) => Err((interpreter.path, err)),
             });
 
-        let errors: Arc<Mutex<Vec<(Interpreter, anyhow::Error)>>> = Arc::new(Mutex::new(errors));
+        let errors: Arc<Mutex<Vec<(PathBuf, anyhow::Error)>>> = Arc::new(Mutex::new(errors));
         if let Some((interpreter, selected_wheels)) =
             resolve_results_iter.find_map_first(|result| match result {
                 Ok((interpreter, selected_wheels)) => Some((interpreter, selected_wheels)),
@@ -326,7 +335,7 @@ impl<'a> Pex<'a> {
                     if let Err(lock_err) = errors.lock().map(|mut errors| {
                         debug!(
                             "Failed to resolve for {python_exe}: {resolve_err}",
-                            python_exe = interpreter.path.display()
+                            python_exe = interpreter.display()
                         );
                         errors.push((interpreter, resolve_err))
                     }) {
@@ -336,10 +345,15 @@ impl<'a> Pex<'a> {
                 }
             })
         {
-            let additional_resolves = additional_pexes
+            let additional_wheels = additional_pexes
                 .map(|pex| pex.resolve_wheels(&interpreter).map(|wheels| (pex, wheels)))
                 .collect::<anyhow::Result<Vec<_>>>()?;
-            return Ok((interpreter, selected_wheels, resources, additional_resolves));
+            return Ok(Resolve {
+                interpreter,
+                selected_wheels,
+                scripts,
+                additional_wheels,
+            });
         }
 
         let reqs = &self.info.requirements;
@@ -380,7 +394,7 @@ impl<'a> Pex<'a> {
                 .map(|(idx, (interpreter, err))| format!(
                     "{idx:>2} {path}: {err}",
                     idx = idx + 1,
-                    path = interpreter.path.display()
+                    path = interpreter.display()
                 ))
                 .join("\n")
         )
@@ -611,14 +625,14 @@ mod tests {
         let pex_path = PexPath::from_pex_info(&pex.info, false);
         let additional_pexes = pex_path.load_pexes().unwrap();
         let search_path = SearchPath::known(indexset![python_exe.to_path_buf()]);
-        let (_, wheels, _, additional_resolves) = pex
+        let resolve = pex
             .resolve(Some(python_exe), additional_pexes.iter(), search_path)
             .unwrap();
 
-        assert_wheels(wheels, EXPECTED_REQUESTS_PEX_WHEELS);
+        assert_wheels(resolve.selected_wheels, EXPECTED_REQUESTS_PEX_WHEELS);
 
-        assert_eq!(1, additional_resolves.len());
-        let (_, additional_wheels) = additional_resolves.into_iter().next().unwrap();
+        assert_eq!(1, resolve.additional_wheels.len());
+        let (_, additional_wheels) = resolve.additional_wheels.into_iter().next().unwrap();
         assert_wheels(additional_wheels, EXPECTED_ANSICOLORS_PEX_WHEELS);
     }
 }
