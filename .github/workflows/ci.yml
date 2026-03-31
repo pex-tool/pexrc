@@ -35,11 +35,11 @@ jobs:
           cargo --color always clippy --locked --all
 
   setup-cross-build:
-    name: "Determine Cross-build Targets"
+    name: "Setup Cross-build Matrix"
     runs-on: ubuntu-24.04-arm
     needs: setup
     outputs:
-      targets: ${{ steps.determine-targets.outputs.targets }}
+      targets: ${{ steps.create-matrix.outputs.matrix }}
     steps:
       - name: Checkout Pexrc
         uses: actions/checkout@v6
@@ -52,11 +52,11 @@ jobs:
           path: |
             target/release/package
             .gitignore
-      - name: Determine Targets
-        id: determine-targets
+      - name: Create Matrix
+        id: create-matrix
         run: |
-          CHUNK_SIZE=5
-          echo targets=$(
+          CHUNK_SIZE=2
+          echo matrix=$(
             target/release/package --print-targets json | \
               jq -c --arg cs $CHUNK_SIZE '
                 {
@@ -83,7 +83,7 @@ jobs:
     # N.B.: We break these up just to save wall time; they all can be built on 1 machine in ~40
     # minutes; this gets us to a ~15 minute long-pole using CHUNK_SIZE=2 in setup-cross-build.
     strategy:
-      matrix: ${{ fromJSON(needs.setup-cross-build.outputs.targets) }}
+      matrix: ${{ fromJSON(needs.setup-cross-build.outputs.matrix) }}
     steps:
       - name: Checkout Pexrc
         uses: actions/checkout@v6
