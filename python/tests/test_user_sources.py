@@ -8,6 +8,7 @@ import subprocess
 from textwrap import dedent
 
 import pytest
+from testing import IS_WINDOWS
 from testing.compare import compare
 
 TYPE_CHECKING = False
@@ -70,15 +71,6 @@ def create_cowsay_pex(
     return pex
 
 
-def assert_result(
-    result,  # type: ProcessResult
-    _is_traditional_pex,  # type: bool
-):
-    # type: (...) -> None
-    result.assert_success()
-    assert "| Moo? |" in result.stdout
-
-
 @pytest.mark.parametrize(
     "layout_args",
     [
@@ -101,8 +93,34 @@ def test_user_sources(
 ):
     # type: (...) -> None
 
+    pex = create_cowsay_pex(tmpdir, *(layout_args + whl_args))
+
+    # N.B.: Neither zipapp nor packed traditional PEXes with deps as whl files work on Windows.
+    is_windows_non_loose_pex = IS_WINDOWS and (
+        os.path.isfile(pex) or os.path.isfile(os.path.join(pex, ".bootstrap"))
+    )
+
+    def test_result(
+        result,  # type: ProcessResult
+        is_traditional_pex,  # type: bool
+    ):
+        # type: (...) -> None
+        if is_traditional_pex and is_windows_non_loose_pex:
+            return
+        result.assert_success()
+        assert "| Moo? |" in result.stdout
+
+    def compare_results(
+        traditional_result,  # type: ProcessResult
+        injected_result,  # type: ProcessResult
+    ):
+        if is_windows_non_loose_pex:
+            return
+        assert traditional_result.stdout == injected_result.stdout
+
     compare(
-        create_cowsay_pex(tmpdir, *(layout_args + whl_args)),
+        pex,
         env=dict(PEXRC_ROOT=os.path.join(str(tmpdir), "pexrc-root")),
-        test_result=assert_result,
+        test_result=test_result,
+        compare_results=compare_results,
     )
