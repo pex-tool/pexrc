@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::{anyhow, bail};
 use fs_err as fs;
 use fs_err::File;
-use indexmap::{IndexMap, IndexSet};
+use indexmap::IndexMap;
 use interpreter::{Interpreter, InterpreterConstraints, SearchPath};
 use itertools::Itertools;
 use log::{Level, debug, warn};
@@ -25,6 +25,7 @@ use pep508_rs::{ExtraName, PackageName, Requirement, VersionOrUrl};
 use rayon::prelude::*;
 use scripts::{IdentifyInterpreter, Scripts};
 use strum_macros::{AsRefStr, EnumString};
+use tempfile::TempPath;
 use url::Url;
 use zip::ZipArchive;
 
@@ -74,9 +75,35 @@ pub struct Pex<'a> {
 
 pub struct Resolve<'a> {
     pub interpreter: Interpreter,
-    pub selected_wheels: IndexSet<&'a str>,
+    pub wheels: ResolvedWheels<'a>,
     pub scripts: Scripts,
-    pub additional_wheels: Vec<(&'a Pex<'a>, IndexSet<&'a str>)>,
+    pub additional_wheels: Vec<(&'a Pex<'a>, ResolvedWheels<'a>)>,
+}
+
+pub struct ResolvedWheels<'a> {
+    wheels: IndexMap<&'a str, Option<TempWheel>>,
+}
+
+impl<'a> ResolvedWheels<'a> {
+    pub fn contains(&self, file_name: &str) -> bool {
+        self.wheels.contains_key(file_name)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.wheels.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.wheels.len()
+    }
+
+    pub fn file_names(&self) -> impl ExactSizeIterator<Item = &'a str> {
+        self.wheels.keys().copied()
+    }
+
+    pub fn into_wheels(self) -> Vec<TempWheel> {
+        self.wheels.into_values().flatten().collect::<Vec<_>>()
+    }
 }
 
 impl<'a> Pex<'a> {
@@ -128,7 +155,7 @@ impl<'a> Pex<'a> {
     }
 
     #[time("debug", "Pex.{}")]
-    fn resolve_wheels(&self, interpreter: &Interpreter) -> anyhow::Result<IndexSet<&str>> {
+    fn resolve_wheels(&'a self, interpreter: &Interpreter) -> anyhow::Result<ResolvedWheels<'a>> {
         let supported_tags: HashMap<Tag, usize> = interpreter
             .supported_tags
             .iter()
@@ -139,42 +166,52 @@ impl<'a> Pex<'a> {
         let wheel_files = self
             .info
             .parse_distributions()
-            .collect::<Result<Vec<(&str, WheelFile)>, _>>()?;
+            .collect::<Result<Vec<_>, _>>()?;
 
-        let wheel_files = wheel_files
+        let ranked_wheel_files = wheel_files
             .into_iter()
-            .filter_map(|(file_name, wheel_file)| {
+            .filter_map(|wheel_file| {
                 for tag in &wheel_file.tags {
                     if let Some(rank) = supported_tags.get(tag) {
-                        return Some((file_name, wheel_file, *rank));
+                        return Some(RankedWheelFile {
+                            wheel_file,
+                            rank: *rank,
+                        });
                     }
                 }
                 None
             })
             .collect::<Vec<_>>();
 
-        let wheels = self.load_wheel_metadata(interpreter, wheel_files)?;
+        let ranked_wheels = self.load_wheel_metadata(interpreter, ranked_wheel_files)?;
 
-        struct WheelInfo<'b>(&'b str, Version, Vec<Requirement<Url>>, usize);
+        struct WheelInfo<'b>(
+            &'b str,
+            Version,
+            Vec<Requirement<Url>>,
+            usize,
+            Option<TempWheel>,
+        );
 
         let mut wheels_by_project_name: HashMap<PackageName, Vec<WheelInfo>> =
-            HashMap::with_capacity(wheels.len());
-        for (file_name, wheel, rank) in wheels {
+            HashMap::with_capacity(ranked_wheels.len());
+        for ranked_wheel in ranked_wheels {
             wheels_by_project_name
-                .entry(wheel.project_name)
+                .entry(ranked_wheel.metadata.project_name)
                 .or_default()
                 .push(WheelInfo(
-                    file_name,
-                    wheel.version,
-                    wheel.requires_dists,
-                    rank,
+                    ranked_wheel.metadata.file_name,
+                    ranked_wheel.metadata.version,
+                    ranked_wheel.metadata.requires_dists,
+                    ranked_wheel.rank,
+                    ranked_wheel.whl,
                 ))
         }
         for wheels in wheels_by_project_name.values_mut() {
-            wheels.sort_by_key(|WheelInfo(_, _, _, rank)| *rank);
+            wheels.sort_by_key(|WheelInfo(_, _, _, rank, _)| *rank);
         }
 
-        let mut resolved_by_project_name: IndexMap<PackageName, &str> =
+        let mut resolved_by_project_name: IndexMap<PackageName, ResolvedWheel> =
             IndexMap::with_capacity(wheels_by_project_name.len());
         let mut indexed_extras: Vec<Vec<ExtraName>> = vec![Vec::new()];
         let mut to_resolve: VecDeque<(Requirement<Url>, usize)> = self
@@ -202,10 +239,8 @@ impl<'a> Pex<'a> {
                         .info
                         .parse_distributions()
                         .filter_map(|result| match result {
-                            Ok((file_name, wheel_file))
-                                if wheel_file.project_name == requirement.name =>
-                            {
-                                Some(file_name)
+                            Ok(wheel_file) if wheel_file.project_name == requirement.name => {
+                                Some(wheel_file.file_name)
                             }
                             _ => None,
                         })
@@ -235,7 +270,7 @@ impl<'a> Pex<'a> {
                         reason = reason,
                     )
                 })?;
-            for WheelInfo(file_name, version, requirements, _) in wheels {
+            for WheelInfo(file_name, version, requirements, _, whl) in wheels {
                 if let Some(version_or_url) = requirement.version_or_url.as_ref() {
                     match version_or_url {
                         VersionOrUrl::VersionSpecifier(version_specifier) => {
@@ -257,14 +292,19 @@ impl<'a> Pex<'a> {
                     indexed_extras.push(requirement.extras);
                     idx
                 };
-                resolved_by_project_name.insert(requirement.name, file_name);
+                resolved_by_project_name.insert(requirement.name, ResolvedWheel { file_name, whl });
                 for req in requirements {
                     to_resolve.push_back((req, extras_index))
                 }
                 break;
             }
         }
-        Ok(resolved_by_project_name.into_values().collect())
+        Ok(ResolvedWheels {
+            wheels: resolved_by_project_name
+                .into_values()
+                .map(|resolved_wheel| resolved_wheel.into_parts())
+                .collect::<IndexMap<_, _>>(),
+        })
     }
 
     #[time("debug", "Pex.{}")]
@@ -286,13 +326,13 @@ impl<'a> Pex<'a> {
             && search_path.contains(python_exe)
         {
             match self.resolve_wheels(&interpreter) {
-                Ok(selected_wheels) => {
+                Ok(wheels) => {
                     let additional_wheels = additional_pexes
                         .map(|pex| pex.resolve_wheels(&interpreter).map(|wheels| (pex, wheels)))
                         .collect::<anyhow::Result<Vec<_>>>()?;
                     return Ok(Resolve {
                         interpreter,
-                        selected_wheels,
+                        wheels,
                         scripts,
                         additional_wheels,
                     });
@@ -328,7 +368,7 @@ impl<'a> Pex<'a> {
             });
 
         let errors: Arc<Mutex<Vec<(PathBuf, anyhow::Error)>>> = Arc::new(Mutex::new(errors));
-        if let Some((interpreter, selected_wheels)) =
+        if let Some((interpreter, wheels)) =
             resolve_results_iter.find_map_first(|result| match result {
                 Ok((interpreter, selected_wheels)) => Some((interpreter, selected_wheels)),
                 Err((interpreter, resolve_err)) => {
@@ -350,7 +390,7 @@ impl<'a> Pex<'a> {
                 .collect::<anyhow::Result<Vec<_>>>()?;
             return Ok(Resolve {
                 interpreter,
-                selected_wheels,
+                wheels,
                 scripts,
                 additional_wheels,
             });
@@ -403,30 +443,137 @@ impl<'a> Pex<'a> {
     fn load_wheel_metadata(
         &'a self,
         interpreter: &Interpreter,
-        wheel_files: Vec<(&'a str, WheelFile<'a>, usize)>,
-    ) -> anyhow::Result<Vec<(&'a str, WheelMetadata, usize)>> {
+        wheel_files: Vec<RankedWheelFile<'a>>,
+    ) -> anyhow::Result<Vec<RankedWheel<'a>>> {
         let python_version = Version::new([
             u64::from(interpreter.version.major),
             u64::from(interpreter.version.minor),
             u64::from(interpreter.version.micro),
         ]);
         match self.layout {
+            // N.B.: When deps_are_wheel_files for a `--layout loose` PEX, our layout detection
+            // detects as `--layout packed`, which properly handles the .whl zips.
             Layout::Loose => read_wheel_metadata(
                 python_version,
                 wheel_files,
-                LoosePexMetadataReader(self.path),
-            ),
+                &mut LoosePexMetadataReader(self.path),
+            )
+            .map(|metadatas| metadatas.into_iter().map(RankedWheel::from).collect()),
+            // N.B.: When deps_are_wheel_files for a `--layout packed` PEX, the packed wheel chroot
+            // zips and normal .whl zips have the same for code and metadata; so no differentiation
+            // in behavior is needed.
             Layout::Packed => read_wheel_metadata(
                 python_version,
                 wheel_files,
-                PackedPexMetadataReader(self.path),
-            ),
-            Layout::ZipApp => read_wheel_metadata(
-                python_version,
-                wheel_files,
-                ZipAppPexMetadataReader::new(self.path)?,
-            ),
+                &mut PackedPexMetadataReader(self.path),
+            )
+            .map(|metadatas| metadatas.into_iter().map(RankedWheel::from).collect()),
+            Layout::ZipApp => {
+                if self.info.deps_are_wheel_files {
+                    let mut metadata_reader = ZipAppPexOfWhlsMetadataReader::new(self.path)?;
+                    let metadatas =
+                        read_wheel_metadata(python_version, wheel_files, &mut metadata_reader)?;
+                    let mut whls = metadata_reader.whls;
+                    let mut ranked_wheels = Vec::with_capacity(metadatas.len());
+                    for wheel in metadatas {
+                        let whl = whls.remove(wheel.metadata.file_name);
+                        ranked_wheels.push(RankedWheel {
+                            metadata: wheel.metadata,
+                            rank: wheel.rank,
+                            whl,
+                        })
+                    }
+                    Ok(ranked_wheels)
+                } else {
+                    read_wheel_metadata(
+                        python_version,
+                        wheel_files,
+                        &mut ZipAppPexMetadataReader::new(self.path)?,
+                    )
+                    .map(|metadatas| metadatas.into_iter().map(RankedWheel::from).collect())
+                }
+            }
         }
+    }
+}
+struct RankedWheelFile<'a> {
+    wheel_file: WheelFile<'a>,
+    rank: usize,
+}
+
+struct RankedWheelMetadata<'a> {
+    metadata: WheelMetadata<'a>,
+    rank: usize,
+}
+
+struct RankedWheel<'a> {
+    metadata: WheelMetadata<'a>,
+    rank: usize,
+    whl: Option<TempWheel>,
+}
+
+impl<'a> From<RankedWheelMetadata<'a>> for RankedWheel<'a> {
+    fn from(value: RankedWheelMetadata<'a>) -> Self {
+        Self {
+            metadata: value.metadata,
+            rank: value.rank,
+            whl: None,
+        }
+    }
+}
+
+struct ResolvedWheel<'a> {
+    file_name: &'a str,
+    whl: Option<TempWheel>,
+}
+
+impl<'a> ResolvedWheel<'a> {
+    fn into_parts(self) -> (&'a str, Option<TempWheel>) {
+        (self.file_name, self.whl)
+    }
+}
+
+pub struct TempWheel {
+    pub path: TempPath,
+    pub whl: ZipArchive<std::fs::File>,
+}
+
+struct ZipAppPexOfWhlsMetadataReader<'a> {
+    pex_zip: ZipArchive<File>,
+    whls: HashMap<&'a str, TempWheel>,
+}
+
+impl<'a> ZipAppPexOfWhlsMetadataReader<'a> {
+    fn new(path: impl AsRef<Path>) -> anyhow::Result<Self> {
+        Ok(Self {
+            pex_zip: ZipArchive::new(File::open(path.as_ref())?)?,
+            whls: HashMap::new(),
+        })
+    }
+}
+
+impl<'a> MetadataReader<'a> for ZipAppPexOfWhlsMetadataReader<'a> {
+    fn read(
+        &mut self,
+        wheel_file_name: &'a str,
+        path_components: &[&str],
+    ) -> anyhow::Result<String> {
+        let mut whl = self
+            .pex_zip
+            .by_name(&[".deps", wheel_file_name].join("/"))?;
+        let mut extracted_whl = tempfile::NamedTempFile::new()?;
+        io::copy(&mut whl, &mut extracted_whl)?;
+        let (tmp_file, tmp_path) = extracted_whl.into_parts();
+        let mut whl_zip = ZipArchive::new(tmp_file)?;
+        let metadata = io::read_to_string(whl_zip.by_name(&path_components.join("/"))?)?;
+        self.whls.insert(
+            wheel_file_name,
+            TempWheel {
+                path: tmp_path,
+                whl: whl_zip,
+            },
+        );
+        Ok(metadata)
     }
 }
 
@@ -438,8 +585,12 @@ impl ZipAppPexMetadataReader {
     }
 }
 
-impl MetadataReader for ZipAppPexMetadataReader {
-    fn read(&mut self, wheel_file_name: &str, path_components: &[&str]) -> anyhow::Result<String> {
+impl<'a> MetadataReader<'a> for ZipAppPexMetadataReader {
+    fn read(
+        &mut self,
+        wheel_file_name: &'a str,
+        path_components: &[&str],
+    ) -> anyhow::Result<String> {
         Ok(io::read_to_string(
             self.0.by_name(
                 &[".deps", wheel_file_name]
@@ -453,8 +604,12 @@ impl MetadataReader for ZipAppPexMetadataReader {
 
 struct LoosePexMetadataReader<'a>(&'a Path);
 
-impl<'a> MetadataReader for LoosePexMetadataReader<'a> {
-    fn read(&mut self, wheel_file_name: &str, path_components: &[&str]) -> anyhow::Result<String> {
+impl<'a> MetadataReader<'a> for LoosePexMetadataReader<'a> {
+    fn read(
+        &mut self,
+        wheel_file_name: &'a str,
+        path_components: &[&str],
+    ) -> anyhow::Result<String> {
         let mut read_path = self.0.join(".deps").join(wheel_file_name);
         for component in path_components {
             read_path.push(component);
@@ -465,8 +620,12 @@ impl<'a> MetadataReader for LoosePexMetadataReader<'a> {
 
 struct PackedPexMetadataReader<'a>(&'a Path);
 
-impl<'a> MetadataReader for PackedPexMetadataReader<'a> {
-    fn read(&mut self, wheel_file_name: &str, path_components: &[&str]) -> anyhow::Result<String> {
+impl<'a> MetadataReader<'a> for PackedPexMetadataReader<'a> {
+    fn read(
+        &mut self,
+        wheel_file_name: &'a str,
+        path_components: &[&str],
+    ) -> anyhow::Result<String> {
         let mut zip = ZipArchive::new(File::open(self.0.join(".deps").join(wheel_file_name))?)?;
         Ok(io::read_to_string(
             zip.by_name(&path_components.iter().join("/"))?,
@@ -476,20 +635,23 @@ impl<'a> MetadataReader for PackedPexMetadataReader<'a> {
 
 fn read_wheel_metadata<'a>(
     python_version: Version,
-    wheel_files: Vec<(&'a str, WheelFile<'a>, usize)>,
-    mut metadata_reader: impl MetadataReader,
-) -> anyhow::Result<Vec<(&'a str, WheelMetadata, usize)>> {
-    let mut wheels = Vec::with_capacity(wheel_files.len());
-    for (file_name, wheel_file, rank) in wheel_files {
-        let wheel = WheelMetadata::parse(wheel_file, &mut metadata_reader)?;
-        if let Some(requires_python) = &wheel.requires_python
+    ranked_wheel_files: Vec<RankedWheelFile<'a>>,
+    metadata_reader: &mut impl MetadataReader<'a>,
+) -> anyhow::Result<Vec<RankedWheelMetadata<'a>>> {
+    let mut ranked_wheels = Vec::with_capacity(ranked_wheel_files.len());
+    for ranked_wheel_file in ranked_wheel_files {
+        let metadata = WheelMetadata::parse(ranked_wheel_file.wheel_file, metadata_reader)?;
+        if let Some(requires_python) = &metadata.requires_python
             && !requires_python.contains(&python_version)
         {
             continue;
         }
-        wheels.push((file_name, wheel, rank));
+        ranked_wheels.push(RankedWheelMetadata {
+            metadata,
+            rank: ranked_wheel_file.rank,
+        });
     }
-    Ok(wheels)
+    Ok(ranked_wheels)
 }
 
 #[cfg(test)]
@@ -509,6 +671,7 @@ mod tests {
     use zip::write::SimpleFileOptions;
     use zip::{CompressionMethod, ZipWriter};
 
+    use crate::pex::ResolvedWheels;
     use crate::wheel::WheelFile;
     use crate::{Pex, PexPath};
 
@@ -570,22 +733,20 @@ mod tests {
                 .unwrap();
         let file_options =
             SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
-        embedded_scripts
-            .inject_scripts(&mut zip, file_options)
-            .unwrap();
+        embedded_scripts.inject(&mut zip, file_options).unwrap();
         zip.finish().unwrap();
 
         pex
     }
 
     fn assert_wheels(
-        wheels: IndexSet<&str>,
+        wheels: ResolvedWheels,
         expected_requirements: impl IntoIterator<Item = &'static str>,
     ) {
         let resolved = wheels
-            .into_iter()
-            .map(|wheel_file_name| {
-                WheelFile::parse_file_name(wheel_file_name)
+            .file_names()
+            .map(|file_name| {
+                WheelFile::parse_file_name(file_name)
                     .map(|wheel_file| (wheel_file.project_name, wheel_file.version))
             })
             .collect::<Result<IndexSet<_>, _>>()
@@ -629,7 +790,7 @@ mod tests {
             .resolve(Some(python_exe), additional_pexes.iter(), search_path)
             .unwrap();
 
-        assert_wheels(resolve.selected_wheels, EXPECTED_REQUESTS_PEX_WHEELS);
+        assert_wheels(resolve.wheels, EXPECTED_REQUESTS_PEX_WHEELS);
 
         assert_eq!(1, resolve.additional_wheels.len());
         let (_, additional_wheels) = resolve.additional_wheels.into_iter().next().unwrap();

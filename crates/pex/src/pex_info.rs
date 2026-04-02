@@ -107,9 +107,10 @@ impl PexInfo {
 
     pub(crate) fn parse_distributions(
         &self,
-    ) -> impl Iterator<Item = anyhow::Result<(&str, WheelFile<'_>)>> {
-        self.distributions.keys().map(|file_name| {
-            WheelFile::parse_file_name(file_name).map(|wheel_file| (file_name.as_str(), wheel_file))
-        })
+    ) -> impl Iterator<Item = anyhow::Result<WheelFile<'_>>> {
+        self.distributions
+            .keys()
+            .map(String::as_str)
+            .map(WheelFile::parse_file_name)
     }
 }

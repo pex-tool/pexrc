@@ -28,7 +28,7 @@ jobs:
     steps:
       - name: Checkout Pexrc
         uses: actions/checkout@v6
-      - name: Check Formatting, Lints and Cross-build
+      - name: Check Formatting and Lints
         run: |
           rustup toolchain add nightly -c rustfmt
           cargo +nightly fmt --check --all
