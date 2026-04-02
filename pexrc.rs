@@ -72,9 +72,7 @@ fn main() -> anyhow::Result<()> {
             } else {
                 None
             };
-            for pex in pexes {
-                inject::inject(&pex, compression_level, clibs.as_ref())?;
-            }
+            inject::inject_all(pexes, compression_level, clibs.as_ref())?;
             Ok(())
         }
         Commands::Info => info::display(),

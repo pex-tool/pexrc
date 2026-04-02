@@ -138,15 +138,13 @@ fn populate_user_code_from_directory_pex<'a>(
     populate_pex_info: bool,
 ) -> anyhow::Result<()> {
     let excludes: HashSet<PathBuf> = [
-        ".bootstrap",
         ".deps",
+        "PEX-INFO",
         "__main__.py",
         "__pex__",
         "__pycache__",
         "pex",
         "pex-repl",
-        "PEX-INFO",
-        "PEX-LAYOUT",
     ]
     .into_iter()
     .map(|rel_path| directory_pex.path.join(rel_path))
@@ -191,7 +189,32 @@ fn populate_from_zip_app_with_whl_deps<'a>(
     resolved_wheels: ResolvedWheels<'a>,
     populate_pex_info: bool,
 ) -> anyhow::Result<()> {
+    let pex_zip = ZipArchive::new(File::open(zip_app_pex.path)?)?;
+    let metadata = pex_zip.metadata();
+    let extract_indexes = pex_zip
+        .file_names()
+        .enumerate()
+        .filter_map(|(idx, name)| {
+            if [".deps/", "__pex__/"]
+                .iter()
+                .any(|exclude_dir| name.starts_with(exclude_dir))
+                || ["PEX-INFO", "__main__.py"].contains(&name)
+            {
+                None
+            } else {
+                Some(idx)
+            }
+        })
+        .collect::<Vec<_>>();
     let site_packages_path = venv.site_packages_path();
+    extract_indexes
+        .into_par_iter()
+        .try_for_each(|index| -> anyhow::Result<()> {
+            let zip_fp = File::open(zip_app_pex.path)?;
+            let mut zip = unsafe { ZipArchive::unsafe_new_with_metadata(zip_fp, metadata.clone()) };
+            extract_idx(&site_packages_path, index, &mut zip)?;
+            Ok(())
+        })?;
     resolved_wheels
         .into_wheels()
         .into_par_iter()
@@ -220,10 +243,8 @@ fn populate_from_zip_app<'a>(
         .enumerate()
         .filter_map(|(idx, name)| {
             // TODO: XXX: Deal with .layout and .prefix/ in wheel chroots.
-            if [".bootstrap/", "__pex__/"]
-                .iter()
-                .any(|exclude_dir| name.starts_with(exclude_dir))
-                || ["PEX-INFO", "__main__.py", ".deps/"].contains(&name)
+            if name.starts_with("__pex__/")
+                || [".deps/", "PEX-INFO", "__main__.py"].contains(&name)
                 || name.starts_with(".deps/")
                     && name[6..]
                         .split("/")
