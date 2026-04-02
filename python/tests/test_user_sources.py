@@ -87,14 +87,22 @@ def assert_result(
         pytest.param(["--layout", "loose"], id="loose"),
     ],
 )
+@pytest.mark.parametrize(
+    "whl_args",
+    [
+        pytest.param([], id="chroot"),
+        pytest.param(["--no-pre-install-wheels"], id="whl"),
+    ],
+)
 def test_user_sources(
     tmpdir,  # type: Any
     layout_args,  # type: List[str]
+    whl_args,  # type: List[str]
 ):
     # type: (...) -> None
 
     compare(
-        create_cowsay_pex(tmpdir, *layout_args),
+        create_cowsay_pex(tmpdir, *(layout_args + whl_args)),
         env=dict(PEXRC_ROOT=os.path.join(str(tmpdir), "pexrc-root")),
         test_result=assert_result,
     )
