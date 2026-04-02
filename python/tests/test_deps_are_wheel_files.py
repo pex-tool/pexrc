@@ -67,7 +67,7 @@ def test_no_pre_install_wheels(
         result.assert_success()
         assert "| Moo! |" in result.stdout
 
-    def compare_result(
+    def compare_results(
         traditional_result,  # type: ProcessResult
         injected_result,  # type: ProcessResult
     ):
@@ -80,7 +80,7 @@ def test_no_pre_install_wheels(
         args=["Moo!"],
         env=dict(PEXRC_ROOT=os.path.join(str(tmpdir), "pexrc-root")),
         test_result=test_result,
-        compare_results=compare_result,
+        compare_results=compare_results,
     )
     if zipfile.is_zipfile(injected_pex):
         with closing(zipfile.ZipFile(injected_pex)) as zip_fp:

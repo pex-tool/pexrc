@@ -21,9 +21,15 @@ pub struct Tag<'a> {
 impl<'a> Tag<'a> {
     pub(crate) fn parse(tag: &'a str) -> anyhow::Result<Self> {
         let mut tags = tag.split("-");
-        let python = tags.next().ok_or_else(|| anyhow!("333"))?;
-        let abi = tags.next().ok_or_else(|| anyhow!("334"))?;
-        let platform = tags.next().ok_or_else(|| anyhow!("335"))?;
+        let python = tags
+            .next()
+            .ok_or_else(|| anyhow!("Failed to find python tag in {tag}"))?;
+        let abi = tags
+            .next()
+            .ok_or_else(|| anyhow!("Failed to find abi tag in {tag}"))?;
+        let platform = tags
+            .next()
+            .ok_or_else(|| anyhow!("Failed to find polatform tag in {tag}"))?;
         if tags.next().is_some() {
             bail!("336")
         }

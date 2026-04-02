@@ -21,7 +21,18 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 use crate::clibs::CLIBS_DIR;
 
-pub fn inject(
+pub fn inject_all(
+    pexes: Vec<PathBuf>,
+    compression_level: Option<i64>,
+    clibs: Option<&HashSet<&Path>>,
+) -> anyhow::Result<()> {
+    for pex in pexes {
+        inject(&pex, compression_level, clibs)?
+    }
+    Ok(())
+}
+
+fn inject(
     pex: &Path,
     compression_level: Option<i64>,
     clibs: Option<&HashSet<&Path>>,

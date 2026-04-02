@@ -1,5 +1,9 @@
 # Release Notes
 
+## 0.4.1
+
+This release fixes user code support for `--no-pre-install-wheels` injected PEXes.
+
 ## 0.4.0
 
 This release adds support for injecting `--no-pre-install-wheels` PEXes of all layout types.
