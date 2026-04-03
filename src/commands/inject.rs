@@ -1,9 +1,9 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io;
-use std::io::{BufRead, Read, Write};
+use std::io::{BufRead, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, anyhow};
@@ -172,29 +172,42 @@ fn inject_pex_zip(
     let zstd_file_options = SimpleFileOptions::default()
         .compression_method(CompressionMethod::Zstd)
         .compression_level(compression_level);
+    let stored_file_options =
+        SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
     let other_file_options =
         SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
     let directory_options = SimpleFileOptions::default();
+    let whl_file_indicies = map_whl_file_indicies(pex)?;
     for index in 0..src_zip.len() {
-        let mut src_file = src_zip.by_index(index)?;
-        let entry_name = src_file.name();
-        if [".bootstrap/", "__pex__/"]
-            .into_iter()
-            .any(|prefix| entry_name.starts_with(prefix))
-            || entry_name == "__main__.py"
-        {
-            continue;
-        }
-        if src_file.is_dir() {
-            dst_zip.add_directory(entry_name, directory_options)?
+        if let Some(entry_name) = whl_file_indicies.get(&index) {
+            let zip_file = src_zip.by_index_seek(index)?;
+            dst_zip.start_file(entry_name, stored_file_options)?;
+            let whl_zip = ZipArchive::new(zip_file)?;
+            io::copy(
+                &mut re_compress(whl_zip, directory_options, zstd_file_options)?,
+                &mut dst_zip,
+            )?;
         } else {
-            let options = if entry_name == "PEX-INFO" {
-                other_file_options
+            let mut src_file = src_zip.by_index(index)?;
+            let entry_name = src_file.name();
+            if [".bootstrap/", "__pex__/"]
+                .into_iter()
+                .any(|prefix| entry_name.starts_with(prefix))
+                || entry_name == "__main__.py"
+            {
+                continue;
+            }
+            if src_file.is_dir() {
+                dst_zip.add_directory(entry_name, directory_options)?
             } else {
-                zstd_file_options
-            };
-            dst_zip.start_file(entry_name, options)?;
-            io::copy(&mut src_file, &mut dst_zip)?;
+                let options = if entry_name == "PEX-INFO" {
+                    other_file_options
+                } else {
+                    zstd_file_options
+                };
+                dst_zip.start_file(entry_name, options)?;
+                io::copy(&mut src_file, &mut dst_zip)?;
+            }
         }
     }
 
@@ -240,4 +253,41 @@ fn inject_pex_zip(
     dst_zip_fp.persist(dst)?;
 
     Ok(())
+}
+
+fn map_whl_file_indicies(pex: &Path) -> anyhow::Result<HashMap<usize, String>> {
+    let zip_read_fp = File::open(pex)?;
+    let mut src_zip = ZipArchive::new(&zip_read_fp)?;
+    let mut whl_file_indicies = HashMap::new();
+    for index in 0..src_zip.len() {
+        let src_file = src_zip.by_index(index)?;
+        if src_file.is_file() && src_file.compression() == CompressionMethod::Stored {
+            whl_file_indicies.insert(index, src_file.name().to_string());
+        }
+    }
+    Ok(whl_file_indicies)
+}
+
+fn re_compress(
+    mut zip: ZipArchive<impl Read + Seek>,
+    directory_options: SimpleFileOptions,
+    file_options: SimpleFileOptions,
+) -> anyhow::Result<impl Read> {
+    let mut re_compressed = tempfile::tempfile()?;
+    {
+        let mut re_zipped = ZipWriter::new(&mut re_compressed);
+        for index in 0..zip.len() {
+            let mut entry = zip.by_index(index)?;
+            let entry_name = entry.name();
+            if entry.is_dir() {
+                re_zipped.add_directory(entry_name, directory_options)?;
+            } else {
+                re_zipped.start_file(entry_name, file_options)?;
+                io::copy(&mut entry, &mut re_zipped)?;
+            }
+        }
+        re_zipped.finish()?;
+    }
+    re_compressed.rewind()?;
+    Ok(re_compressed)
 }
