@@ -70,8 +70,6 @@ pub unsafe extern "C" fn boot(
     argv: *const *const c_char,
     argc: usize,
 ) -> c_int {
-    env_logger::init();
-
     // SAFETY: python_exe must be a null-terminated character array.
     let python_exe_path = match unsafe { as_path(python_exe, "Python executable") } {
         Ok(path) => path,
@@ -132,8 +130,6 @@ pub unsafe extern "C" fn mount(
     pex_file: *const c_char,
     sys_path_entry: *mut c_char,
 ) -> c_int {
-    env_logger::init();
-
     // SAFETY: python_exe must be a null-terminated character array.
     let python_exe_path = match unsafe { as_path(python_exe, "Python executable") } {
         Ok(path) => path,

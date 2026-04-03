@@ -15,7 +15,7 @@ use pexrc::commands::{info, inject};
 #[command(version, about, long_about = None)]
 struct Cli {
     #[command(flatten)]
-    verbosity: clap_verbosity_flag::Verbosity,
+    verbosity: Option<clap_verbosity_flag::Verbosity>,
 
     #[command(flatten)]
     color: colorchoice_clap::Color,
@@ -45,10 +45,7 @@ enum Commands {
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    env_logger::Builder::new()
-        .filter_level(cli.verbosity.into())
-        .target(env_logger::Target::Stderr)
-        .init();
+    logging::init(cli.verbosity.map(|verbosity| verbosity.log_level_filter()))?;
     cli.color.write_global();
 
     match cli.command {

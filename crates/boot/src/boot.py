@@ -42,7 +42,11 @@ else:
         pass
 
 
-_PEX_VERBOSE = "PEX_VERBOSE" in os.environ
+_PEX_VERBOSE = False
+try:
+    _PEX_VERBOSE = int(os.environ.get("PEX_VERBOSE", "0")) >= 3
+except ValueError:
+    pass
 
 
 if sys.version_info >= (3, 10):

@@ -3,7 +3,7 @@
 
 [package]
 name = "pexrc"
-version = "0.4.1"
+version = "0.5.0"
 edition = "2024"
 publish = false
 
@@ -11,12 +11,13 @@ publish = false
 members = [
     ".",
     "crates/boot",
+    "crates/build-system",
     "crates/cache",
     "crates/clib",
     "crates/interpreter",
+    "crates/logging",
     "crates/package",
     "crates/pex",
-    "crates/build-system",
     "crates/pexrs",
     "crates/platform",
     "crates/scripts",
@@ -107,6 +108,7 @@ ctor = "0.8"
 digest = "0.11"
 dirs = "6.0"
 elf = "0.8"
+env_filter = "1.0"
 env_logger = "0.11"
 flate2 = "1.1"
 fs-err = "3.3"
@@ -149,10 +151,10 @@ zstd = "0.13"
 
 [build-dependencies]
 anyhow = { workspace = true }
-build-system = { path = "crates/build-system" }
 bstr = { workspace = true }
-fs-err = { workspace = true }
+build-system = { path = "crates/build-system" }
 env_logger = { workspace = true }
+fs-err = { workspace = true }
 itertools = { workspace = true }
 zstd = { workspace = true }
 
@@ -172,6 +174,7 @@ indexmap = { workspace = true }
 interpreter = { path = "crates/interpreter" }
 itertools = { workspace = true }
 log = { workspace = true }
+logging = { path = "crates/logging" }
 owo-colors = { workspace = true }
 pex = { path = "crates/pex" }
 pexrs = { path = "crates/pexrs" }

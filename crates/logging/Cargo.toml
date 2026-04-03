@@ -1,0 +1,9 @@
+[package]
+name = "logging"
+edition = "2024"
+
+[dependencies]
+anyhow = { workspace = true }
+env_filter = { workspace = true }
+env_logger = { workspace = true }
+log = { workspace = true }
