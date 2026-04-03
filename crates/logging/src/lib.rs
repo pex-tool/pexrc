@@ -1,0 +1,63 @@
+// Copyright 2026 Pex project contributors.
+// SPDX-License-Identifier: Apache-2.0
+
+#![deny(clippy::all)]
+
+use std::env;
+use std::str::FromStr;
+
+use anyhow::anyhow;
+use env_logger::Target;
+use log::LevelFilter;
+
+pub fn init() -> anyhow::Result<()> {
+    env_logger::Builder::new()
+        .target(Target::Stderr)
+        .filter(None, calculate_level()?)
+        .init();
+    Ok(())
+}
+
+fn calculate_level() -> anyhow::Result<LevelFilter> {
+    parse_pex_level().map(|pex_filter| {
+        pex_filter
+            .iter()
+            .copied()
+            .chain(parse_rust_level().iter().copied())
+            .max()
+            .unwrap_or(LevelFilter::Error)
+    })
+}
+
+fn parse_pex_level() -> anyhow::Result<Option<LevelFilter>> {
+    let level = if let Some(level_var) = env::var_os("PEX_VERBOSE") {
+        let level_str = level_var.into_string().map_err(|raw_value| {
+            anyhow!(
+                "PEX_VERBOSE must be an un-signed integer. Given non-UTF-8 value: {value}",
+                value = raw_value.display()
+            )
+        })?;
+        match u8::from_str(&level_str).map_err(|err| {
+            anyhow!("PEX_VERBOSE must be an un-signed integer. Given {level_str}: {err}")
+        })? {
+            0 => LevelFilter::Error,
+            1 => LevelFilter::Warn,
+            2 => LevelFilter::Info,
+            3 => LevelFilter::Debug,
+            _ => LevelFilter::Trace,
+        }
+    } else {
+        return Ok(None);
+    };
+    Ok(Some(level))
+}
+
+fn parse_rust_level() -> Option<LevelFilter> {
+    if let Ok(level_var) = env::var("RUST_LOG")
+        && let Ok(filter_builder) = env_filter::Builder::new().try_parse(&level_var)
+    {
+        Some(filter_builder.build().filter())
+    } else {
+        None
+    }
+}

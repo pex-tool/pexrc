@@ -11,5 +11,4 @@ name = "pexrc"
 crate-type = ["cdylib"]
 
 [dependencies]
-env_logger = { workspace = true }
 pexrs = { path = "../pexrs" }

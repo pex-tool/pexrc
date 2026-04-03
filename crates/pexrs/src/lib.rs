@@ -13,13 +13,12 @@ use anyhow::anyhow;
 use cache::{CacheDir, HashOptions, Key, atomic_dir};
 use interpreter::SearchPath;
 use itertools::Itertools;
-use log::{debug, warn};
+use log::{info, warn};
 use logging_timer::time;
 use pex::{Pex, PexPath};
 use regex::bytes::Regex;
 use venv::{Virtualenv, populate, populate_user_code_and_wheels};
 
-#[time("debug", "{}")]
 pub fn boot(
     python: impl AsRef<Path>,
     python_args: Vec<String>,
@@ -27,7 +26,7 @@ pub fn boot(
     argv: Vec<String>,
 ) -> anyhow::Result<i32> {
     let mut command = prepare_boot(python, python_args, pex, argv)?;
-    debug!(
+    info!(
         "Booting with {exe} {args}",
         exe = command.get_program().to_string_lossy(),
         args = command.get_args().map(OsStr::to_string_lossy).join(" ")
@@ -35,13 +34,13 @@ pub fn boot(
     exec(&mut command)
 }
 
-#[time("debug", "{}")]
 fn prepare_boot(
     python: impl AsRef<Path>,
     python_args: Vec<String>,
     pex: impl AsRef<Path>,
     argv: Vec<String>,
 ) -> anyhow::Result<Command> {
+    logging::init()?;
     let venv = prepare_venv(
         python,
         pex.as_ref(),
@@ -77,8 +76,8 @@ fn exec(command: &mut Command) -> anyhow::Result<i32> {
         .map_err(|err| anyhow!("Failed to wait() for {command:?}: {err}"))
 }
 
-#[time("debug", "{}")]
 pub fn mount(python: impl AsRef<Path>, pex: impl AsRef<Path>) -> anyhow::Result<PathBuf> {
+    logging::init()?;
     prepare_venv(
         python,
         pex.as_ref(),
@@ -91,10 +90,10 @@ pub fn mount(python: impl AsRef<Path>, pex: impl AsRef<Path>) -> anyhow::Result<
 #[time("debug", "{}")]
 fn prepare_venv<'a>(
     python: impl AsRef<Path>,
-    pex: &'a Path,
+    pex: impl AsRef<Path>,
     #[cfg(unix)] sh_boot_seed_dir: Option<PathBuf>,
 ) -> anyhow::Result<Virtualenv<'a>> {
-    let pex = Pex::load(pex)?;
+    let pex = Pex::load(pex.as_ref())?;
     let pex_path = PexPath::from_pex_info(&pex.info, true);
     let additional_pexes = pex_path.load_pexes()?;
     let search_path = SearchPath::from_env()?;
@@ -114,7 +113,7 @@ fn prepare_venv<'a>(
         }
         Ok(venv.interpreter)
     })? {
-        debug!("Built venv at {path}", path = venv_dir.display());
+        info!("Built venv at {path}", path = venv_dir.display());
         let venv_interpreter = Virtualenv::host_interpreter(&venv_dir, &venv_interpreter);
         venv_interpreter.store()?;
         #[cfg(unix)]
@@ -128,7 +127,7 @@ fn prepare_venv<'a>(
         }
         Virtualenv::enclosing(venv_interpreter)
     } else {
-        debug!("Loading cached venv at {path}", path = venv_dir.display());
+        info!("Loading cached venv at {path}", path = venv_dir.display());
         let mut scripts = pex.scripts()?;
         Virtualenv::load(Cow::Owned(venv_dir), &mut scripts)
     }
