@@ -1,5 +1,10 @@
 # Release Notes
 
+## 0.5.0
+
+This release wires PEX_VERBOSE to logging levels for both the `pexrc` tool and the runtime of the
+injected PEXes it creates.
+
 ## 0.4.1
 
 This release fixes user code support for `--no-pre-install-wheels` injected PEXes.
