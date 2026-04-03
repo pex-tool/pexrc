@@ -4,16 +4,16 @@
 use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
 use std::io;
-use std::io::Write;
+use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::anyhow;
 use fs_err as fs;
 use fs_err::File;
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 use log::warn;
 use logging_timer::time;
-use pex::{BinPath, InheritPath, Layout, Pex, PexInfo, ResolvedWheels};
+use pex::{BinPath, InheritPath, Layout, Pex, PexInfo};
 use platform::{mark_executable, path_as_bytes, path_as_str, symlink_or_link_or_copy};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use scripts::{Scripts, VenvPex, VenvPexRepl};
@@ -24,7 +24,7 @@ use crate::virtualenv::Virtualenv;
 fn populate_from_loose_pex<'a>(
     venv: &Virtualenv,
     loose_pex: &'a Pex<'a>,
-    resolved_wheels: ResolvedWheels<'a>,
+    resolved_wheels: IndexSet<&'a str>,
     populate_pex_info: bool,
 ) -> anyhow::Result<()> {
     let site_packages_path = venv.site_packages_path();
@@ -42,7 +42,7 @@ fn populate_from_loose_pex<'a>(
 
 fn collect_wheels_from_directory_pex(
     pex: &Pex,
-    resolved_wheels: ResolvedWheels,
+    resolved_wheels: IndexSet<&str>,
 ) -> anyhow::Result<Vec<PathBuf>> {
     let mut wheels = Vec::with_capacity(resolved_wheels.len());
     let deps_dir = pex.path.join(".deps");
@@ -93,7 +93,7 @@ fn populate_wheel_dir(wheel: &Path, site_packages_path: &Path) -> anyhow::Result
 fn populate_from_packed_pex<'a>(
     venv: &Virtualenv,
     packed_pex: &'a Pex<'a>,
-    resolved_wheels: ResolvedWheels<'a>,
+    resolved_wheels: IndexSet<&'a str>,
     populate_pex_info: bool,
 ) -> anyhow::Result<()> {
     let site_packages_path = venv.site_packages_path();
@@ -186,7 +186,7 @@ fn populate_user_code_from_directory_pex<'a>(
 fn populate_from_zip_app_with_whl_deps<'a>(
     venv: &Virtualenv,
     zip_app_pex: &'a Pex<'a>,
-    resolved_wheels: ResolvedWheels<'a>,
+    resolved_wheels: IndexSet<&'a str>,
     populate_pex_info: bool,
 ) -> anyhow::Result<()> {
     let pex_zip = ZipArchive::new(File::open(zip_app_pex.path)?)?;
@@ -215,12 +215,28 @@ fn populate_from_zip_app_with_whl_deps<'a>(
             extract_idx(&site_packages_path, index, &mut zip)?;
             Ok(())
         })?;
-    resolved_wheels
-        .into_wheels()
+
+    let wheel_file_names = resolved_wheels.into_iter().collect::<Vec<_>>();
+    wheel_file_names
         .into_par_iter()
-        .try_for_each(|temp_wheel| {
-            populate_whl_zip(temp_wheel.path, temp_wheel.whl, &site_packages_path)
+        .try_for_each(|wheel_file_name| {
+            let zip_fp = File::open(zip_app_pex.path)?;
+            let mut zip = unsafe { ZipArchive::unsafe_new_with_metadata(zip_fp, metadata.clone()) };
+            let whl_file = zip.by_name_seek(&[".deps", wheel_file_name].join("/"))?;
+            let whl_zip = ZipArchive::new(whl_file)?;
+            let whl_zip_metadata = whl_zip.metadata();
+            (0..whl_zip.len()).into_par_iter().try_for_each(|index| {
+                let zip_fp = File::open(zip_app_pex.path)?;
+                let mut zip =
+                    unsafe { ZipArchive::unsafe_new_with_metadata(zip_fp, metadata.clone()) };
+                let whl_file = zip.by_name_seek(&[".deps", wheel_file_name].join("/"))?;
+                let mut whl_zip = unsafe {
+                    ZipArchive::unsafe_new_with_metadata(whl_file, whl_zip_metadata.clone())
+                };
+                extract_idx(&site_packages_path, index, &mut whl_zip)
+            })
         })?;
+
     if populate_pex_info {
         let mut pex_zip = ZipArchive::new(File::open(zip_app_pex.path)?)?;
         let mut pex_info_src_fp = pex_zip.by_name("PEX-INFO")?;
@@ -233,7 +249,7 @@ fn populate_from_zip_app_with_whl_deps<'a>(
 fn populate_from_zip_app<'a>(
     venv: &Virtualenv,
     zip_app_pex: &'a Pex<'a>,
-    resolved_wheels: ResolvedWheels<'a>,
+    resolved_wheels: IndexSet<&'a str>,
     populate_pex_info: bool,
 ) -> anyhow::Result<()> {
     let mut pex_zip = ZipArchive::new(File::open(zip_app_pex.path)?)?;
@@ -279,7 +295,7 @@ fn populate_from_zip_app<'a>(
 pub fn populate_user_code_and_wheels<'a>(
     venv: &Virtualenv,
     pex: &'a Pex<'a>,
-    resolved_wheels: ResolvedWheels<'a>,
+    resolved_wheels: IndexSet<&'a str>,
     populate_pex_info: bool,
 ) -> anyhow::Result<()> {
     match pex.layout {
@@ -300,10 +316,10 @@ pub fn populate<'a>(
     venv: &Virtualenv,
     resting_venv_dir: &Path,
     pex: &'a Pex<'a>,
-    resolved_wheels: ResolvedWheels<'a>,
+    resolved_wheels: IndexSet<&'a str>,
     scripts: &mut Scripts,
 ) -> anyhow::Result<()> {
-    let selected_wheels = resolved_wheels.file_names().collect::<Vec<_>>();
+    let selected_wheels = resolved_wheels.iter().copied().collect::<Vec<_>>();
     populate_user_code_and_wheels(venv, pex, resolved_wheels, true)?;
 
     let interpreter_relpath = venv
@@ -331,11 +347,14 @@ pub fn populate<'a>(
     )
 }
 
-fn extract_idx(
+fn extract_idx<R>(
     dst_dir: impl AsRef<Path>,
     index: usize,
-    zip: &mut ZipArchive<File>,
-) -> anyhow::Result<()> {
+    zip: &mut ZipArchive<R>,
+) -> anyhow::Result<()>
+where
+    R: Read + Seek,
+{
     let mut zip_file = zip.by_index(index)?;
     let dst_path =
         dst_dir

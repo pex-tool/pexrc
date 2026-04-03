@@ -88,9 +88,20 @@ def test_no_pre_install_wheels(
                 info for info in zip_fp.infolist() if info.filename.startswith(".deps/cowsay")
             )
 
-        assert len(cowsay_files) == 1
-        cowsay_whl = cowsay_files[0]
-        assert ".deps/cowsay-5.0-py2.py3-none-any.whl" == cowsay_whl.filename
-        assert ZIP_ZSTANDARD == cowsay_whl.compress_type, (
-            "Expected the whl to be re-compressed using zstd during pexrc injection."
-        )
+            assert len(cowsay_files) == 1
+            cowsay_whl = cowsay_files[0]
+            assert ".deps/cowsay-5.0-py2.py3-none-any.whl" == cowsay_whl.filename
+            assert zipfile.ZIP_STORED == cowsay_whl.compress_type, (
+                "Expected the whl to be stored in the outer zip with no compression."
+            )
+
+            with zipfile.ZipFile(zip_fp.open(cowsay_whl)) as cowsay_zip_fp:
+                for entry in cowsay_zip_fp.infolist():
+                    if entry.filename.endswith("/"):
+                        assert zipfile.ZIP_STORED == entry.compress_type, (
+                            "Expected the re-compressed whl to have stored directory entries."
+                        )
+                    else:
+                        assert ZIP_ZSTANDARD == entry.compress_type, (
+                            "Expected the re-compressed whl to have zstd compressed files."
+                        )
