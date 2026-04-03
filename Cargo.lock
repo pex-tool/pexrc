@@ -1615,6 +1615,7 @@ dependencies = [
  "interpreter",
  "itertools 0.14.0",
  "log",
+ "logging",
  "owo-colors",
  "pex",
  "pexrs",

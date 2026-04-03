@@ -40,7 +40,7 @@ fn prepare_boot(
     pex: impl AsRef<Path>,
     argv: Vec<String>,
 ) -> anyhow::Result<Command> {
-    logging::init()?;
+    logging::init_default()?;
     let venv = prepare_venv(
         python,
         pex.as_ref(),
@@ -77,7 +77,7 @@ fn exec(command: &mut Command) -> anyhow::Result<i32> {
 }
 
 pub fn mount(python: impl AsRef<Path>, pex: impl AsRef<Path>) -> anyhow::Result<PathBuf> {
-    logging::init()?;
+    logging::init_default()?;
     prepare_venv(
         python,
         pex.as_ref(),

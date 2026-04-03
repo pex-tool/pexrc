@@ -10,10 +10,19 @@ use anyhow::anyhow;
 use env_logger::Target;
 use log::LevelFilter;
 
-pub fn init() -> anyhow::Result<()> {
+pub fn init_default() -> anyhow::Result<()> {
+    init(None)
+}
+
+pub fn init(level: Option<LevelFilter>) -> anyhow::Result<()> {
+    let level_filter = if let Some(level_filter) = level {
+        level_filter
+    } else {
+        calculate_level()?
+    };
     env_logger::Builder::new()
         .target(Target::Stderr)
-        .filter(None, calculate_level()?)
+        .filter(None, level_filter)
         .init();
     Ok(())
 }

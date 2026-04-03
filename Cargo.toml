@@ -151,10 +151,10 @@ zstd = "0.13"
 
 [build-dependencies]
 anyhow = { workspace = true }
-build-system = { path = "crates/build-system" }
 bstr = { workspace = true }
-fs-err = { workspace = true }
+build-system = { path = "crates/build-system" }
 env_logger = { workspace = true }
+fs-err = { workspace = true }
 itertools = { workspace = true }
 zstd = { workspace = true }
 
@@ -174,6 +174,7 @@ indexmap = { workspace = true }
 interpreter = { path = "crates/interpreter" }
 itertools = { workspace = true }
 log = { workspace = true }
+logging = { path = "crates/logging" }
 owo-colors = { workspace = true }
 pex = { path = "crates/pex" }
 pexrs = { path = "crates/pexrs" }
