@@ -4,12 +4,12 @@
 #![deny(clippy::all)]
 
 use std::borrow::Cow;
-use std::env;
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::{env, mem};
 
-use anyhow::anyhow;
+use anyhow::bail;
 use cache::{CacheDir, HashOptions, Key, atomic_dir};
 use interpreter::SearchPath;
 use itertools::Itertools;
@@ -25,13 +25,17 @@ pub fn boot(
     pex: impl AsRef<Path>,
     argv: Vec<String>,
 ) -> anyhow::Result<i32> {
+    let lock = match cache::read_lock() {
+        Ok(lock) => lock,
+        Err(err) => bail!("Failed to obtain PEXRC cache read lock: {err}"),
+    };
     let mut command = prepare_boot(python, python_args, pex, argv)?;
     info!(
         "Booting with {exe} {args}",
         exe = command.get_program().to_string_lossy(),
         args = command.get_args().map(OsStr::to_string_lossy).join(" ")
     );
-    exec(&mut command)
+    Ok(platform::exec(&mut command, &[lock])?)
 }
 
 fn prepare_boot(
@@ -55,28 +59,18 @@ fn prepare_boot(
     Ok(command)
 }
 
-#[cfg(unix)]
-fn exec(command: &mut Command) -> anyhow::Result<i32> {
-    use std::os::unix::process::CommandExt;
-    let err = command.exec();
-    Err(anyhow!("Failed to exec {command:?}: {err}"))
-}
-
-#[cfg(windows)]
-fn exec(command: &mut Command) -> anyhow::Result<i32> {
-    command
-        .spawn()
-        .map_err(|err| anyhow!("Failed to spawn() {command:?}: {err}"))?
-        .wait()
-        .map(|exit_status| {
-            exit_status
-                .code()
-                .unwrap_or_else(|| if exit_status.success() { 0 } else { 1 })
-        })
-        .map_err(|err| anyhow!("Failed to wait() for {command:?}: {err}"))
-}
-
 pub fn mount(python: impl AsRef<Path>, pex: impl AsRef<Path>) -> anyhow::Result<PathBuf> {
+    match cache::read_lock() {
+        Ok(lock) => {
+            // N.B.: We're being called from a Python program that lives longer than us via an
+            // import hook. We want the cache read lock to survive for the lifetime of that process.
+            // To prevent unlock when the lock goes out of scope, we forget it to disable its
+            // destructor. This will keep the fd open which will keep the read_lock read-locked.
+            mem::forget(lock);
+        }
+        Err(err) => bail!("Failed to obtain PEXRC cache read lock: {err}"),
+    };
+
     logging::init_default()?;
     prepare_venv(
         python,

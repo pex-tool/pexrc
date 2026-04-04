@@ -500,7 +500,11 @@ if __name__ == "__main__":
         )
     )?;
     mark_executable(main_py_fp.file_mut())?;
-    symlink_or_link_or_copy(&main_py, venv.prefix().join("pex"), true)
+    Ok(symlink_or_link_or_copy(
+        &main_py,
+        venv.prefix().join("pex"),
+        true,
+    )?)
 }
 
 fn write_repl(
