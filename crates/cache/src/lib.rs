@@ -84,3 +84,13 @@ impl CacheDir {
         })
     }
 }
+
+pub fn read_lock() -> Result<std::fs::File, Cow<'static, str>> {
+    let root = PEXRC_ROOT.as_deref().map_err(|err| err.clone())?;
+    std::fs::create_dir_all(root).map_err(|_| Cow::Borrowed("Failed to create PEXRC_ROOT dir."))?;
+    let lock = std::fs::File::create(root.join(".lck"))
+        .map_err(|_| Cow::Borrowed("Failed to open PEXRC_ROOT read lock."))?;
+    lock.lock_shared()
+        .map_err(|_| Cow::Borrowed("Failed to obtain PEXRC_ROOT read lock."))?;
+    Ok(lock)
+}
