@@ -147,19 +147,6 @@ impl<'a> ClassifiedTargets<'a> {
         }
     }
 
-    pub fn is_just_current(&'a self) -> anyhow::Result<Option<&'a str>> {
-        let current_target = HOST.to_string();
-        let mut all_targets_iter = self.iter_all_targets();
-        if let Some(target) = all_targets_iter.next()
-            && target.as_str() == current_target
-            && all_targets_iter.next().is_none()
-        {
-            Ok(Some(target.as_str()))
-        } else {
-            Ok(None)
-        }
-    }
-
     pub fn iter_zigbuild_targets(&'a self) -> impl ExactSizeIterator<Item = &'a Target<'a>> {
         self.zigbuild_targets.iter()
     }

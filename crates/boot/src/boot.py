@@ -441,7 +441,7 @@ SHOULD_EXECUTE = __name__ == "__main__"
 def _load_pexrc():
     # type: () -> Pexrc
 
-    prefix = ".clib" if __name__ == "__pex__" else os.path.join("__pex__", ".clib")
+    prefix = ".clibs" if __name__ == "__pex__" else os.path.join("__pex__", ".clibs")
     target_triple = CURRENT_OS.target_triple(arch=CURRENT_ARCH, abi=CURRENT_ABI)
     library_file_name = CURRENT_OS.library_file_name(lib_name="pexrc")
     library_file_relpath = os.path.join(

@@ -1773,6 +1773,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "python-proxy"
+version = "0.0.0"
+dependencies = [
+ "cache",
+ "platform",
+]
+
+[[package]]
 name = "quinn"
 version = "0.11.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -20,6 +20,7 @@ members = [
     "crates/pex",
     "crates/pexrs",
     "crates/platform",
+    "crates/python-proxy",
     "crates/scripts",
     "crates/testing",
     "crates/venv",
@@ -45,11 +46,11 @@ artifacts = [
     { target = "x86_64-unknown-linux-musl", type = "tgz", size = 8053450, hash = "sha256:8822793dd22a1fcfba6d7581ed130ec935fb26a0db58fb9b0f01f0fae17d28f8"},
 ]
 
-[package.metadata.build.clib]
+[package.metadata.build.embeds]
 compression_level = 3
 
-[package.metadata.build.clib.profiles.release]
-profile = "release-clib"
+[package.metadata.build.embeds.profiles.release]
+profile = "release-embed"
 compression_level = 19
 
 # The glibc release timeline for reference: https://sourceware.org/glibc/wiki/Glibc%20Timeline
@@ -82,7 +83,7 @@ lto = true
 strip = "symbols"
 panic = "abort"
 
-[profile.release-clib]
+[profile.release-embed]
 inherits = "release"
 opt-level = "z"
 

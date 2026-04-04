@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // N.B.: We stick to stdlib as much as possible in this crate since it is re-used by the
-// python-proxy crate (forthcoming) which produces a size-sensitive binary. Particularly, no fs-err
-// or anyhow: we handle ensuring useful errors manually in this crate.
+// python-proxy crate which produces a size-sensitive binary. Particularly, no fs-err or anyhow: we
+// handle ensuring useful errors manually in this crate.
 
 #![deny(clippy::all)]
 

@@ -18,10 +18,10 @@ use target_lexicon::HOST;
 use which::which_in_global;
 
 use crate::downloads::ensure_download;
-use crate::metadata::{Build, CargoBinstall, Clib, Download, Glibc};
+use crate::metadata::{Build, CargoBinstall, Download, Embeds, Glibc};
 
 pub(crate) struct ToolBox<'a> {
-    clib: Clib<'a>,
+    emeds: Embeds<'a>,
     binstall: CargoBinstall<'a>,
     zig_version: &'a str,
     glibc: Glibc<'a>,
@@ -40,7 +40,7 @@ impl<'a> From<Build<'a>> for ToolBox<'a> {
         let downloads: Vec<(&'static str, Download<'a>)> = Vec::new();
 
         Self {
-            clib: build.clib,
+            emeds: build.embeds,
             binstall: build.cargo_binstall,
             zig_version: build.zig_version,
             glibc: build.glibc,
@@ -77,7 +77,7 @@ impl<'a> ToolBox<'a> {
             }
         }
         Ok(ToolInventory {
-            clib: self.clib,
+            embeds: self.emeds,
             binstall: self.binstall,
             downloads: self.downloads,
             zig,
@@ -191,7 +191,7 @@ impl<'a> Zig<'a> {
 }
 
 pub(crate) struct ToolInventory<'a> {
-    clib: Clib<'a>,
+    embeds: Embeds<'a>,
     glibc: Glibc<'a>,
     binstall: CargoBinstall<'a>,
     zig: Zig<'a>,
@@ -201,7 +201,7 @@ pub(crate) struct ToolInventory<'a> {
 }
 
 pub enum ToolInstallation<'a> {
-    Success((Clib<'a>, Glibc<'a>, Vec<FoundTool>)),
+    Success((Embeds<'a>, Glibc<'a>, Vec<FoundTool>)),
     Failure((Zig<'a>, Vec<BinstallTool>, OsString)),
 }
 
@@ -250,7 +250,7 @@ impl<'a> ToolInventory<'a> {
             });
         }
         Ok(ToolInstallation::Success((
-            self.clib,
+            self.embeds,
             self.glibc,
             found_tools,
         )))

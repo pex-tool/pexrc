@@ -3,5 +3,5 @@
 
 #![deny(clippy::all)]
 
-pub mod clibs;
 pub mod commands;
+pub mod embeds;

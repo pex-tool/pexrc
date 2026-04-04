@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::bail;
 use itertools::Itertools;
-pub use metadata::{Clib, ClibConfiguration, Glibc};
+pub use metadata::{Embeds, EmbedsConfiguration, Glibc};
 pub use rust_toolchain::{ClassifiedTargets, GnuLinux, Target};
 use rust_toolchain::{Toolchain, parse_toolchain};
 
@@ -49,7 +49,7 @@ pub fn ensure_tools_installed<'a>(
     cargo_manifest_contents: &'a str,
     target_dir: &Path,
     is_build_script: bool,
-) -> anyhow::Result<(Clib<'a>, Glibc<'a>, Vec<FoundTool>)> {
+) -> anyhow::Result<(Embeds<'a>, Glibc<'a>, Vec<FoundTool>)> {
     let install_dirs = InstallDirs::system("pexrc-dev").unwrap_or_else(|| {
         let cache_base_dir = target_dir.join(".pexrc-dev");
         if is_build_script {

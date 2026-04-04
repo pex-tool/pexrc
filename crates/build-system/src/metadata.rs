@@ -63,23 +63,23 @@ impl<'a> Glibc<'a> {
 }
 
 #[derive(Deserialize)]
-pub struct ClibConfiguration<'a> {
+pub struct EmbedsConfiguration<'a> {
     pub profile: &'a str,
     pub compression_level: i32,
 }
 
 #[derive(Deserialize)]
-pub struct Clib<'a> {
+pub struct Embeds<'a> {
     pub compression_level: i32,
     #[serde(borrow)]
-    profiles: HashMap<&'a str, ClibConfiguration<'a>>,
+    profiles: HashMap<&'a str, EmbedsConfiguration<'a>>,
 }
 
-impl<'a> Clib<'a> {
-    pub fn configuration_for(&'a mut self, profile: &'a str) -> &'a ClibConfiguration<'a> {
+impl<'a> Embeds<'a> {
+    pub fn configuration_for(&'a mut self, profile: &'a str) -> &'a EmbedsConfiguration<'a> {
         self.profiles
             .entry(profile)
-            .or_insert_with(|| ClibConfiguration {
+            .or_insert_with(|| EmbedsConfiguration {
                 profile,
                 compression_level: self.compression_level,
             })
@@ -139,7 +139,7 @@ pub(crate) struct Build<'a> {
     #[serde(borrow)]
     pub(crate) cargo_binstall: CargoBinstall<'a>,
     #[serde(borrow)]
-    pub(crate) clib: Clib<'a>,
+    pub(crate) embeds: Embeds<'a>,
     #[serde(borrow)]
     pub(crate) glibc: Glibc<'a>,
 

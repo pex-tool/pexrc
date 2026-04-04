@@ -4,6 +4,7 @@
 [package]
 name = "build-system"
 edition = "2024"
+publish = false
 
 [dependencies]
 anyhow = { workspace = true }
