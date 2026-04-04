@@ -5,27 +5,32 @@ use std::cmp;
 
 use cache::Fingerprint;
 use digest::Digest;
+use include_dir::File;
 use owo_colors::OwoColorize;
 use sha2::Sha256;
 
-use crate::clibs::CLIBS_DIR;
+use crate::embeds::{CLIBS_DIR, PROXIES_DIR};
+
+fn iter_embeds<'a>() -> impl Iterator<Item = &'a File<'a>> {
+    CLIBS_DIR.files().chain(PROXIES_DIR.files())
+}
 
 pub fn display() -> anyhow::Result<()> {
     let mut paths = Vec::new();
     let mut max_width = 0;
-    for clib in CLIBS_DIR.files() {
+    for clib in iter_embeds() {
         let path = clib.path().display().to_string();
         max_width = cmp::max(max_width, path.len());
         paths.push(path);
     }
     let count = paths.len();
     anstream::println!(
-        "There {are} {count} embedded {clibs}:",
+        "There {are} {count} {embeds}:",
         are = if count == 1 { "is" } else { "are" },
         count = count.yellow(),
-        clibs = if count == 1 { "clib" } else { "clibs" }
+        embeds = if count == 1 { "embed" } else { "embeds" }
     );
-    for (idx, (clib, path)) in CLIBS_DIR.files().zip(paths).enumerate() {
+    for (idx, (clib, path)) in iter_embeds().zip(paths).enumerate() {
         let mut digest = Sha256::new();
         digest.update(clib.contents());
         let fingerprint = Fingerprint::new(digest);

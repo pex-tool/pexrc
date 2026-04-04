@@ -1,0 +1,11 @@
+# Copyright 2026 Pex project contributors.
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "python-proxy"
+edition = "2024"
+publish = false
+
+[dependencies]
+cache = { path = "../cache" }
+platform = { path = "../platform" }

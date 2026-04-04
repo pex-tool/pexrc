@@ -4,6 +4,7 @@
 [package]
 name = "interpreter"
 edition = "2024"
+publish = false
 
 [dependencies]
 anyhow = { workspace = true }

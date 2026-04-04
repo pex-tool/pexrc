@@ -30,8 +30,7 @@ jobs:
         uses: actions/checkout@v6
       - name: Check Formatting and Lints
         run: |
-          rustup toolchain add nightly -c rustfmt
-          cargo +nightly fmt --check --all
+          cargo --color always fmt --check --all
           cargo --color always clippy --locked --all
 
   setup-cross-build:

@@ -7,8 +7,8 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use clap::{ArgAction, Parser, Subcommand};
-use pexrc::clibs::CLIB_BY_TARGET;
 use pexrc::commands::{info, inject};
+use pexrc::embeds::{CLIB_BY_TARGET, PROXY_BY_TARGET};
 
 /// Pex Runtime Control.
 #[derive(Parser)]
@@ -54,22 +54,35 @@ fn main() -> anyhow::Result<()> {
             compression_level,
             targets,
         } => {
-            let clibs = if !targets.is_empty() {
-                Some(
-                    targets
-                        .into_iter()
-                        .map(|target| {
-                            CLIB_BY_TARGET.get(target.as_str()).copied().expect(
+            let (clibs, proxies) = if !targets.is_empty() {
+                (
+                    Some(
+                        targets
+                            .iter()
+                            .map(|target| {
+                                CLIB_BY_TARGET.get(target.as_str()).copied().expect(
                                 "The allowed --target values are all keys in the CLIB_BY_TARGET \
                                 map.",
                             )
-                        })
-                        .collect::<HashSet<_>>(),
+                            })
+                            .collect::<HashSet<_>>(),
+                    ),
+                    Some(
+                        targets
+                            .iter()
+                            .map(|target| {
+                                PROXY_BY_TARGET.get(target.as_str()).copied().expect(
+                                "The allowed --target values are all keys in the PROXY_BY_TARGET \
+                                map.",
+                            )
+                            })
+                            .collect::<HashSet<_>>(),
+                    ),
                 )
             } else {
-                None
+                (None, None)
             };
-            inject::inject_all(pexes, compression_level, clibs.as_ref())?;
+            inject::inject_all(pexes, compression_level, clibs.as_ref(), proxies.as_ref())?;
             Ok(())
         }
         Commands::Info => info::display(),

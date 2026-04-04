@@ -1,6 +1,10 @@
+# Copyright 2026 Pex project contributors.
+# SPDX-License-Identifier: Apache-2.0
+
 [package]
 name = "package"
 edition = "2024"
+publish = false
 
 [dependencies]
 anstream = { workspace = true }

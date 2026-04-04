@@ -19,15 +19,16 @@ use tempfile::NamedTempFile;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
-use crate::clibs::CLIBS_DIR;
+use crate::embeds::{CLIBS_DIR, PROXIES_DIR};
 
 pub fn inject_all(
     pexes: Vec<PathBuf>,
     compression_level: Option<i64>,
     clibs: Option<&HashSet<&Path>>,
+    proxies: Option<&HashSet<&Path>>,
 ) -> anyhow::Result<()> {
     for pex in pexes {
-        inject(&pex, compression_level, clibs)?
+        inject(&pex, compression_level, clibs, proxies)?
     }
     Ok(())
 }
@@ -36,15 +37,20 @@ fn inject(
     pex: &Path,
     compression_level: Option<i64>,
     clibs: Option<&HashSet<&Path>>,
+    proxies: Option<&HashSet<&Path>>,
 ) -> anyhow::Result<()> {
     let pex = Pex::load(pex)?;
     match pex.layout {
-        Layout::Loose | Layout::Packed => inject_pex_dir(pex.path, clibs),
-        Layout::ZipApp => inject_pex_zip(pex.path, compression_level, clibs),
+        Layout::Loose | Layout::Packed => inject_pex_dir(pex.path, clibs, proxies),
+        Layout::ZipApp => inject_pex_zip(pex.path, compression_level, clibs, proxies),
     }
 }
 
-fn inject_pex_dir(pex: &Path, clibs: Option<&HashSet<&Path>>) -> anyhow::Result<()> {
+fn inject_pex_dir(
+    pex: &Path,
+    clibs: Option<&HashSet<&Path>>,
+    proxies: Option<&HashSet<&Path>>,
+) -> anyhow::Result<()> {
     // Make sure we have a shebang early. This partially validates the pex to inject is a valid one
     // before expending too much effort copying files below.
     let shebang = if let Some(sh_boot_shebang) = sh_boot_shebang(pex, true)? {
@@ -94,9 +100,8 @@ fn inject_pex_dir(pex: &Path, clibs: Option<&HashSet<&Path>>) -> anyhow::Result<
     scripts.write(dest_pex.path())?;
 
     let dst = pex.with_extension("pexrc");
-    let clib_dir = pex_dir.join(".clib");
+    let clib_dir = pex_dir.join(".clibs");
     fs::create_dir_all(&clib_dir)?;
-
     info!("Embedded clibs:");
     for file in CLIBS_DIR.files() {
         let path = file.path();
@@ -105,18 +110,19 @@ fn inject_pex_dir(pex: &Path, clibs: Option<&HashSet<&Path>>) -> anyhow::Result<
         {
             continue;
         }
-
-        let dst_path = clib_dir.join(path);
-        anstream::eprint!(
-            "Writing {entry} {size} bytes to {dst_path}...",
-            entry = path.display().blue(),
-            size = file.contents().len(),
-            dst_path = dst.join("__pex__").join(".clib").join(path).display(),
-        );
-        let mut dst_file = File::create_new(dst_path)?;
-        let mut clib_reader = zstd::Decoder::new(file.contents())?;
-        io::copy(&mut clib_reader, &mut dst_file)?;
-        anstream::eprintln!("{}.", "done".green())
+        embed_in_dir(path, file.contents(), &clib_dir, false)?;
+    }
+    let scripts_dir = pex_dir.join(".proxies");
+    fs::create_dir_all(&scripts_dir)?;
+    info!("Embedded proxies:");
+    for file in PROXIES_DIR.files() {
+        let path = file.path();
+        if let Some(proxies) = proxies.as_ref()
+            && !proxies.contains(path)
+        {
+            continue;
+        }
+        embed_in_dir(path, file.contents(), &scripts_dir, true)?;
     }
 
     write_boot(dest_pex.path(), &shebang)?;
@@ -131,10 +137,34 @@ fn inject_pex_dir(pex: &Path, clibs: Option<&HashSet<&Path>>) -> anyhow::Result<
     Ok(())
 }
 
+fn embed_in_dir(
+    path: &Path,
+    contents: &[u8],
+    dst_dir: &Path,
+    mark_executable: bool,
+) -> anyhow::Result<()> {
+    let dst_path = dst_dir.join(path.file_name().expect("Embeds have file names."));
+    anstream::eprint!(
+        "Writing {entry} {size} bytes to {dst_path}...",
+        entry = path.display().blue(),
+        size = contents.len(),
+        dst_path = dst_path.display(),
+    );
+    let mut dst_file = File::create_new(dst_path)?;
+    let mut embed_reader = zstd::Decoder::new(contents)?;
+    io::copy(&mut embed_reader, &mut dst_file)?;
+    if mark_executable {
+        platform::mark_executable(dst_file.file_mut())?;
+    }
+    anstream::eprintln!("{}.", "done".green());
+    Ok(())
+}
+
 fn inject_pex_zip(
     pex: &Path,
     compression_level: Option<i64>,
     clibs: Option<&HashSet<&Path>>,
+    proxies: Option<&HashSet<&Path>>,
 ) -> anyhow::Result<()> {
     let zip_read_fp = File::open(pex)?;
     let mut src_zip = ZipArchive::new(&zip_read_fp)?;
@@ -216,7 +246,7 @@ fn inject_pex_zip(
 
     let deflate_options =
         SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
-    dst_zip.add_directory("__pex__/.clib", directory_options)?;
+    dst_zip.add_directory("__pex__/.clibs", directory_options)?;
     info!("Embedded clibs:");
     for file in CLIBS_DIR.files() {
         let path = file.path();
@@ -225,22 +255,32 @@ fn inject_pex_zip(
         {
             continue;
         }
-        let dst_path = format!(
-            "__pex__/.clib/{clib}",
-            clib = path
-                .to_str()
-                .expect("Embedded C-lib file names are utf-8 strings.")
-        );
-        anstream::eprint!(
-            "Writing {entry} {size} bytes to {dst_path}...",
-            entry = path.display().blue(),
-            size = file.contents().len()
-        );
-        dst_zip.start_file(dst_path, deflate_options)?;
-        let mut clib_reader = zstd::Decoder::new(file.contents())?;
-        io::copy(&mut clib_reader, &mut dst_zip)?;
-        anstream::eprintln!("{}.", "done".green())
+        embed_in_zip(
+            path,
+            file.contents(),
+            &mut dst_zip,
+            "__pex__/.clibs",
+            deflate_options,
+        )?;
     }
+    dst_zip.add_directory("__pex__/.proxies", directory_options)?;
+    info!("Embedded proxies:");
+    for file in PROXIES_DIR.files() {
+        let path = file.path();
+        if let Some(proxies) = proxies.as_ref()
+            && !proxies.contains(path)
+        {
+            continue;
+        }
+        embed_in_zip(
+            path,
+            file.contents(),
+            &mut dst_zip,
+            "__pex__/.proxies",
+            zstd_file_options,
+        )?;
+    }
+
     inject_boot(&mut dst_zip, deflate_options)?;
 
     dst_zip.finish()?;
@@ -252,6 +292,33 @@ fn inject_pex_zip(
     }
     dst_zip_fp.persist(dst)?;
 
+    Ok(())
+}
+
+fn embed_in_zip(
+    path: &Path,
+    contents: &[u8],
+    dst_zip: &mut ZipWriter<impl Write + Seek>,
+    dst_dir: &str,
+    file_options: SimpleFileOptions,
+) -> anyhow::Result<()> {
+    let dst_path = format!(
+        "{dst_dir}/{embed}",
+        embed = path
+            .file_name()
+            .expect("Embeds have file names.")
+            .to_str()
+            .expect("Embed file names are utf-8 strings.")
+    );
+    anstream::eprint!(
+        "Writing {entry} {size} bytes to {dst_path}...",
+        entry = path.display().blue(),
+        size = contents.len()
+    );
+    dst_zip.start_file(dst_path, file_options)?;
+    let mut embed_reader = zstd::Decoder::new(contents)?;
+    io::copy(&mut embed_reader, dst_zip)?;
+    anstream::eprintln!("{}.", "done".green());
     Ok(())
 }
 

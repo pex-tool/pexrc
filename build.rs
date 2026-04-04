@@ -2,17 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #![deny(clippy::all)]
+#![feature(exact_size_is_empty)]
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::{env, io, iter};
+use std::sync::LazyLock;
+use std::{env, io};
 
 use anyhow::{anyhow, bail};
 use bstr::ByteSlice;
 use build_system::{
     ClassifiedTargets,
-    ClibConfiguration,
+    EmbedsConfiguration,
     FoundTool,
     Target,
     classify_targets,
@@ -21,6 +23,28 @@ use build_system::{
 use fs_err as fs;
 use fs_err::File;
 use itertools::Itertools;
+
+const CARGO_UNSTABLE_FLAGS: [&str; 2] = [
+    // N.B.: This gets us the stdlib compiled locally and LTO'ed into the binaries and libraries
+    // we produce for space (and speed) savings.
+    // See https://github.com/johnthagen/min-sized-rust for the inspiration.
+    "-Zbuild-std=std,panic_abort",
+    "-Zbuild-std-features=optimize_for_size",
+];
+
+static RUSTFLAGS: LazyLock<String> = LazyLock::new(|| {
+    [
+        // N.B.: These options help reduce binary size.
+        // See https://github.com/johnthagen/min-sized-rust for the inspiration.
+        "-Zunstable-options",
+        "-Zfmt-debug=none",
+        "-Zlocation-detail=none",
+        "-Cpanic=immediate-abort",
+        // This gets us lib musl dynamic linking.
+        "-Ctarget-feature=-crt-static",
+    ]
+    .join(" ")
+});
 
 fn main() -> anyhow::Result<()> {
     println!("cargo::rerun-if-changed=crates");
@@ -39,11 +63,11 @@ fn main() -> anyhow::Result<()> {
         PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("target")
     };
 
-    let (mut clib, glibc, found_tools) =
+    let (mut embeds, glibc, found_tools) =
         ensure_tools_installed(&cargo, &cargo_manifest_contents, &target_dir, true)?;
     println!("cargo::rerun-if-env-changed=PROFILE");
     let profile = env::var("PROFILE")?;
-    let clib = clib.configuration_for(&profile);
+    let embeds_configuration = embeds.configuration_for(&profile);
 
     println!("cargo::rerun-if-env-changed=PEXRC_TARGETS");
     let all_targets = match env::var("PEXRC_TARGETS")
@@ -60,24 +84,29 @@ fn main() -> anyhow::Result<()> {
         None => false,
     };
 
-    let clibs_dir = {
+    let embeds_dir = {
         let out_dir = env::var_os("OUT_DIR").unwrap();
-        let clibs_dir = PathBuf::from(out_dir).join("clibs");
+        let embeds_dir = PathBuf::from(out_dir).join("embeds");
         if all_targets {
-            clibs_dir.join("all")
+            embeds_dir.join("all")
         } else {
-            clibs_dir.join("current")
+            embeds_dir.join("current")
         }
     };
-    fs::create_dir_all(&clibs_dir)?;
+    fs::create_dir_all(&embeds_dir)?;
     println!(
-        "cargo::rustc-env=CLIBS_DIR={clibs_dir}",
-        clibs_dir = clibs_dir.display()
+        "cargo::rustc-env=EMBEDS_DIR={embeds_dir}",
+        embeds_dir = embeds_dir.to_str().ok_or_else(|| {
+            anyhow!(
+                "Build cannot proceed with project housed in a non-UTF-8 directory: {embeds_dir}",
+                embeds_dir = embeds_dir.display()
+            )
+        })?
     );
 
     // N.B.: We need to use a custom --target-dir to avoid a deadlock on the ambient target that
     // would otherwise occur calling into cargo build recursively below.
-    let tgt_path = target_dir.join("clib");
+    let tgt_path = target_dir.join("embeds");
     let tgt_arg = tgt_path.to_str().ok_or_else(|| {
         anyhow!(
             "The target directory of {target_dir} must be a UTF-8 path",
@@ -93,29 +122,29 @@ fn main() -> anyhow::Result<()> {
         custom_cargo_build(
             &cargo,
             &["zigbuild", "--target-dir", tgt_arg],
-            clib.profile,
+            embeds_configuration.profile,
             &found_tools,
             targets.iter_zigbuild_targets().map(Target::zigbuild_target),
         )?;
         custom_cargo_build(
             &cargo,
             &["xwin", "build", "--target-dir", tgt_arg],
-            clib.profile,
+            embeds_configuration.profile,
             &found_tools,
             targets.iter_xwin_targets().map(Target::as_str),
         )?;
-        collect_clibs(&targets, &tgt_path, clib, &clibs_dir, true)
+        collect_embeds(&targets, &tgt_path, embeds_configuration, &embeds_dir, true)
     } else {
         let target = env::var("TARGET")?;
         let targets = ClassifiedTargets::parse([target.as_str()].into_iter(), &glibc);
         custom_cargo_build(
             &cargo,
             &["build", "--target-dir", tgt_arg],
-            clib.profile,
+            embeds_configuration.profile,
             &found_tools,
-            iter::empty(),
+            [Target::current(&glibc).as_str()].into_iter(),
         )?;
-        collect_clibs(&targets, &tgt_path, clib, &clibs_dir, true)
+        collect_embeds(&targets, &tgt_path, embeds_configuration, &embeds_dir, true)
     }
 }
 
@@ -124,13 +153,18 @@ fn custom_cargo_build<'a>(
     custom_build_args: &[&str],
     profile: &str,
     found_tools: &[FoundTool],
-    targets: impl Iterator<Item = &'a str>,
+    targets: impl ExactSizeIterator<Item = &'a str>,
 ) -> anyhow::Result<()> {
+    if targets.is_empty() {
+        return Ok(());
+    }
+
     let mut cmd = Command::new(cargo);
     let cmd = cmd
         .stderr(Stdio::piped())
         .env_remove("CARGO_ENCODED_RUSTFLAGS")
-        .env("CARGO_TERM_COLOR", "always");
+        .env("CARGO_TERM_COLOR", "always")
+        .env("RUSTFLAGS", RUSTFLAGS.as_str());
     for found_tool in found_tools {
         println!(
             "cargo::rustc-env={env_var}={path}",
@@ -139,7 +173,9 @@ fn custom_cargo_build<'a>(
         );
         cmd.env(found_tool.env_var, &found_tool.path);
     }
-    cmd.args(custom_build_args).args(["--package", "clib"]);
+    cmd.args(custom_build_args)
+        .args(CARGO_UNSTABLE_FLAGS)
+        .args(["--package", "clib", "--package", "python-proxy"]);
     cmd.args([
         "--profile",
         if profile == "debug" { "dev" } else { profile },
@@ -161,40 +197,68 @@ fn custom_cargo_build<'a>(
     )
 }
 
-fn collect_clibs<'a>(
+fn collect_embeds<'a>(
     targets: &'a ClassifiedTargets<'a>,
     target_dir: &Path,
-    clib: &'a ClibConfiguration<'a>,
-    clibs_dir: &Path,
+    embeds_configuration: &'a EmbedsConfiguration<'a>,
+    embeds_dir: &Path,
     compress: bool,
 ) -> anyhow::Result<()> {
-    let is_just_current_target = targets.is_just_current()?;
+    let clibs_dir = embeds_dir.join("clibs");
+    fs::create_dir_all(&clibs_dir)?;
+    let proxies_dir = embeds_dir.join("proxies");
+    fs::create_dir_all(&proxies_dir)?;
     for target in targets.iter_all_targets() {
         let clib_name = target.shared_library_name("pexrc");
-        let clib_path = if is_just_current_target.is_some() {
-            target_dir.join(clib.profile).join("deps")
-        } else {
-            target_dir.join(target.as_str()).join(clib.profile)
-        }
-        .join(&clib_name);
-        if !clib_path.exists() {
-            eprintln!(
-                "The clib for {target} does not exist at {clib_path}!",
-                clib_path = clib_path.display(),
-                target = target.as_str(),
-            );
-        }
-        let mut dst = File::create(clibs_dir.join(format!(
-            "{target}.{clib_name}",
-            target = target.simplified_target_triple()
-        )))?;
-        if compress {
-            let encoder = zstd::Encoder::new(dst, clib.compression_level)?;
-            io::copy(&mut File::open(clib_path)?, &mut encoder.auto_finish())?;
-        } else {
-            io::copy(&mut File::open(clib_path)?, &mut dst)?;
-        }
+        collect_embed(
+            &clib_name,
+            &clibs_dir,
+            embeds_configuration,
+            target,
+            target_dir,
+            compress,
+        )?;
+        let python_proxy_name = target.binary_name("python-proxy", None);
+        collect_embed(
+            &python_proxy_name,
+            &proxies_dir,
+            embeds_configuration,
+            target,
+            target_dir,
+            compress,
+        )?;
     }
+    Ok(())
+}
 
+fn collect_embed<'a>(
+    embed_name: &str,
+    embed_dir: &Path,
+    embeds_configuration: &'a EmbedsConfiguration<'a>,
+    target: &'a Target,
+    target_dir: &Path,
+    compress: bool,
+) -> anyhow::Result<()> {
+    let embed_path = target_dir
+        .join(target.as_str())
+        .join(embeds_configuration.profile)
+        .join(embed_name);
+    if !embed_path.exists() {
+        eprintln!(
+            "The embed for {target} does not exist at {embed_path}!",
+            embed_path = embed_path.display(),
+            target = target.as_str(),
+        );
+    }
+    let mut dst = File::create(embed_dir.join(format!(
+        "{target}.{embed_name}",
+        target = target.simplified_target_triple()
+    )))?;
+    if compress {
+        let encoder = zstd::Encoder::new(dst, embeds_configuration.compression_level)?;
+        io::copy(&mut File::open(embed_path)?, &mut encoder.auto_finish())?;
+    } else {
+        io::copy(&mut File::open(embed_path)?, &mut dst)?;
+    }
     Ok(())
 }

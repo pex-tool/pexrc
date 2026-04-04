@@ -7,8 +7,8 @@ edition = "2024"
 publish = false
 
 # N.B.: We stick to stdlib as much as possible in this crate since it is re-used by the python-proxy
-# crate (forthcoming) which produces a size-sensitive binary. Particularly, no fs-err or anyhow: we
-# handle ensuring useful errors manually in this crate.
+# crate which produces a size-sensitive binary. Particularly, no fs-err or anyhow: we handle 
+# ensuring useful errors manually in this crate.
 
 [target.'cfg(windows)'.dependencies]
 # N.B.: Although is_executable is cross-platform, we only use it for Windows. The nix unistd access
