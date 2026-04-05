@@ -11,13 +11,21 @@ use std::{env, mem};
 
 use anyhow::bail;
 use cache::{CacheDir, HashOptions, Key, atomic_dir};
-use interpreter::SearchPath;
+use interpreter::{Interpreter, SearchPath};
 use itertools::Itertools;
 use log::{info, warn};
 use logging_timer::time;
 use pex::{Pex, PexPath};
 use regex::bytes::Regex;
-use venv::{Virtualenv, populate, populate_user_code_and_wheels};
+use venv::{Linker, Virtualenv, populate, populate_user_code_and_wheels};
+
+struct PythonProxyLinker<'a>(&'a Pex<'a>);
+
+impl<'a> Linker for PythonProxyLinker<'a> {
+    fn link(&self, interpreter: &Interpreter, path: &Path) -> anyhow::Result<()> {
+        python_proxy::create(self.0, interpreter, path, None)
+    }
+}
 
 pub fn boot(
     python: impl AsRef<Path>,
@@ -98,6 +106,7 @@ fn prepare_venv<'a>(
         let venv = Virtualenv::create(
             resolve.interpreter,
             Cow::Borrowed(work_dir),
+            PythonProxyLinker(&pex),
             &mut resolve.scripts,
             pex.info.venv_system_site_packages,
         )?;

@@ -193,6 +193,7 @@ dependencies = [
  "strum",
  "strum_macros",
  "tar",
+ "target",
  "target-lexicon",
  "tempfile",
  "toml",
@@ -1643,6 +1644,7 @@ dependencies = [
  "logging_timer",
  "pex",
  "platform",
+ "python-proxy",
  "regex",
  "venv",
 ]
@@ -1776,8 +1778,13 @@ dependencies = [
 name = "python-proxy"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
  "cache",
+ "interpreter",
+ "pex",
  "platform",
+ "target",
+ "zip",
 ]
 
 [[package]]
@@ -2477,6 +2484,14 @@ dependencies = [
  "filetime",
  "libc",
  "xattr",
+]
+
+[[package]]
+name = "target"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "target-lexicon",
 ]
 
 [[package]]

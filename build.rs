@@ -13,10 +13,10 @@ use std::{env, io};
 use anyhow::{anyhow, bail};
 use bstr::ByteSlice;
 use build_system::{
+    BuildTarget,
     ClassifiedTargets,
     EmbedsConfiguration,
     FoundTool,
-    Target,
     classify_targets,
     ensure_tools_installed,
 };
@@ -93,6 +93,9 @@ fn main() -> anyhow::Result<()> {
             embeds_dir.join("current")
         }
     };
+    if embeds_dir.is_dir() {
+        fs::remove_dir_all(&embeds_dir)?;
+    }
     fs::create_dir_all(&embeds_dir)?;
     println!(
         "cargo::rustc-env=EMBEDS_DIR={embeds_dir}",
@@ -114,6 +117,20 @@ fn main() -> anyhow::Result<()> {
         )
     })?;
 
+    println!("cargo::rerun-if-env-changed=PEXRC_OPTIMIZE_SIZE");
+    let optimize_for_size = if let Some(value) = env::var_os("PEXRC_OPTIMIZE_SIZE") {
+        match value.to_ascii_lowercase().as_encoded_bytes() {
+            b"on" | b"1" | b"true" => true,
+            b"off" | b"0" | b"false" => false,
+            _ => bail!(
+                "PEXRC_OPTIMIZE_SIZE must be on|1|true or else off|0|false, given: {value}",
+                value = value.display()
+            ),
+        }
+    } else {
+        true
+    };
+
     println!("cargo::rerun-if-env-changed=PEXRC_TARGETS");
     if all_targets {
         println!("cargo::rerun-if-changed=rust-toolchain");
@@ -124,14 +141,18 @@ fn main() -> anyhow::Result<()> {
             &["zigbuild", "--target-dir", tgt_arg],
             embeds_configuration.profile,
             &found_tools,
-            targets.iter_zigbuild_targets().map(Target::zigbuild_target),
+            targets
+                .iter_zigbuild_targets()
+                .map(BuildTarget::zigbuild_target),
+            optimize_for_size,
         )?;
         custom_cargo_build(
             &cargo,
             &["xwin", "build", "--target-dir", tgt_arg],
             embeds_configuration.profile,
             &found_tools,
-            targets.iter_xwin_targets().map(Target::as_str),
+            targets.iter_xwin_targets().map(BuildTarget::as_str),
+            optimize_for_size,
         )?;
         collect_embeds(&targets, &tgt_path, embeds_configuration, &embeds_dir, true)
     } else {
@@ -142,7 +163,8 @@ fn main() -> anyhow::Result<()> {
             &["build", "--target-dir", tgt_arg],
             embeds_configuration.profile,
             &found_tools,
-            [Target::current(&glibc).as_str()].into_iter(),
+            [BuildTarget::current(&glibc).as_str()].into_iter(),
+            optimize_for_size,
         )?;
         collect_embeds(&targets, &tgt_path, embeds_configuration, &embeds_dir, true)
     }
@@ -154,6 +176,7 @@ fn custom_cargo_build<'a>(
     profile: &str,
     found_tools: &[FoundTool],
     targets: impl ExactSizeIterator<Item = &'a str>,
+    optimize_for_size: bool,
 ) -> anyhow::Result<()> {
     if targets.is_empty() {
         return Ok(());
@@ -163,8 +186,10 @@ fn custom_cargo_build<'a>(
     let cmd = cmd
         .stderr(Stdio::piped())
         .env_remove("CARGO_ENCODED_RUSTFLAGS")
-        .env("CARGO_TERM_COLOR", "always")
-        .env("RUSTFLAGS", RUSTFLAGS.as_str());
+        .env("CARGO_TERM_COLOR", "always");
+    if optimize_for_size {
+        cmd.env("RUSTFLAGS", RUSTFLAGS.as_str());
+    }
     for found_tool in found_tools {
         println!(
             "cargo::rustc-env={env_var}={path}",
@@ -173,9 +198,12 @@ fn custom_cargo_build<'a>(
         );
         cmd.env(found_tool.env_var, &found_tool.path);
     }
-    cmd.args(custom_build_args)
-        .args(CARGO_UNSTABLE_FLAGS)
-        .args(["--package", "clib", "--package", "python-proxy"]);
+
+    cmd.args(custom_build_args);
+    if optimize_for_size {
+        cmd.args(CARGO_UNSTABLE_FLAGS);
+    }
+    cmd.args(["--package", "clib", "--package", "python-proxy"]);
     cmd.args([
         "--profile",
         if profile == "debug" { "dev" } else { profile },
@@ -210,21 +238,28 @@ fn collect_embeds<'a>(
     fs::create_dir_all(&proxies_dir)?;
     for target in targets.iter_all_targets() {
         let clib_name = target.shared_library_name("pexrc");
+        let target_name = format!(
+            "{target}.{clib_name}",
+            target = target.simplified_target_triple()
+        );
         collect_embed(
             &clib_name,
             &clibs_dir,
             embeds_configuration,
             target,
             target_dir,
+            &target_name,
             compress,
         )?;
         let python_proxy_name = target.binary_name("python-proxy", None);
+        let target_name = target.fully_qualified_binary_name("python-proxy", None);
         collect_embed(
             &python_proxy_name,
             &proxies_dir,
             embeds_configuration,
             target,
             target_dir,
+            &target_name,
             compress,
         )?;
     }
@@ -235,8 +270,9 @@ fn collect_embed<'a>(
     embed_name: &str,
     embed_dir: &Path,
     embeds_configuration: &'a EmbedsConfiguration<'a>,
-    target: &'a Target,
+    target: &'a BuildTarget,
     target_dir: &Path,
+    target_name: &str,
     compress: bool,
 ) -> anyhow::Result<()> {
     let embed_path = target_dir
@@ -250,10 +286,7 @@ fn collect_embed<'a>(
             target = target.as_str(),
         );
     }
-    let mut dst = File::create(embed_dir.join(format!(
-        "{target}.{embed_name}",
-        target = target.simplified_target_triple()
-    )))?;
+    let mut dst = File::create(embed_dir.join(target_name))?;
     if compress {
         let encoder = zstd::Encoder::new(dst, embeds_configuration.compression_level)?;
         io::copy(&mut File::open(embed_path)?, &mut encoder.auto_finish())?;

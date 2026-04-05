@@ -21,6 +21,19 @@ const SCRIPTS_DIR: &str = env!("SCRIPTS_DIR");
 const PYTHON_EXE: &str = concatcp!("python", EXE_SUFFIX);
 const VENV_PYTHON_RELPATH: &str = concatcp!(SCRIPTS_DIR, MAIN_SEPARATOR_STR, PYTHON_EXE);
 
+pub trait Linker {
+    fn link(&self, interpreter: &Interpreter, path: &Path) -> anyhow::Result<()>;
+}
+
+pub struct FileSystemLinker();
+
+impl Linker for FileSystemLinker {
+    fn link(&self, interpreter: &Interpreter, path: &Path) -> anyhow::Result<()> {
+        symlink_or_link_or_copy(&interpreter.realpath, path, false)?;
+        Ok(())
+    }
+}
+
 pub struct Virtualenv<'a> {
     pub interpreter: Interpreter,
     pub bin_dir_relpath: &'a str,
@@ -65,6 +78,7 @@ impl<'a> Virtualenv<'a> {
     pub fn create(
         interpreter: Interpreter,
         path: Cow<'a, Path>,
+        linker: impl Linker,
         scripts: &mut Scripts,
         include_system_site_packages: bool,
     ) -> anyhow::Result<Self> {
@@ -75,6 +89,7 @@ impl<'a> Virtualenv<'a> {
                 create_pep_405_venv(
                     interpreter,
                     path.as_ref(),
+                    linker,
                     include_system_site_packages,
                     scripts,
                 )?
@@ -83,6 +98,7 @@ impl<'a> Virtualenv<'a> {
                 create_virtualenv_venv(
                     &interpreter,
                     path.as_ref(),
+                    linker,
                     virtualenv_script,
                     include_system_site_packages,
                 )?
@@ -107,6 +123,7 @@ impl<'a> Virtualenv<'a> {
 fn create_pep_405_venv<'a>(
     interpreter: Interpreter,
     path: &Path,
+    linker: impl Linker,
     include_system_site_packages: bool,
     scripts: &mut Scripts,
 ) -> anyhow::Result<Cow<'a, Path>> {
@@ -130,11 +147,7 @@ fn create_pep_405_venv<'a>(
     )?;
     let scripts_dir = path.join(SCRIPTS_DIR);
     fs::create_dir_all(&scripts_dir)?;
-    symlink_or_link_or_copy(
-        &base_interpreter.realpath,
-        scripts_dir.join(PYTHON_EXE),
-        false,
-    )?;
+    linker.link(&base_interpreter, &scripts_dir.join(PYTHON_EXE))?;
     let site_packages_relpath = site_packages_relpath(&base_interpreter);
     fs::create_dir_all(path.join(site_packages_relpath.as_ref()))?;
     Ok(site_packages_relpath)
@@ -143,6 +156,7 @@ fn create_pep_405_venv<'a>(
 fn create_virtualenv_venv<'a>(
     interpreter: &Interpreter,
     path: &Path,
+    _linker: impl Linker,
     virtualenv_script: VendoredVirtualenv<'a>,
     include_system_site_packages: bool,
 ) -> anyhow::Result<Cow<'a, Path>> {
@@ -176,6 +190,8 @@ fn create_virtualenv_venv<'a>(
             stderr = String::from_utf8_lossy(&output.stderr)
         )
     }
+    // TODO: XXX: Replace the non-symlink pythons with a python-proxy (+ hardlinks for extras?).
+    //  It's not yet clear if this can be done under virtualenv + with -E.
     Ok(site_packages_relpath(interpreter))
 }
 
@@ -216,7 +232,7 @@ mod tests {
     use scripts::{IdentifyInterpreter, Scripts};
     use testing::{embedded_scripts, python_exe, tmp_dir};
 
-    use crate::virtualenv::{Path, Virtualenv};
+    use crate::virtualenv::{FileSystemLinker, Path, Virtualenv};
 
     #[rstest]
     fn test_create(python_exe: &Path, tmp_dir: PathBuf, mut embedded_scripts: Scripts) {
@@ -230,6 +246,7 @@ mod tests {
         let venv = Virtualenv::create(
             interpreter,
             Cow::Owned(tmp_dir),
+            FileSystemLinker(),
             &mut embedded_scripts,
             false,
         )

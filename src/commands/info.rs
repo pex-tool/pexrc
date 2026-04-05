@@ -18,8 +18,8 @@ fn iter_embeds<'a>() -> impl Iterator<Item = &'a File<'a>> {
 pub fn display() -> anyhow::Result<()> {
     let mut paths = Vec::new();
     let mut max_width = 0;
-    for clib in iter_embeds() {
-        let path = clib.path().display().to_string();
+    for embed in iter_embeds() {
+        let path = embed.path().display().to_string();
         max_width = cmp::max(max_width, path.len());
         paths.push(path);
     }
@@ -30,16 +30,16 @@ pub fn display() -> anyhow::Result<()> {
         count = count.yellow(),
         embeds = if count == 1 { "embed" } else { "embeds" }
     );
-    for (idx, (clib, path)) in iter_embeds().zip(paths).enumerate() {
+    for (idx, (embed, path)) in iter_embeds().zip(paths).enumerate() {
         let mut digest = Sha256::new();
-        digest.update(clib.contents());
+        digest.update(embed.contents());
         let fingerprint = Fingerprint::new(digest);
         anstream::println!(
             "{idx:>3}. {path} {pad}{size:<8} bytes {alg}:{fingerprint}",
             idx = (idx + 1).yellow(),
             path = path.blue(),
             pad = " ".repeat(max_width - path.len()),
-            size = clib.contents().len().yellow(),
+            size = embed.contents().len().yellow(),
             alg = "sha256-base64".green(),
             fingerprint = fingerprint.base64_digest().green(),
         )

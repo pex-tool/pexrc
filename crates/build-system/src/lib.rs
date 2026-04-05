@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use anyhow::bail;
 use itertools::Itertools;
 pub use metadata::{Embeds, EmbedsConfiguration, Glibc};
-pub use rust_toolchain::{ClassifiedTargets, GnuLinux, Target};
+pub use rust_toolchain::{BuildTarget, ClassifiedTargets};
 use rust_toolchain::{Toolchain, parse_toolchain};
 
 use crate::downloads::ensure_download;

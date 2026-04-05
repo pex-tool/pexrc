@@ -2,116 +2,67 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::borrow::Cow;
-use std::sync::LazyLock;
 
 use serde::Deserialize;
-use target_lexicon::HOST;
+use target::Target;
 
 use crate::metadata::Glibc;
 
-pub struct GnuLinux<'a> {
-    target: &'a str,
-    zigbuild_target: String,
+pub struct BuildTarget<'a> {
+    target: Target<'a>,
+    zigbuild_target: Option<String>,
 }
 
-pub enum Target<'a> {
-    Apple(&'a str),
-    GnuLinux(GnuLinux<'a>),
-    Unix(&'a str),
-    Windows(&'a str),
-}
-
-pub static CURRENT_TARGET: LazyLock<String> = LazyLock::new(|| HOST.to_string());
-
-impl<'a> Target<'a> {
+impl<'a> BuildTarget<'a> {
     pub fn current(glibc: &'a Glibc<'a>) -> Self {
-        Self::classify(CURRENT_TARGET.as_str(), glibc)
+        Self::classify_target(
+            Target::current().expect("We always build on targets we support."),
+            glibc,
+        )
     }
 
-    pub fn classify(target: &'a str, glibc: &'a Glibc<'a>) -> Target<'a> {
-        if target.contains("-apple-") {
-            Target::Apple(target)
-        } else if target.contains("-linux-") {
-            if target.ends_with("-gnu") {
-                let zigbuild_target = format!(
-                    "{target}.{glibc_version}",
-                    glibc_version = glibc.version(target)
-                );
-                Target::GnuLinux(GnuLinux {
-                    target,
-                    zigbuild_target,
-                })
-            } else {
-                Target::Unix(target)
-            }
-        } else if target.contains("-windows-") {
-            Target::Windows(target)
-        } else {
-            panic!("The build system does not know how to handle")
+    pub fn classify(target: &'a str, glibc: &'a Glibc<'a>) -> Self {
+        Self::classify_target(
+            Target::classify(target).expect("We always build on targets we support."),
+            glibc,
+        )
+    }
+    pub fn classify_target(target: Target<'a>, glibc: &'a Glibc<'a>) -> Self {
+        match target {
+            Target::Apple(_) | Target::Unix(_) | Target::Windows(_) => Self {
+                target,
+                zigbuild_target: None,
+            },
+            Target::GnuLinux(triple) => Self {
+                target,
+                zigbuild_target: Some(format!(
+                    "{triple}.{glibc_version}",
+                    glibc_version = glibc.version(triple)
+                )),
+            },
         }
     }
 
     pub fn as_str(&self) -> &str {
-        match self {
-            Target::Apple(target) | Target::Unix(target) | Target::Windows(target) => target,
-            Target::GnuLinux(linux) => linux.target,
-        }
+        self.target.as_str()
     }
 
     pub fn zigbuild_target(&self) -> &str {
-        match self {
-            Target::Apple(target) | Target::Unix(target) | Target::Windows(target) => target,
-            Target::GnuLinux(linux) => &linux.zigbuild_target,
-        }
+        self.zigbuild_target
+            .as_deref()
+            .unwrap_or_else(|| self.target.as_str())
     }
 
     pub fn shared_library_name(&self, lib_name: &str) -> String {
-        match self {
-            Target::Apple(_) => format!("lib{lib_name}.dylib"),
-            Target::GnuLinux(_) | Target::Unix(_) => format!("lib{lib_name}.so"),
-            Target::Windows(_) => format!("{lib_name}.dll"),
-        }
+        self.target.shared_library_name(lib_name)
     }
 
     pub fn binary_name(&self, binary_name: &'a str, exe_suffix: Option<&str>) -> Cow<'a, str> {
-        match self {
-            Target::Windows(_) => Cow::Owned(format!(
-                "{binary_name}{suffix}.exe",
-                suffix = exe_suffix.unwrap_or_default()
-            )),
-            _ => {
-                if let Some(suffix) = exe_suffix {
-                    Cow::Owned(format!("{binary_name}{suffix}"))
-                } else {
-                    Cow::Borrowed(binary_name)
-                }
-            }
-        }
-    }
-
-    fn arch(&self) -> &'a str {
-        let target = match self {
-            Target::Apple(target) | Target::Unix(target) | Target::Windows(target) => target,
-            Target::GnuLinux(linux) => linux.target,
-        };
-        target
-            .split("-")
-            .next()
-            .expect("Target triples always have a leading arch component.")
+        self.target.binary_name(binary_name, exe_suffix)
     }
 
     pub fn simplified_target_triple(&self) -> Cow<'a, str> {
-        match self {
-            Target::Apple(_target) => Cow::Owned(format!("{arch}-macos", arch = self.arch())),
-            Target::GnuLinux(GnuLinux { target, .. }) | Target::Unix(target) => {
-                if target.contains("-unknown-") {
-                    Cow::Owned(target.replace("-unknown", ""))
-                } else {
-                    Cow::Borrowed(target)
-                }
-            }
-            Target::Windows(_target) => Cow::Owned(format!("{arch}-windows", arch = self.arch())),
-        }
+        self.target.simplified_target_triple()
     }
 
     pub fn fully_qualified_binary_name(
@@ -119,27 +70,23 @@ impl<'a> Target<'a> {
         binary_name: &str,
         target_suffix: Option<&str>,
     ) -> String {
-        let triple = self.simplified_target_triple();
-        let target_suffix = target_suffix.unwrap_or_default();
-        match self {
-            Target::Windows(_target) => {
-                format!("{binary_name}-{triple}{target_suffix}.exe")
-            }
-            _ => format!("{binary_name}-{triple}{target_suffix}"),
-        }
+        self.target
+            .fully_qualified_binary_name(binary_name, target_suffix)
     }
 }
 
 pub struct ClassifiedTargets<'a> {
-    xwin_targets: Vec<Target<'a>>,
-    zigbuild_targets: Vec<Target<'a>>,
+    xwin_targets: Vec<BuildTarget<'a>>,
+    zigbuild_targets: Vec<BuildTarget<'a>>,
 }
 
 impl<'a> ClassifiedTargets<'a> {
     pub fn parse(targets: impl Iterator<Item = &'a str>, glibc: &'a Glibc<'a>) -> Self {
         let (xwin_targets, zigbuild_targets) = targets
-            .map(|target| Target::classify(target, glibc))
-            .partition::<Vec<_>, _>(|target| matches!(target, Target::Windows(_)));
+            .map(|target| BuildTarget::classify(target, glibc))
+            .partition::<Vec<_>, _>(|build_target| {
+                matches!(build_target.target, Target::Windows(_))
+            });
         Self {
             // TODO: Resolve cargo xwin build issues or delete the cargo-xwin code paths.
             xwin_targets: vec![],
@@ -147,15 +94,15 @@ impl<'a> ClassifiedTargets<'a> {
         }
     }
 
-    pub fn iter_zigbuild_targets(&'a self) -> impl ExactSizeIterator<Item = &'a Target<'a>> {
+    pub fn iter_zigbuild_targets(&'a self) -> impl ExactSizeIterator<Item = &'a BuildTarget<'a>> {
         self.zigbuild_targets.iter()
     }
 
-    pub fn iter_xwin_targets(&'a self) -> impl ExactSizeIterator<Item = &'a Target<'a>> {
+    pub fn iter_xwin_targets(&'a self) -> impl ExactSizeIterator<Item = &'a BuildTarget<'a>> {
         self.xwin_targets.iter()
     }
 
-    pub fn iter_all_targets(&'a self) -> impl Iterator<Item = &'a Target<'a>> {
+    pub fn iter_all_targets(&'a self) -> impl Iterator<Item = &'a BuildTarget<'a>> {
         self.zigbuild_targets.iter().chain(self.xwin_targets.iter())
     }
 }
