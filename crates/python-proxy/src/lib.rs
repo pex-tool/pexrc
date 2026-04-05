@@ -10,7 +10,6 @@ use std::path::Path;
 use std::sync::LazyLock;
 
 use anyhow::anyhow;
-use interpreter::Interpreter;
 use pex::{Layout, Pex};
 use target::Target;
 use zip::write::SimpleFileOptions;
@@ -18,7 +17,7 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 pub fn create(
     pex: &Pex,
-    interpreter: &Interpreter,
+    interpreter: &Path,
     path: &Path,
     script: Option<String>,
 ) -> anyhow::Result<()> {
@@ -36,7 +35,7 @@ pub fn create(
     }
 
     const SHEBANG_PREFIX: &str = "\n#!";
-    let shebang_python = interpreter.realpath.as_os_str();
+    let shebang_python = interpreter.as_os_str();
     const SHEBANG_SUFFIX: &str = "\n";
     if let Some(script) = script {
         let mut script_zip = ZipWriter::new(&target_python);

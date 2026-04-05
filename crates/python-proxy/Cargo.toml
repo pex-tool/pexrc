@@ -9,7 +9,6 @@ publish = false
 [dependencies]
 anyhow = { workspace = true }
 cache = { path = "../cache" }
-interpreter = { path = "../interpreter" }
 pex = { path = "../pex" }
 platform = { path = "../platform" }
 target = { path = "../target" }

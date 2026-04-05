@@ -53,7 +53,19 @@ fn main() {
             exit(1);
         }
     };
-    let mut command = Command::new(&python_proxy.target);
+    let mut command = if python_proxy.target.is_absolute() {
+        Command::new(&python_proxy.target)
+    } else if let Some(proxy_dir) = python_proxy.proxy.parent() {
+        Command::new(proxy_dir.join(&python_proxy.target))
+    } else {
+        eprintln!(
+            "The proxy target {target} is relative but the python-proxy at {proxy} has no parent \
+            directory to base that relative path in",
+            target = python_proxy.target.display(),
+            proxy = python_proxy.proxy.display()
+        );
+        exit(1);
+    };
     command.args(env::args_os().skip(1));
     command.env("__PYVENV_LAUNCHER__", &python_proxy.proxy);
     let lock = match cache::read_lock() {
