@@ -138,7 +138,23 @@ fn main() -> anyhow::Result<()> {
         let targets = classify_targets(&rust_toolchain_contents, &glibc)?;
         custom_cargo_build(
             &cargo,
-            &["zigbuild", "--target-dir", tgt_arg],
+            &["zigbuild", "--target-dir", tgt_arg, "--package", "clib"],
+            embeds_configuration.profile,
+            &found_tools,
+            targets
+                .iter_zigbuild_targets()
+                .map(BuildTarget::zigbuild_target),
+            false,
+        )?;
+        custom_cargo_build(
+            &cargo,
+            &[
+                "zigbuild",
+                "--target-dir",
+                tgt_arg,
+                "--package",
+                "python-proxy",
+            ],
             embeds_configuration.profile,
             &found_tools,
             targets
@@ -146,9 +162,32 @@ fn main() -> anyhow::Result<()> {
                 .map(BuildTarget::zigbuild_target),
             optimize_for_size,
         )?;
+
         custom_cargo_build(
             &cargo,
-            &["xwin", "build", "--target-dir", tgt_arg],
+            &[
+                "xwin",
+                "build",
+                "--target-dir",
+                tgt_arg,
+                "--package",
+                "clib",
+            ],
+            embeds_configuration.profile,
+            &found_tools,
+            targets.iter_xwin_targets().map(BuildTarget::as_str),
+            false,
+        )?;
+        custom_cargo_build(
+            &cargo,
+            &[
+                "xwin",
+                "build",
+                "--target-dir",
+                tgt_arg,
+                "--package",
+                "python-proxy",
+            ],
             embeds_configuration.profile,
             &found_tools,
             targets.iter_xwin_targets().map(BuildTarget::as_str),
@@ -160,7 +199,21 @@ fn main() -> anyhow::Result<()> {
         let targets = ClassifiedTargets::parse([target.as_str()].into_iter(), &glibc);
         custom_cargo_build(
             &cargo,
-            &["build", "--target-dir", tgt_arg],
+            &["build", "--target-dir", tgt_arg, "--package", "clib"],
+            embeds_configuration.profile,
+            &found_tools,
+            [BuildTarget::current(&glibc).as_str()].into_iter(),
+            false,
+        )?;
+        custom_cargo_build(
+            &cargo,
+            &[
+                "build",
+                "--target-dir",
+                tgt_arg,
+                "--package",
+                "python-proxy",
+            ],
             embeds_configuration.profile,
             &found_tools,
             [BuildTarget::current(&glibc).as_str()].into_iter(),
@@ -203,7 +256,6 @@ fn custom_cargo_build<'a>(
     if optimize_for_size {
         cmd.args(CARGO_UNSTABLE_FLAGS);
     }
-    cmd.args(["--package", "clib", "--package", "python-proxy"]);
     cmd.args([
         "--profile",
         if profile == "debug" { "dev" } else { profile },
