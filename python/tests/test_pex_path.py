@@ -18,8 +18,11 @@ if TYPE_CHECKING:
     from testing.compare import ProcessResult  # noqa: F401
 
 
-def test_via_env(tmpdir):
-    # type: (Any) -> None
+def test_via_env(
+    tmpdir,  # type: Any
+    pexrc_root,  # type: str
+):
+    # type: (...) -> None
 
     pex_root = os.path.join(str(tmpdir), "pex-root")
     ansicolors_pex = os.path.join(str(tmpdir), "ansicolors.pex")
@@ -80,6 +83,6 @@ def test_via_env(tmpdir):
     compare(
         cowsay_pex,
         args=["Moo?"],
-        env=dict(PEX_PATH=ansicolors_pex, PEXRC_ROOT=os.path.join(str(tmpdir), "pexrc-root")),
+        env=dict(PEX_PATH=ansicolors_pex, PEXRC_ROOT=pexrc_root),
         test_result=test_result,
     )

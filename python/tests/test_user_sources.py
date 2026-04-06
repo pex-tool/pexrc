@@ -90,6 +90,7 @@ def test_user_sources(
     tmpdir,  # type: Any
     layout_args,  # type: List[str]
     whl_args,  # type: List[str]
+    pexrc_root,  # type: str
 ):
     # type: (...) -> None
 
@@ -120,7 +121,7 @@ def test_user_sources(
 
     compare(
         pex,
-        env=dict(PEXRC_ROOT=os.path.join(str(tmpdir), "pexrc-root")),
+        env=dict(PEXRC_ROOT=pexrc_root),
         test_result=test_result,
         compare_results=compare_results,
     )

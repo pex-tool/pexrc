@@ -55,8 +55,11 @@ def read_shebang(pex):
         return fp.readline().decode("utf-8")
 
 
-def test_basic(tmpdir):
-    # type: (Any) -> None
+def test_basic(
+    tmpdir,  # type: Any
+    pexrc_root,  # type: str
+):
+    # type: (...) -> None
 
     pex = create_cowsay_pex(tmpdir)
     expected_shebang = read_shebang(pex)
@@ -65,20 +68,23 @@ def test_basic(tmpdir):
     injected_pex = compare(
         pex,
         args=["Moo!"],
-        env=dict(PEXRC_ROOT=os.path.join(str(tmpdir), "pexrc-root")),
+        env=dict(PEXRC_ROOT=pexrc_root),
         test_result=assert_result,
     )
     assert expected_shebang == read_shebang(injected_pex)
 
 
-def test_sh_boot(tmpdir):
-    # type: (Any) -> None
+def test_sh_boot(
+    tmpdir,  # type: Any
+    pexrc_root,  # type: str
+):
+    # type: (...) -> None
 
     pex = create_cowsay_pex(tmpdir, "--sh-boot")
     expected_shebang = read_shebang(pex)
     assert expected_shebang == "#!/bin/sh\n"
 
-    pexrc_env = dict(PEXRC_ROOT=os.path.join(str(tmpdir), "pexrc-root"))
+    pexrc_env = dict(PEXRC_ROOT=pexrc_root)
     injected_pex = compare(
         pex,
         args=["Moo!"],
@@ -95,8 +101,11 @@ def test_sh_boot(tmpdir):
         assert b"| Moo! |" in subprocess.check_output(args=[injected_pex, "Moo!"], env=pexrc_env)
 
 
-def test_packed(tmpdir):
-    # type: (Any) -> None
+def test_packed(
+    tmpdir,  # type: Any
+    pexrc_root,  # type: str
+):
+    # type: (...) -> None
 
     pex = create_cowsay_pex(tmpdir, "--layout", "packed")
     assert os.path.isdir(pex)
@@ -104,14 +113,17 @@ def test_packed(tmpdir):
     injected_pex = compare(
         pex=pex,
         args=["Moo!"],
-        env=dict(PEXRC_ROOT=os.path.join(str(tmpdir), "pexrc-root")),
+        env=dict(PEXRC_ROOT=pexrc_root),
         test_result=assert_result,
     )
     assert os.path.isdir(injected_pex)
 
 
-def test_packed_sh_boot(tmpdir):
-    # type: (Any) -> None
+def test_packed_sh_boot(
+    tmpdir,  # type: Any
+    pexrc_root,  # type: str
+):
+    # type: (...) -> None
 
     pex = create_cowsay_pex(tmpdir, "--layout", "packed", "--sh-boot")
     assert os.path.isdir(pex)
@@ -126,7 +138,7 @@ def test_packed_sh_boot(tmpdir):
     assert "#!/bin/sh\n" == read_shebang(injected_pex_script)
 
     if not IS_WINDOWS:
-        pexrc_env = dict(PEXRC_ROOT=os.path.join(str(tmpdir), "pexrc-root"))
+        pexrc_env = dict(PEXRC_ROOT=pexrc_root)
 
         # N.B.: The `--layout packed --sh-boot` PEXes Pex builds are broken on Windows; so we just
         # run the comparison on unix.
@@ -143,8 +155,11 @@ def test_packed_sh_boot(tmpdir):
         )
 
 
-def test_loose(tmpdir):
-    # type: (Any) -> None
+def test_loose(
+    tmpdir,  # type: Any
+    pexrc_root,  # type: str
+):
+    # type: (...) -> None
 
     pex = create_cowsay_pex(tmpdir, "--layout", "loose")
     assert os.path.isdir(pex)
@@ -152,7 +167,7 @@ def test_loose(tmpdir):
     injected_pex = compare(
         pex=pex,
         args=["Moo!"],
-        env=dict(PEXRC_ROOT=os.path.join(str(tmpdir), "pexrc-root")),
+        env=dict(PEXRC_ROOT=pexrc_root),
         test_result=assert_result,
     )
     assert os.path.isdir(injected_pex)
