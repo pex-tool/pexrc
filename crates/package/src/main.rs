@@ -11,7 +11,7 @@ use std::sync::LazyLock;
 use std::{cmp, env, io};
 
 use anyhow::{anyhow, bail};
-use build_system::{Target, all_targets, classify_targets, ensure_tools_installed};
+use build_system::{BuildTarget, all_targets, classify_targets, ensure_tools_installed};
 use cache::fingerprint_file;
 use clap::builder::Str;
 use clap::{ArgAction, Parser, ValueEnum};
@@ -143,7 +143,7 @@ fn main() -> anyhow::Result<()> {
     if let Some(print_format) = cli.print_targets {
         let mut all_targets = classified_targets
             .iter_all_targets()
-            .map(Target::as_str)
+            .map(BuildTarget::as_str)
             .collect::<Vec<_>>();
         all_targets.sort();
         match print_format {
@@ -176,7 +176,7 @@ fn main() -> anyhow::Result<()> {
         if !result.success() {
             bail!("Build via cargo build failed!");
         }
-        let current_target = Target::current(&glibc);
+        let current_target = BuildTarget::current(&glibc);
         vec![(
             target_dir
                 .join(profile_dir_name)

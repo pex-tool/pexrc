@@ -22,6 +22,7 @@ members = [
     "crates/platform",
     "crates/python-proxy",
     "crates/scripts",
+    "crates/target",
     "crates/testing",
     "crates/venv",
 ]

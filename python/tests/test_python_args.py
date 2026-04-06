@@ -18,8 +18,11 @@ if TYPE_CHECKING:
     from testing.compare import ProcessResult  # noqa: F401
 
 
-def test_python_args_forwarded(tmpdir):
-    # type: (Any) -> None
+def test_python_args_forwarded(
+    tmpdir,  # type: Any
+    pexrc_root,  # type: str
+):
+    # type: (...) -> None
 
     pex = os.path.join(str(tmpdir), "cowsay.pex")
     pex_root = os.path.join(str(tmpdir), "pex-root")
@@ -67,7 +70,7 @@ def test_python_args_forwarded(tmpdir):
         pex,
         python_args=["-O"],
         args=["Slartibartfast", "Ford"],
-        env=dict(PEXRC_ROOT=os.path.join(str(tmpdir), "pexrc-root")),
+        env=dict(PEXRC_ROOT=pexrc_root),
         test_result=test_result,
     )
 

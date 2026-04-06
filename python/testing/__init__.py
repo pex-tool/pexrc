@@ -7,6 +7,8 @@ import os
 import platform
 import subprocess
 
+IS_LINUX = platform.system().lower() == "linux"
+IS_MAC = platform.system().lower() == "darwin"
 IS_WINDOWS = platform.system().lower() == "windows"
 
 
@@ -24,3 +26,13 @@ def pexrc_inject(pex):
         os.path.isdir(pex) and os.path.isdir(injected_pex)
     )
     return injected_pex
+
+
+def session_dir():
+    # type: () -> str
+    return os.environ["_PEXRC_TEST_SESSION_DIR"]
+
+
+def session_pexrc_root():
+    # type: () -> str
+    return os.environ["_PEXRC_TEST_SESSION_PEXRC_ROOT"]

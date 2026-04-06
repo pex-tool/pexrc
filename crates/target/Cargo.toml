@@ -1,0 +1,11 @@
+# Copyright 2026 Pex project contributors.
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "target"
+edition = "2024"
+publish = false
+
+[dependencies]
+anyhow = { workspace = true }
+target-lexicon = { workspace = true }

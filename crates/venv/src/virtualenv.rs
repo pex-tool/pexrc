@@ -2,24 +2,69 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::borrow::Cow;
-use std::env;
-use std::env::consts::EXE_SUFFIX;
-use std::io::Write;
-use std::path::{MAIN_SEPARATOR_STR, Path, PathBuf};
+use std::io::{BufRead, BufReader, Write};
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use anyhow::{anyhow, bail};
-use const_format::concatcp;
 use fs_err as fs;
+use fs_err::File;
 use interpreter::Interpreter;
 use logging_timer::time;
 use platform::symlink_or_link_or_copy;
 use scripts::{IdentifyInterpreter, Scripts, VendoredVirtualenv};
 use target_lexicon::{HOST, OperatingSystem};
 
-const SCRIPTS_DIR: &str = env!("SCRIPTS_DIR");
-const PYTHON_EXE: &str = concatcp!("python", EXE_SUFFIX);
-const VENV_PYTHON_RELPATH: &str = concatcp!(SCRIPTS_DIR, MAIN_SEPARATOR_STR, PYTHON_EXE);
+#[cfg(unix)]
+const SCRIPTS_DIR: &str = "bin";
+
+#[cfg(unix)]
+fn executable_rel_path(interpreter: &Interpreter) -> Cow<'static, str> {
+    if interpreter.pypy_version.is_some() {
+        Cow::Owned(format!(
+            "{SCRIPTS_DIR}/pypy{major}.{minor}",
+            major = interpreter.version.major,
+            minor = interpreter.version.minor
+        ))
+    } else {
+        Cow::Owned(format!(
+            "{SCRIPTS_DIR}/python{major}.{minor}",
+            major = interpreter.version.major,
+            minor = interpreter.version.minor
+        ))
+    }
+}
+
+#[cfg(windows)]
+const SCRIPTS_DIR: &str = "Scripts";
+
+#[cfg(windows)]
+fn executable_rel_path(interpreter: &Interpreter) -> Cow<'static, str> {
+    if interpreter.pypy_version.is_some() {
+        Cow::Owned(format!(
+            "{SCRIPTS_DIR}\\pypy{major}.{minor}.exe",
+            major = interpreter.version.major,
+            minor = interpreter.version.minor
+        ))
+    } else {
+        Cow::Borrowed("{SCRIPTS_DIR\\python.exe")
+    }
+}
+
+pub trait Linker {
+    fn link(&self, dest: &Path, interpreter: Option<&Path>) -> anyhow::Result<()>;
+}
+
+pub struct FileSystemLinker();
+
+impl Linker for FileSystemLinker {
+    fn link(&self, dest: &Path, interpreter: Option<&Path>) -> anyhow::Result<()> {
+        if let Some(interpreter) = interpreter {
+            symlink_or_link_or_copy(interpreter, dest, false)?;
+        }
+        Ok(())
+    }
+}
 
 pub struct Virtualenv<'a> {
     pub interpreter: Interpreter,
@@ -40,41 +85,48 @@ impl<'a> Virtualenv<'a> {
 
     #[time("debug", "Virtualenv.{}")]
     pub fn load(path: Cow<'a, Path>, scripts: &mut Scripts) -> anyhow::Result<Self> {
+        let pyvenv_cfg = PyVenvCfg::read(path.as_ref())?;
         let identification_script = IdentifyInterpreter::read(scripts)?;
         let interpreter = Interpreter::load(
-            path.as_ref().join(VENV_PYTHON_RELPATH),
+            path.as_ref().join(pyvenv_cfg.executable_rel_path),
             &identification_script,
         )?;
         Self::enclosing(interpreter)
     }
 
-    pub fn host_interpreter(venv_dir: &Path, interpreter: &Interpreter) -> Interpreter {
+    pub fn host_interpreter(
+        venv_dir: &Path,
+        interpreter: &Interpreter,
+    ) -> anyhow::Result<Interpreter> {
+        let executable_relpath = executable_rel_path(interpreter);
         let mut venv_interpreter = interpreter.clone();
         venv_interpreter.base_prefix = venv_interpreter
             .base_prefix
             .or(Some(venv_interpreter.prefix));
         venv_interpreter.prefix = venv_dir.to_path_buf();
-        venv_interpreter.path = venv_dir.join(VENV_PYTHON_RELPATH);
+        venv_interpreter.path = venv_dir.join(executable_relpath.as_ref());
         if HOST.operating_system == OperatingSystem::Windows {
             venv_interpreter.realpath = venv_interpreter.path.clone();
         }
-        venv_interpreter
+        Ok(venv_interpreter)
     }
 
     #[time("debug", "Virtualenv.{}")]
     pub fn create(
         interpreter: Interpreter,
         path: Cow<'a, Path>,
+        linker: impl Linker,
         scripts: &mut Scripts,
         include_system_site_packages: bool,
     ) -> anyhow::Result<Self> {
-        let venv_interpreter = Self::host_interpreter(path.as_ref(), &interpreter);
+        let venv_interpreter = Self::host_interpreter(path.as_ref(), &interpreter)?;
 
         let site_packages_relpath =
             if interpreter.version.major == 3 && interpreter.version.minor >= 3 {
                 create_pep_405_venv(
                     interpreter,
                     path.as_ref(),
+                    linker,
                     include_system_site_packages,
                     scripts,
                 )?
@@ -83,6 +135,7 @@ impl<'a> Virtualenv<'a> {
                 create_virtualenv_venv(
                     &interpreter,
                     path.as_ref(),
+                    linker,
                     virtualenv_script,
                     include_system_site_packages,
                 )?
@@ -104,9 +157,76 @@ impl<'a> Virtualenv<'a> {
     }
 }
 
+struct PyVenvCfg<'a> {
+    home: Cow<'a, Path>,
+    include_system_site_packages: bool,
+    executable_rel_path: Cow<'a, Path>,
+}
+
+impl<'a> PyVenvCfg<'a> {
+    fn read(dir: &Path) -> anyhow::Result<Self> {
+        let pyvenv_cfg = BufReader::new(File::open(dir.join("pyvenv.cfg"))?);
+        let mut home: Option<PathBuf> = None;
+        let mut include_system_site_packages: Option<bool> = None;
+        let mut executable_rel_path: Option<PathBuf> = None;
+        for line in pyvenv_cfg.lines() {
+            let line = line?;
+            let mut components = line.splitn(2, " = ");
+            match components.next() {
+                Some("home") => home = components.next().map(str::trim_end).map(PathBuf::from),
+                Some("include-system-site-packages") => {
+                    include_system_site_packages = components
+                        .next()
+                        .map(str::trim_end)
+                        .map(|value| value == "true")
+                }
+                Some("executable") => {
+                    executable_rel_path = components.next().map(str::trim_end).map(PathBuf::from)
+                }
+                _ => {}
+            }
+        }
+        if let Some(home) = home
+            && let Some(executable_rel_path) = executable_rel_path
+        {
+            Ok(Self {
+                home: Cow::Owned(home),
+                include_system_site_packages: include_system_site_packages.unwrap_or_default(),
+                executable_rel_path: Cow::Owned(executable_rel_path),
+            })
+        } else {
+            bail!(
+                "The pyvenv.cfg in {dir} is not valid. It must contain both a home entry and a executable entry.",
+                dir = dir.display()
+            )
+        }
+    }
+
+    fn write(&self, dir: &Path) -> anyhow::Result<()> {
+        let mut pyvenv_cfg = File::create(dir.join("pyvenv.cfg"))?;
+        pyvenv_cfg.write_all(b"home = ")?;
+        pyvenv_cfg.write_all(self.home.as_os_str().as_encoded_bytes())?;
+        pyvenv_cfg.write_all(b"\n")?;
+
+        pyvenv_cfg.write_all(b"include-system-site-packages = ")?;
+        pyvenv_cfg.write_all(if self.include_system_site_packages {
+            b"true"
+        } else {
+            b"false"
+        })?;
+        pyvenv_cfg.write_all(b"\n")?;
+
+        pyvenv_cfg.write_all(b"executable = ")?;
+        pyvenv_cfg.write_all(self.executable_rel_path.as_os_str().as_encoded_bytes())?;
+        pyvenv_cfg.write_all(b"\n")?;
+        Ok(())
+    }
+}
+
 fn create_pep_405_venv<'a>(
     interpreter: Interpreter,
     path: &Path,
+    linker: impl Linker,
     include_system_site_packages: bool,
     scripts: &mut Scripts,
 ) -> anyhow::Result<Cow<'a, Path>> {
@@ -118,23 +238,20 @@ fn create_pep_405_venv<'a>(
             path = base_interpreter.realpath.display()
         )
     })?;
-    fs::write(
-        path.join("pyvenv.cfg"),
-        format!(
-            "\
-            home = {home}\n\
-            include-system-site-packages = {include_system_site_packages}\n\
-            ",
-            home = home.display()
-        ),
-    )?;
-    let scripts_dir = path.join(SCRIPTS_DIR);
-    fs::create_dir_all(&scripts_dir)?;
-    symlink_or_link_or_copy(
-        &base_interpreter.realpath,
-        scripts_dir.join(PYTHON_EXE),
-        false,
-    )?;
+    let executable_rel_path = executable_rel_path(&base_interpreter);
+    let executable_rel_path = Path::new(executable_rel_path.as_ref());
+    let pyvenv_cfg = PyVenvCfg {
+        home: Cow::Borrowed(home),
+        include_system_site_packages,
+        executable_rel_path: Cow::Borrowed(executable_rel_path),
+    };
+    pyvenv_cfg.write(path)?;
+
+    let dest = path.join(executable_rel_path);
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    linker.link(&dest, Some(&base_interpreter.realpath))?;
     let site_packages_relpath = site_packages_relpath(&base_interpreter);
     fs::create_dir_all(path.join(site_packages_relpath.as_ref()))?;
     Ok(site_packages_relpath)
@@ -143,6 +260,7 @@ fn create_pep_405_venv<'a>(
 fn create_virtualenv_venv<'a>(
     interpreter: &Interpreter,
     path: &Path,
+    linker: impl Linker,
     virtualenv_script: VendoredVirtualenv<'a>,
     include_system_site_packages: bool,
 ) -> anyhow::Result<Cow<'a, Path>> {
@@ -176,6 +294,25 @@ fn create_virtualenv_venv<'a>(
             stderr = String::from_utf8_lossy(&output.stderr)
         )
     }
+
+    let home = interpreter.realpath.parent().ok_or_else(|| {
+        anyhow!(
+            "Failed to calculate the home dir of venv base python {path}",
+            path = interpreter.realpath.display()
+        )
+    })?;
+    let executable_rel_path = executable_rel_path(interpreter);
+    let executable_rel_path = Path::new(executable_rel_path.as_ref());
+    let dest = path.join(executable_rel_path);
+    assert!(dest.is_file());
+    let pyvenv_cfg = PyVenvCfg {
+        home: Cow::Borrowed(home),
+        include_system_site_packages,
+        executable_rel_path: Cow::Borrowed(executable_rel_path),
+    };
+    pyvenv_cfg.write(path.as_ref())?;
+
+    linker.link(&dest, None)?;
     Ok(site_packages_relpath(interpreter))
 }
 
@@ -216,7 +353,7 @@ mod tests {
     use scripts::{IdentifyInterpreter, Scripts};
     use testing::{embedded_scripts, python_exe, tmp_dir};
 
-    use crate::virtualenv::{Path, Virtualenv};
+    use crate::virtualenv::{FileSystemLinker, Path, Virtualenv};
 
     #[rstest]
     fn test_create(python_exe: &Path, tmp_dir: PathBuf, mut embedded_scripts: Scripts) {
@@ -230,6 +367,7 @@ mod tests {
         let venv = Virtualenv::create(
             interpreter,
             Cow::Owned(tmp_dir),
+            FileSystemLinker(),
             &mut embedded_scripts,
             false,
         )

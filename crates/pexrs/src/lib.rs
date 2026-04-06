@@ -9,15 +9,66 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::{env, mem};
 
-use anyhow::bail;
-use cache::{CacheDir, HashOptions, Key, atomic_dir};
+use anyhow::{anyhow, bail};
+use cache::{CacheDir, HashOptions, Key, atomic_dir, atomic_file};
+use fs_err as fs;
 use interpreter::SearchPath;
 use itertools::Itertools;
 use log::{info, warn};
 use logging_timer::time;
 use pex::{Pex, PexPath};
+use platform::symlink_or_link_or_copy;
 use regex::bytes::Regex;
-use venv::{Virtualenv, populate, populate_user_code_and_wheels};
+use venv::{Linker, Virtualenv, populate, populate_user_code_and_wheels};
+
+struct PythonProxyLinker<'a>(&'a Pex<'a>);
+
+impl<'a> Linker for PythonProxyLinker<'a> {
+    fn link(&self, dest: &Path, interpreter: Option<&Path>) -> anyhow::Result<()> {
+        let file_name = dest.file_name().ok_or_else(|| {
+            anyhow!(
+                "The destination for the python-proxy doesn't have a file name: {path}",
+                path = dest.display()
+            )
+        })?;
+        let venv_python_file_name = format!(
+            ".{file_name}",
+            file_name = file_name.to_str().ok_or_else(|| anyhow!(
+                "The destination for the python-proxy is not a UTF-8 file name: {file_name}",
+                file_name = file_name.display()
+            ))?
+        );
+
+        let mut key = Key::default();
+        key.property("proxied-python", &venv_python_file_name);
+        let fingerprint = key.fingerprint();
+        let python_proxy = CacheDir::PythonProxy
+            .path()?
+            .join(fingerprint.base64_digest());
+
+        atomic_file(&python_proxy, |file| {
+            python_proxy::create(
+                self.0,
+                venv_python_file_name.as_ref(),
+                file.into_file(),
+                None,
+            )
+        })?;
+
+        if let Some(interpreter) = interpreter {
+            symlink_or_link_or_copy(
+                interpreter,
+                dest.with_file_name(&venv_python_file_name),
+                false,
+            )?;
+        } else {
+            let orig_python = dest.with_file_name(&venv_python_file_name);
+            fs::rename(dest, &orig_python)?;
+        }
+        symlink_or_link_or_copy(python_proxy, dest, true)?;
+        Ok(())
+    }
+}
 
 pub fn boot(
     python: impl AsRef<Path>,
@@ -98,6 +149,7 @@ fn prepare_venv<'a>(
         let venv = Virtualenv::create(
             resolve.interpreter,
             Cow::Borrowed(work_dir),
+            PythonProxyLinker(&pex),
             &mut resolve.scripts,
             pex.info.venv_system_site_packages,
         )?;
@@ -108,7 +160,7 @@ fn prepare_venv<'a>(
         Ok(venv.interpreter)
     })? {
         info!("Built venv at {path}", path = venv_dir.display());
-        let venv_interpreter = Virtualenv::host_interpreter(&venv_dir, &venv_interpreter);
+        let venv_interpreter = Virtualenv::host_interpreter(&venv_dir, &venv_interpreter)?;
         venv_interpreter.store()?;
         #[cfg(unix)]
         if let Some(sh_boot_seed_dir) = sh_boot_seed_dir {

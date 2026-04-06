@@ -8,7 +8,6 @@ publish = false
 
 [dependencies]
 anyhow = { workspace = true }
-const_format = { workspace = true }
 fs-err = { workspace = true }
 indexmap = { workspace = true }
 interpreter = { path = "../interpreter" }
@@ -28,6 +27,3 @@ interpreter = { path = "../interpreter" }
 rstest = { workspace = true}
 scripts = { path = "../scripts" }
 testing = { path = "../testing" }
-
-[build-dependencies]
-build-target = { workspace = true }

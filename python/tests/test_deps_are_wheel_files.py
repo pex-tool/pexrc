@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 def test_no_pre_install_wheels(
     tmpdir,  # type: Any
     layout_args,  # type: List[str]
+    pexrc_root,  # type: str
 ):
     # type: (...) -> None
 
@@ -78,7 +79,7 @@ def test_no_pre_install_wheels(
     injected_pex = compare(
         pex,
         args=["Moo!"],
-        env=dict(PEXRC_ROOT=os.path.join(str(tmpdir), "pexrc-root")),
+        env=dict(PEXRC_ROOT=pexrc_root),
         test_result=test_result,
         compare_results=compare_results,
     )

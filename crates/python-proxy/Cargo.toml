@@ -7,5 +7,9 @@ edition = "2024"
 publish = false
 
 [dependencies]
+anyhow = { workspace = true }
 cache = { path = "../cache" }
+pex = { path = "../pex" }
 platform = { path = "../platform" }
+target = { path = "../target" }
+zip = { workspace = true }

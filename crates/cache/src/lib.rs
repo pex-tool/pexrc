@@ -58,6 +58,7 @@ static PEXRC_ROOT: LazyLock<Result<PathBuf, Cow<'static, str>>> = LazyLock::new(
 
 pub enum CacheDir {
     Interpreter,
+    PythonProxy,
     Venv,
 }
 
@@ -69,6 +70,7 @@ impl CacheDir {
     fn version(&self) -> &'static str {
         match self {
             CacheDir::Interpreter => "0",
+            CacheDir::PythonProxy => "0",
             CacheDir::Venv => "0",
         }
     }
@@ -78,6 +80,7 @@ impl CacheDir {
         Self::root().map(|pexrc_root| {
             match self {
                 CacheDir::Interpreter => pexrc_root.join("interpreters"),
+                CacheDir::PythonProxy => pexrc_root.join("python-proxies"),
                 CacheDir::Venv => pexrc_root.join("venvs"),
             }
             .join(self.version())

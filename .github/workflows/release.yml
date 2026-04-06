@@ -47,7 +47,7 @@ jobs:
         run: echo targets="$(target/release/package --print-targets json)" >> "$GITHUB_OUTPUT"
 
   cross-build:
-    name: "Cross-build pexrc"
+    name: "Build pexrc"
     needs: setup-cross-build
     runs-on: ubuntu-24.04-arm
     # N.B.: We break these up just to save wall time; they all can be built on 1 machine in ~40

@@ -74,7 +74,7 @@ jobs:
           )\nEOF" | tee -a "$GITHUB_OUTPUT"
 
   cross-build:
-    name: "Cross-build pexrc - shard ${{ matrix.shard }}"
+    name: "Build pexrc - shard ${{ matrix.shard }}"
     needs: setup-cross-build
     runs-on: ubuntu-24.04-arm
     # N.B.: We break these up just to save wall time; they all can be built on 1 machine in ~40

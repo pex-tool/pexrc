@@ -17,8 +17,11 @@ if TYPE_CHECKING:
     from testing.compare import ProcessResult  # noqa: F401
 
 
-def test_non_hermetic(tmpdir):
-    # type: (Any) -> None
+def test_non_hermetic(
+    tmpdir,  # type: Any
+    pexrc_root,  # type: str
+):
+    # type: (...) -> None
 
     pex_root = os.path.join(str(tmpdir), "pex-root")
     pex = os.path.join(str(tmpdir), "pex")
@@ -76,6 +79,6 @@ def test_non_hermetic(tmpdir):
 
     compare(
         pex,
-        env=dict(PYTHONPATH=adjoined, PEXRC_ROOT=os.path.join(str(tmpdir), "pexrc-root")),
+        env=dict(PYTHONPATH=adjoined, PEXRC_ROOT=pexrc_root),
         test_result=test_result,
     )

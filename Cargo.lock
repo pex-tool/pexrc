@@ -193,6 +193,7 @@ dependencies = [
  "strum",
  "strum_macros",
  "tar",
+ "target",
  "target-lexicon",
  "tempfile",
  "toml",
@@ -200,12 +201,6 @@ dependencies = [
  "xz2",
  "zip",
 ]
-
-[[package]]
-name = "build-target"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78e2ceaf91e22593e194211930aea78a41af58e49e872474ebf4335bf649aad1"
 
 [[package]]
 name = "bumpalo"
@@ -1643,6 +1638,7 @@ dependencies = [
  "logging_timer",
  "pex",
  "platform",
+ "python-proxy",
  "regex",
  "venv",
 ]
@@ -1776,8 +1772,12 @@ dependencies = [
 name = "python-proxy"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
  "cache",
+ "pex",
  "platform",
+ "target",
+ "zip",
 ]
 
 [[package]]
@@ -2480,6 +2480,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "target"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "target-lexicon",
+]
+
+[[package]]
 name = "target-lexicon"
 version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2855,8 +2863,6 @@ name = "venv"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "build-target",
- "const_format",
  "fs-err",
  "indexmap",
  "interpreter",

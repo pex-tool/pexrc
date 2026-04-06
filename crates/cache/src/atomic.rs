@@ -9,10 +9,7 @@ use fs_err::File;
 use logging_timer::time;
 
 #[time("debug", "atomic.{}")]
-pub fn atomic_file(
-    path: &Path,
-    func: impl FnOnce(&mut File) -> anyhow::Result<()>,
-) -> anyhow::Result<File> {
+pub fn atomic_file(path: &Path, func: impl Fn(File) -> anyhow::Result<()>) -> anyhow::Result<File> {
     if path.is_file() {
         return Ok(File::open(path)?);
     }
@@ -22,7 +19,7 @@ pub fn atomic_file(
         fs::create_dir_all(parent)?;
     }
     let lock_file_path = path.with_added_extension("lck");
-    let mut lock_file = File::options()
+    let lock_file = File::options()
         .write(true)
         .create(true)
         .truncate(false)
@@ -32,7 +29,7 @@ pub fn atomic_file(
         return Ok(File::open(path)?);
     }
 
-    func(&mut lock_file)?;
+    func(lock_file)?;
     fs::rename(lock_file_path, path)?;
     Ok(File::open(path)?)
 }
