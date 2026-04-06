@@ -4,10 +4,9 @@
 #![deny(clippy::all)]
 #![feature(exact_size_is_empty)]
 
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::LazyLock;
 use std::{env, io};
 
 use anyhow::{anyhow, bail};
@@ -24,7 +23,7 @@ use fs_err as fs;
 use fs_err::File;
 use itertools::Itertools;
 
-const CARGO_UNSTABLE_FLAGS: [&str; 2] = [
+const BUILD_STD_CARGO_OPTIONS: &[&str] = &[
     // N.B.: This gets us the stdlib compiled locally and LTO'ed into the binaries and libraries
     // we produce for space (and speed) savings.
     // See https://github.com/johnthagen/min-sized-rust for the inspiration.
@@ -32,19 +31,64 @@ const CARGO_UNSTABLE_FLAGS: [&str; 2] = [
     "-Zbuild-std-features=optimize_for_size",
 ];
 
-static RUSTFLAGS: LazyLock<String> = LazyLock::new(|| {
-    [
-        // N.B.: These options help reduce binary size.
-        // See https://github.com/johnthagen/min-sized-rust for the inspiration.
-        "-Zunstable-options",
-        "-Zfmt-debug=none",
-        "-Zlocation-detail=none",
-        "-Cpanic=immediate-abort",
-        // This gets us lib musl dynamic linking.
-        "-Ctarget-feature=-crt-static",
-    ]
-    .join(" ")
-});
+const DEFAULT_RUSTFLAGS: &[&str] = &[
+    // This gets us lib musl dynamic linking.
+    "-Ctarget-feature=-crt-static",
+];
+
+static OPTIMIZE_SIZE_RUSTFLAGS: &[&str] = &[
+    // See https://github.com/johnthagen/min-sized-rust for the inspiration.
+    "-Zunstable-options",
+    "-Zfmt-debug=none",
+    "-Zlocation-detail=none",
+    "-Cpanic=immediate-abort",
+];
+
+#[derive(Copy, Clone)]
+enum Optimizations {
+    Default,
+    BuildStd,
+    All,
+}
+
+impl Optimizations {
+    fn parse(value: OsString) -> anyhow::Result<Self> {
+        let decoded = value
+            .into_string()
+            .map_err(|err| anyhow!("Failed to decode optimization: {err}", err = err.display()))?;
+        match decoded.as_str() {
+            "default" => Ok(Self::Default),
+            "build-std" => Ok(Self::Default),
+            "all" => Ok(Self::Default),
+            value => bail!(
+                "Invalid optimization choice: {value}\n\
+                Valid values are:\n\
+                default:   Standard Rust small size optimizations (s or z).\n\
+                build-std: Build std locally and include it in LTO.\n\
+                all:       All of the above plus more extreme size optimization sizes that \n\
+                           sacrifice debuggability on crash.\
+                "
+            ),
+        }
+    }
+
+    fn cargo_options(&self) -> &[&str] {
+        match self {
+            Optimizations::Default => &[],
+            Optimizations::BuildStd | Optimizations::All => BUILD_STD_CARGO_OPTIONS,
+        }
+    }
+
+    fn rust_flags(&self) -> String {
+        match self {
+            Optimizations::Default | Optimizations::BuildStd => DEFAULT_RUSTFLAGS.join(" "),
+            Optimizations::All => OPTIMIZE_SIZE_RUSTFLAGS
+                .iter()
+                .chain(DEFAULT_RUSTFLAGS.iter())
+                .join(" "),
+        }
+    }
+}
 
 fn main() -> anyhow::Result<()> {
     println!("cargo::rerun-if-changed=crates");
@@ -117,18 +161,12 @@ fn main() -> anyhow::Result<()> {
         )
     })?;
 
-    println!("cargo::rerun-if-env-changed=PEXRC_OPTIMIZE_SIZE");
-    let optimize_for_size = if let Some(value) = env::var_os("PEXRC_OPTIMIZE_SIZE") {
-        match value.to_ascii_lowercase().as_encoded_bytes() {
-            b"on" | b"1" | b"true" => true,
-            b"off" | b"0" | b"false" => false,
-            _ => bail!(
-                "PEXRC_OPTIMIZE_SIZE must be on|1|true or else off|0|false, given: {value}",
-                value = value.display()
-            ),
-        }
+    let clib_optimizations = Optimizations::BuildStd;
+    println!("cargo::rerun-if-env-changed=PEXRC_OPTIMIZATIONS");
+    let python_proxy_optimizations = if let Some(value) = env::var_os("PEXRC_OPTIMIZATIONS") {
+        Optimizations::parse(value)?
     } else {
-        true
+        Optimizations::All
     };
 
     println!("cargo::rerun-if-env-changed=PEXRC_TARGETS");
@@ -144,7 +182,7 @@ fn main() -> anyhow::Result<()> {
             targets
                 .iter_zigbuild_targets()
                 .map(BuildTarget::zigbuild_target),
-            false,
+            clib_optimizations,
         )?;
         custom_cargo_build(
             &cargo,
@@ -160,7 +198,7 @@ fn main() -> anyhow::Result<()> {
             targets
                 .iter_zigbuild_targets()
                 .map(BuildTarget::zigbuild_target),
-            optimize_for_size,
+            python_proxy_optimizations,
         )?;
 
         custom_cargo_build(
@@ -176,7 +214,7 @@ fn main() -> anyhow::Result<()> {
             embeds_configuration.profile,
             &found_tools,
             targets.iter_xwin_targets().map(BuildTarget::as_str),
-            false,
+            clib_optimizations,
         )?;
         custom_cargo_build(
             &cargo,
@@ -191,7 +229,7 @@ fn main() -> anyhow::Result<()> {
             embeds_configuration.profile,
             &found_tools,
             targets.iter_xwin_targets().map(BuildTarget::as_str),
-            optimize_for_size,
+            python_proxy_optimizations,
         )?;
         collect_embeds(&targets, &tgt_path, embeds_configuration, &embeds_dir, true)
     } else {
@@ -203,7 +241,7 @@ fn main() -> anyhow::Result<()> {
             embeds_configuration.profile,
             &found_tools,
             [BuildTarget::current(&glibc).as_str()].into_iter(),
-            false,
+            clib_optimizations,
         )?;
         custom_cargo_build(
             &cargo,
@@ -217,7 +255,7 @@ fn main() -> anyhow::Result<()> {
             embeds_configuration.profile,
             &found_tools,
             [BuildTarget::current(&glibc).as_str()].into_iter(),
-            optimize_for_size,
+            python_proxy_optimizations,
         )?;
         collect_embeds(&targets, &tgt_path, embeds_configuration, &embeds_dir, true)
     }
@@ -229,7 +267,7 @@ fn custom_cargo_build<'a>(
     profile: &str,
     found_tools: &[FoundTool],
     targets: impl ExactSizeIterator<Item = &'a str>,
-    optimize_for_size: bool,
+    optimizations: Optimizations,
 ) -> anyhow::Result<()> {
     if targets.is_empty() {
         return Ok(());
@@ -239,10 +277,8 @@ fn custom_cargo_build<'a>(
     let cmd = cmd
         .stderr(Stdio::piped())
         .env_remove("CARGO_ENCODED_RUSTFLAGS")
-        .env("CARGO_TERM_COLOR", "always");
-    if optimize_for_size {
-        cmd.env("RUSTFLAGS", RUSTFLAGS.as_str());
-    }
+        .env("CARGO_TERM_COLOR", "always")
+        .env("RUSTFLAGS", optimizations.rust_flags().as_str());
     for found_tool in found_tools {
         println!(
             "cargo::rustc-env={env_var}={path}",
@@ -252,10 +288,8 @@ fn custom_cargo_build<'a>(
         cmd.env(found_tool.env_var, &found_tool.path);
     }
 
-    cmd.args(custom_build_args);
-    if optimize_for_size {
-        cmd.args(CARGO_UNSTABLE_FLAGS);
-    }
+    cmd.args(custom_build_args)
+        .args(optimizations.cargo_options());
     cmd.args([
         "--profile",
         if profile == "debug" { "dev" } else { profile },
