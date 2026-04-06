@@ -65,7 +65,7 @@ impl<'a> Linker for PythonProxyLinker<'a> {
             let orig_python = dest.with_file_name(&venv_python_file_name);
             fs::rename(dest, &orig_python)?;
         }
-        fs::hard_link(python_proxy, dest)?;
+        symlink_or_link_or_copy(python_proxy, dest, true)?;
         Ok(())
     }
 }

@@ -19,7 +19,12 @@ struct PythonProxy {
 
 fn read_proxy() -> Result<PythonProxy, io::Error> {
     let mut buf = vec![0u8; PATH_MAX];
-    let proxy = env::current_exe()?;
+    let proxy = PathBuf::from(env::args().next().ok_or_else(|| {
+        io::Error::new(
+            ErrorKind::NotFound,
+            "No argv0 was present; python-proxy cannot run.",
+        )
+    })?);
     let mut exe_fp = File::open(&proxy)?;
     exe_fp.seek(SeekFrom::End(-(buf.len() as i64)))?;
     exe_fp.read_to_end(&mut buf)?;
