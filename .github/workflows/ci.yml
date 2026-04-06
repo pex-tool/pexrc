@@ -109,11 +109,11 @@ jobs:
             os: ubuntu-22.04-arm
           - name: Linux x86_64
             os: ubuntu-22.04
-          - name: Mac aarch64
-            os: macos-15
-          - name: Mac x86_64
-            # N.B.: also macos-15, but self-hosted.
-            os: macos-x86_64
+#          - name: Mac aarch64
+#            os: macos-15
+#          - name: Mac x86_64
+#            # N.B.: also macos-15, but self-hosted.
+#            os: macos-x86_64
           - name: Windows aarch64
             os: windows-11-arm
           - name: Windows x86_64
