@@ -32,11 +32,11 @@ def seed_pexrc_root(
     # type: (...) -> str
 
     pexrc_root = os.path.join(session_dir, "pexrc-root")
-    pex = os.path.join(pexrc_root, "empty.pex")
-    subprocess.check_call(args=["pex", "-o", pex])
+    pex = os.path.join(pexrc_root, "seed.pex")
+    subprocess.check_call(args=["pex", "cowsay==5", "-c", "cowsay", "-o", pex])
     subprocess.check_call(args=[pexrc, "inject", pex])
     subprocess.check_call(
-        args=[sys.executable, pex + "rc", "-c", ""], env=dict(PEXRC_ROOT=pexrc_root)
+        args=[sys.executable, pex + "rc", "Seeded!"], env=dict(PEXRC_ROOT=pexrc_root)
     )
     return pexrc_root
 
