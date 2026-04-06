@@ -1,5 +1,6 @@
 # Copyright 2026 Pex project contributors.
 # SPDX-License-Identifier: Apache-2.0
+
 import atexit
 import os.path
 import shutil
@@ -7,6 +8,12 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
+
+PYTHONPATH = os.path.abspath("python")
+sys.path.append(PYTHONPATH)
+
+# We can only import testing after sys.path ammendment.
+from testing import IS_MAC  # noqa: E402
 
 TYPE_CHECKING = False
 if TYPE_CHECKING:
@@ -32,12 +39,17 @@ def seed_pexrc_root(
     # type: (...) -> str
 
     pexrc_root = os.path.join(session_dir, "pexrc-root")
-    pex = os.path.join(pexrc_root, "seed.pex")
-    subprocess.check_call(args=["pex", "cowsay==5", "-c", "cowsay", "-o", pex])
-    subprocess.check_call(args=[pexrc, "inject", pex])
-    subprocess.check_call(
-        args=[sys.executable, pex + "rc", "Seeded!"], env=dict(PEXRC_ROOT=pexrc_root)
-    )
+    if IS_MAC:
+        # See the conftest.py pexrc_root fixture for details about why this is needed on Mac only.
+        pex = os.path.join(pexrc_root, "seed.pex")
+        subprocess.check_call(args=["pex", "-o", pex])
+        subprocess.check_call(args=[pexrc, "inject", pex])
+        subprocess.check_call(
+            args=[sys.executable, pex + "rc", "-c", "print('Seeded!')"],
+            env=dict(PEXRC_ROOT=pexrc_root),
+        )
+    else:
+        os.makedirs(pexrc_root)
     return pexrc_root
 
 
@@ -52,7 +64,7 @@ def run_tests():
         _PEXRC_TEST_PEXRC_BINARY=pexrc,
         _PEXRC_TEST_SESSION_DIR=session_dir,
         _PEXRC_TEST_SESSION_PEXRC_ROOT=seed_pexrc_root(session_dir, pexrc),
-        PYTHONPATH=os.path.abspath(os.path.join("python")),
+        PYTHONPATH=PYTHONPATH,
     )
     return subprocess.call(
         args=["pytest", "-n", "auto"] + sys.argv[1:],
