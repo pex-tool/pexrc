@@ -10,7 +10,7 @@ use std::process::Command;
 use std::{env, mem};
 
 use anyhow::{anyhow, bail};
-use cache::{CacheDir, HashOptions, Key, atomic_dir};
+use cache::{CacheDir, HashOptions, Key, atomic_dir, atomic_file};
 use fs_err as fs;
 use interpreter::SearchPath;
 use itertools::Itertools;
@@ -34,22 +34,39 @@ impl<'a> Linker for PythonProxyLinker<'a> {
         let venv_python_file_name = format!(
             ".{file_name}",
             file_name = file_name.to_str().ok_or_else(|| anyhow!(
-                "The destination for the python-proxy is not a UTF-* file name: {file_name}",
+                "The destination for the python-proxy is not a UTF-8 file name: {file_name}",
                 file_name = file_name.display()
             ))?
         );
+
+        let mut key = Key::default();
+        key.property("proxied-python", &venv_python_file_name);
+        let fingerprint = key.fingerprint();
+        let python_proxy = CacheDir::PythonProxy
+            .path()?
+            .join(fingerprint.base64_digest());
+
+        atomic_file(&python_proxy, |file| {
+            python_proxy::create(
+                self.0,
+                venv_python_file_name.as_ref(),
+                file.into_file(),
+                None,
+            )
+        })?;
+
         if let Some(interpreter) = interpreter {
             symlink_or_link_or_copy(
                 interpreter,
                 dest.with_file_name(&venv_python_file_name),
                 false,
             )?;
-            python_proxy::create(self.0, venv_python_file_name.as_ref(), dest, None)
         } else {
             let orig_python = dest.with_file_name(&venv_python_file_name);
             fs::rename(dest, &orig_python)?;
-            python_proxy::create(self.0, venv_python_file_name.as_ref(), dest, None)
         }
+        fs::hard_link(python_proxy, dest)?;
+        Ok(())
     }
 }
 

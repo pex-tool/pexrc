@@ -18,10 +18,9 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 pub fn create(
     pex: &Pex,
     interpreter: &Path,
-    path: &Path,
+    mut target_python: File,
     script: Option<String>,
 ) -> anyhow::Result<()> {
-    let mut target_python = File::create(path)?;
     match pex.layout {
         Layout::Loose | Layout::Packed => {
             let mut python_proxy = read_python_proxy_from_dir(pex.path)?;
