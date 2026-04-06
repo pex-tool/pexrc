@@ -7,6 +7,7 @@ import os
 import platform
 import subprocess
 
+IS_LINUX = platform.system().lower() == "linux"
 IS_MAC = platform.system().lower() == "darwin"
 IS_WINDOWS = platform.system().lower() == "windows"
 

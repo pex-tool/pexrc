@@ -4,7 +4,6 @@
 from __future__ import absolute_import
 
 import os.path
-import shutil
 
 import pytest
 from testing import IS_MAC, session_pexrc_root
@@ -30,5 +29,10 @@ def pexrc_root(tmpdir):
         # the cache so test comparisons can look past this amortized 1-time slow start.
         src = os.path.join(session_pexrc_root(), "python-proxies")
         dst = os.path.join(pexrc_root, "python-proxies")
-        shutil.copytree(src, dst)
+        for root, dirs, files in os.walk(src):
+            rel_root = os.path.relpath(root, src) if root != src else ""
+            for d in dirs:
+                os.makedirs(os.path.join(dst, rel_root, d))
+            for f in files:
+                os.symlink(os.path.join(root, f), os.path.join(dst, rel_root, f))
     return pexrc_root
