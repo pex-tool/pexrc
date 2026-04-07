@@ -45,7 +45,7 @@ enum Commands {
     /// Create a Windows-style Python venv console script executable.
     Script {
         #[arg(long)]
-        #[arg(value_parser=clap::builder::PossibleValuesParser::new(CLIB_BY_TARGET.keys()))]
+        #[arg(value_parser=clap::builder::PossibleValuesParser::new(PROXY_BY_TARGET.keys()))]
         target: Option<String>,
 
         #[arg(short = 'p', long, required = true)]
@@ -108,11 +108,15 @@ fn main() -> anyhow::Result<()> {
             output_file,
         } => {
             if let Some(target) = target {
-                let target = Target::classify(&target)?;
-                script::create(&target, &python, &script, &output_file)
+                script::create(target.as_str(), &python, &script, &output_file)
             } else {
                 let current_target = Target::current()?;
-                script::create(&current_target, &python, &script, &output_file)
+                script::create(
+                    current_target.simplified_target_triple().as_ref(),
+                    &python,
+                    &script,
+                    &output_file,
+                )
             }
         }
     }
