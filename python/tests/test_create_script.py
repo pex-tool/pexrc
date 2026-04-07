@@ -28,9 +28,6 @@ def test_create_script(tmpdir):
             dedent(
                 """\
                 import sys
-                print("sys.executable:", sys.executable)
-                print("sys.path:\\n", "\\n".join(sys.path))
-                print("sys.argv:", sys.argv)
 
                 import cowsay
 
