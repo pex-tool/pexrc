@@ -19,8 +19,8 @@ pub const SHEBANG_PREFIX: &str = "\n#!";
 const SHEBANG_SUFFIX: &str = "\n";
 
 pub enum ProxySource<'a> {
-    Bytes(&'a [u8]),
     Pex(&'a Pex<'a>),
+    Read(Box<dyn Read + 'a>),
 }
 
 pub fn create(
@@ -30,9 +30,6 @@ pub fn create(
     script: Option<String>,
 ) -> anyhow::Result<()> {
     match proxy_source {
-        ProxySource::Bytes(mut bytes) => {
-            io::copy(&mut bytes, &mut target_python)?;
-        }
         ProxySource::Pex(pex) => match pex.layout {
             Layout::Loose | Layout::Packed => {
                 let mut python_proxy = read_python_proxy_from_dir(pex.path)?;
@@ -44,6 +41,9 @@ pub fn create(
                 io::copy(&mut python_proxy, &mut target_python)?;
             }
         },
+        ProxySource::Read(mut bytes) => {
+            io::copy(&mut bytes, &mut target_python)?;
+        }
     }
 
     let shebang_python = interpreter.as_os_str();

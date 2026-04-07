@@ -6,7 +6,7 @@ use std::path::Path;
 
 use python_proxy::ProxySource;
 
-use crate::embeds::get_proxy_content;
+use crate::embeds::read_proxy_content;
 
 pub fn create(
     target: &str,
@@ -14,11 +14,11 @@ pub fn create(
     script: &Path,
     output_file: &Path,
 ) -> anyhow::Result<()> {
-    let proxy_bytes = get_proxy_content(target)?;
+    let proxy_bytes = Box::new(read_proxy_content(target)?);
     let script = fs::read_to_string(script)?;
     let target_script = fs::File::create(output_file)?;
     python_proxy::create(
-        ProxySource::Bytes(&proxy_bytes),
+        ProxySource::Read(proxy_bytes),
         python,
         target_script,
         Some(script),
