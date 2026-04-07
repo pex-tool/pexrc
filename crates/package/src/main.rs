@@ -106,6 +106,9 @@ struct Cli {
     #[arg(short = 'o', long)]
     dist_dir: Option<PathBuf>,
 
+    #[arg(long, default_value = "false")]
+    copies: bool,
+
     /// Print the available targets to stdout and exit.
     #[arg(long, value_enum)]
     print_targets: Option<PrintFormat>,
@@ -265,7 +268,11 @@ fn main() -> anyhow::Result<()> {
                 fs::remove_file(&dst)?;
             }
             let (size, fingerprint) = fingerprint_file(src, Sha256::new())?;
-            platform::symlink_or_link_or_copy(src, &dst, true)?;
+            if cli.copies {
+                fs::copy(src, &dst)?;
+            } else {
+                platform::symlink_or_link_or_copy(src, &dst, true)?;
+            }
             fs::write(
                 dst.with_added_extension("sha256"),
                 format!(
