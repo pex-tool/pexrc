@@ -15,27 +15,38 @@ use target::Target;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
+pub const SHEBANG_PREFIX: &str = "\n#!";
+const SHEBANG_SUFFIX: &str = "\n";
+
+pub enum ProxySource<'a> {
+    Bytes(&'a [u8]),
+    Pex(&'a Pex<'a>),
+}
+
 pub fn create(
-    pex: &Pex,
+    proxy_source: ProxySource,
     interpreter: &Path,
     mut target_python: File,
     script: Option<String>,
 ) -> anyhow::Result<()> {
-    match pex.layout {
-        Layout::Loose | Layout::Packed => {
-            let mut python_proxy = read_python_proxy_from_dir(pex.path)?;
-            io::copy(&mut python_proxy, &mut target_python)?;
+    match proxy_source {
+        ProxySource::Bytes(mut bytes) => {
+            io::copy(&mut bytes, &mut target_python)?;
         }
-        Layout::ZipApp => {
-            let mut pex_zip = ZipArchive::new(File::open(pex.path)?)?;
-            let mut python_proxy = read_python_proxy_from_zip(&mut pex_zip)?;
-            io::copy(&mut python_proxy, &mut target_python)?;
-        }
+        ProxySource::Pex(pex) => match pex.layout {
+            Layout::Loose | Layout::Packed => {
+                let mut python_proxy = read_python_proxy_from_dir(pex.path)?;
+                io::copy(&mut python_proxy, &mut target_python)?;
+            }
+            Layout::ZipApp => {
+                let mut pex_zip = ZipArchive::new(File::open(pex.path)?)?;
+                let mut python_proxy = read_python_proxy_from_zip(&mut pex_zip)?;
+                io::copy(&mut python_proxy, &mut target_python)?;
+            }
+        },
     }
 
-    const SHEBANG_PREFIX: &str = "\n#!";
     let shebang_python = interpreter.as_os_str();
-    const SHEBANG_SUFFIX: &str = "\n";
     if let Some(script) = script {
         let mut script_zip = ZipWriter::new(&target_python);
         script_zip.start_file(
@@ -44,7 +55,7 @@ pub fn create(
         )?;
         script_zip.write_all(script.as_bytes())?;
         script_zip.set_comment(format!(
-            "{SHEBANG_PREFIX}{shebang_python}{SHEBANG_SUFFIX}\n",
+            "{SHEBANG_PREFIX}{shebang_python}{SHEBANG_SUFFIX}",
             shebang_python = shebang_python.to_str().ok_or_else(|| anyhow!(
                 "The shebang python path is not UTF-8: {shebang_python}",
                 shebang_python = shebang_python.display()

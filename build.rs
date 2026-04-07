@@ -58,8 +58,8 @@ impl Optimizations {
             .map_err(|err| anyhow!("Failed to decode optimization: {err}", err = err.display()))?;
         match decoded.as_str() {
             "default" => Ok(Self::Default),
-            "build-std" => Ok(Self::Default),
-            "all" => Ok(Self::Default),
+            "build-std" => Ok(Self::BuildStd),
+            "all" => Ok(Self::All),
             value => bail!(
                 "Invalid optimization choice: {value}\n\
                 Valid values are:\n\

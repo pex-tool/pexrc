@@ -18,6 +18,7 @@ use log::{info, warn};
 use logging_timer::time;
 use pex::{Pex, PexPath};
 use platform::symlink_or_link_or_copy;
+use python_proxy::ProxySource;
 use regex::bytes::Regex;
 use venv::{Linker, Virtualenv, populate, populate_user_code_and_wheels};
 
@@ -48,7 +49,7 @@ impl<'a> Linker for PythonProxyLinker<'a> {
 
         atomic_file(&python_proxy, |file| {
             python_proxy::create(
-                self.0,
+                ProxySource::Pex(self.0),
                 venv_python_file_name.as_ref(),
                 file.into_file(),
                 None,

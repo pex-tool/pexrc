@@ -3,3 +3,4 @@
 
 pub mod info;
 pub mod inject;
+pub mod script;
