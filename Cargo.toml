@@ -181,9 +181,11 @@ owo-colors = { workspace = true }
 pex = { path = "crates/pex" }
 pexrs = { path = "crates/pexrs" }
 platform = { path = "crates/platform" }
+python-proxy = { path = "crates/python-proxy" }
 scripts = { path = "crates/scripts", features = ["embedded"] }
 sha2 = { workspace = true }
 strum = { workspace = true }
+target = { path = "crates/target" }
 tempfile = { workspace = true }
 walkdir = { workspace = true }
 zip = { workspace = true }

@@ -7,8 +7,9 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use clap::{ArgAction, Parser, Subcommand};
-use pexrc::commands::{info, inject};
+use pexrc::commands::{info, inject, script};
 use pexrc::embeds::{CLIB_BY_TARGET, PROXY_BY_TARGET};
+use target::Target;
 
 /// Pex Runtime Control.
 #[derive(Parser)]
@@ -41,6 +42,21 @@ enum Commands {
     },
     /// Provide information about the supported target runtimes.
     Info,
+    /// Create a Windows-style Python venv console script executable.
+    Script {
+        #[arg(long)]
+        #[arg(value_parser=clap::builder::PossibleValuesParser::new(CLIB_BY_TARGET.keys()))]
+        target: Option<String>,
+
+        #[arg(short = 'p', long, required = true)]
+        python: PathBuf,
+
+        #[arg(short = 'o', long)]
+        output_file: PathBuf,
+
+        #[arg(value_name = "SCRIPT")]
+        script: PathBuf,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -82,9 +98,22 @@ fn main() -> anyhow::Result<()> {
             } else {
                 (None, None)
             };
-            inject::inject_all(pexes, compression_level, clibs.as_ref(), proxies.as_ref())?;
-            Ok(())
+            inject::inject_all(pexes, compression_level, clibs.as_ref(), proxies.as_ref())
         }
         Commands::Info => info::display(),
+        Commands::Script {
+            target,
+            python,
+            script,
+            output_file,
+        } => {
+            if let Some(target) = target {
+                let target = Target::classify(&target)?;
+                script::create(&target, &python, &script, &output_file)
+            } else {
+                let current_target = Target::current()?;
+                script::create(&current_target, &python, &script, &output_file)
+            }
+        }
     }
 }

@@ -5,8 +5,10 @@ use std::iter::Iterator;
 use std::path::Path;
 use std::sync::LazyLock;
 
+use anyhow::{anyhow, bail};
 use include_dir::{Dir, include_dir};
 use indexmap::IndexMap;
+use target::Target;
 
 const EMBEDS_DIR: Dir<'static> = include_dir!("$EMBEDS_DIR");
 
@@ -53,3 +55,23 @@ pub static PROXY_BY_TARGET: LazyLock<IndexMap<&'static str, &'static Path>> = La
         })
         .collect()
 });
+
+pub fn get_proxy_content(target: &Target) -> anyhow::Result<Vec<u8>> {
+    let proxy_path = *PROXY_BY_TARGET
+        .get(target.simplified_target_triple().as_ref())
+        .ok_or_else(|| {
+            anyhow!(
+                "There is no python-proxy for {target}",
+                target = target.as_str()
+            )
+        })?;
+    for proxy in PROXIES_DIR.files() {
+        if proxy.path() == proxy_path {
+            return Ok(zstd::decode_all(proxy.contents())?);
+        }
+    }
+    bail!(
+        "Failed to find proxy-python for {target}.",
+        target = target.as_str()
+    );
+}
