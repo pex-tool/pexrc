@@ -3,7 +3,7 @@
 
 [package]
 name = "pexrc"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
 publish = false
 
@@ -132,6 +132,7 @@ rayon = "1.11"
 regex = "1.12"
 reqwest = { version = "0.13", features = ["blocking"] }
 rstest = "0.26"
+rust-ini = "0.21"
 same-file = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

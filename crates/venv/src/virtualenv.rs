@@ -47,7 +47,7 @@ fn executable_rel_path(interpreter: &Interpreter) -> Cow<'static, str> {
             minor = interpreter.version.minor
         ))
     } else {
-        Cow::Borrowed("{SCRIPTS_DIR\\python.exe")
+        Cow::Borrowed("Scripts\\python.exe")
     }
 }
 

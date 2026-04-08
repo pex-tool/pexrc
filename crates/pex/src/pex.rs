@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::{anyhow, bail};
 use fs_err as fs;
 use fs_err::File;
-use indexmap::{IndexMap, IndexSet};
+use indexmap::IndexMap;
 use interpreter::{Interpreter, InterpreterConstraints, SearchPath};
 use itertools::Itertools;
 use log::{Level, debug, warn};
@@ -70,11 +70,40 @@ pub struct Pex<'a> {
     pub layout: Layout,
 }
 
+pub struct ResolvedWheel<'a> {
+    file_name: &'a str,
+    project_name: &'a str,
+    version: &'a str,
+}
+
+impl<'a> ResolvedWheel<'a> {
+    pub fn data_dir(&self) -> PathBuf {
+        self.pnav_dir("data")
+    }
+
+    pub fn dist_info_dir(&self) -> PathBuf {
+        self.pnav_dir("dist-info")
+    }
+
+    pub fn pex_info_info_dir(&self) -> PathBuf {
+        self.pnav_dir("pex-info")
+    }
+
+    fn pnav_dir(&self, name: &str) -> PathBuf {
+        format!(
+            "{project_name}-{version}.{name}",
+            project_name = self.project_name,
+            version = self.version
+        )
+        .into()
+    }
+}
+
 pub struct Resolve<'a> {
     pub interpreter: Interpreter,
-    pub wheels: IndexSet<&'a str>,
+    pub wheels: IndexMap<&'a str, ResolvedWheel<'a>>,
     pub scripts: Scripts,
-    pub additional_wheels: Vec<(&'a Pex<'a>, IndexSet<&'a str>)>,
+    pub additional_wheels: Vec<(&'a Pex<'a>, IndexMap<&'a str, ResolvedWheel<'a>>)>,
 }
 
 impl<'a> Pex<'a> {
@@ -126,7 +155,10 @@ impl<'a> Pex<'a> {
     }
 
     #[time("debug", "Pex.{}")]
-    fn resolve_wheels(&'a self, interpreter: &Interpreter) -> anyhow::Result<IndexSet<&'a str>> {
+    fn resolve_wheels(
+        &'a self,
+        interpreter: &Interpreter,
+    ) -> anyhow::Result<IndexMap<&'a str, ResolvedWheel<'a>>> {
         let supported_tags: HashMap<Tag, usize> = interpreter
             .supported_tags
             .iter()
@@ -156,7 +188,14 @@ impl<'a> Pex<'a> {
 
         let ranked_wheels = self.load_wheel_metadata(interpreter, ranked_wheel_files)?;
 
-        struct WheelInfo<'b>(&'b str, Version, Vec<Requirement<Url>>, usize);
+        struct WheelInfo<'b> {
+            file_name: &'b str,
+            raw_project_name: &'b str,
+            raw_version: &'b str,
+            version: Version,
+            requires_dists: Vec<Requirement<Url>>,
+            rank: usize,
+        }
 
         let mut wheels_by_project_name: HashMap<PackageName, Vec<WheelInfo>> =
             HashMap::with_capacity(ranked_wheels.len());
@@ -164,18 +203,20 @@ impl<'a> Pex<'a> {
             wheels_by_project_name
                 .entry(ranked_wheel.metadata.project_name)
                 .or_default()
-                .push(WheelInfo(
-                    ranked_wheel.metadata.file_name,
-                    ranked_wheel.metadata.version,
-                    ranked_wheel.metadata.requires_dists,
-                    ranked_wheel.rank,
-                ))
+                .push(WheelInfo {
+                    file_name: ranked_wheel.metadata.file_name,
+                    raw_project_name: ranked_wheel.metadata.raw_project_name,
+                    raw_version: ranked_wheel.metadata.raw_version,
+                    version: ranked_wheel.metadata.version,
+                    requires_dists: ranked_wheel.metadata.requires_dists,
+                    rank: ranked_wheel.rank,
+                })
         }
         for wheels in wheels_by_project_name.values_mut() {
-            wheels.sort_by_key(|WheelInfo(_, _, _, rank)| *rank);
+            wheels.sort_by_key(|WheelInfo { rank, .. }| *rank);
         }
 
-        let mut resolved_by_project_name: IndexMap<PackageName, &str> =
+        let mut resolved_by_project_name: IndexMap<PackageName, ResolvedWheel> =
             IndexMap::with_capacity(wheels_by_project_name.len());
         let mut indexed_extras: Vec<Vec<ExtraName>> = vec![Vec::new()];
         let mut to_resolve: VecDeque<(Requirement<Url>, usize)> = self
@@ -234,7 +275,15 @@ impl<'a> Pex<'a> {
                         reason = reason,
                     )
                 })?;
-            for WheelInfo(file_name, version, requirements, _) in wheels {
+            for WheelInfo {
+                file_name,
+                raw_project_name,
+                raw_version,
+                version,
+                requires_dists,
+                ..
+            } in wheels
+            {
                 if let Some(version_or_url) = requirement.version_or_url.as_ref() {
                     match version_or_url {
                         VersionOrUrl::VersionSpecifier(version_specifier) => {
@@ -256,14 +305,24 @@ impl<'a> Pex<'a> {
                     indexed_extras.push(requirement.extras);
                     idx
                 };
-                resolved_by_project_name.insert(requirement.name, file_name);
-                for req in requirements {
+                resolved_by_project_name.insert(
+                    requirement.name,
+                    ResolvedWheel {
+                        file_name,
+                        project_name: raw_project_name,
+                        version: raw_version,
+                    },
+                );
+                for req in requires_dists {
                     to_resolve.push_back((req, extras_index))
                 }
                 break;
             }
         }
-        Ok(resolved_by_project_name.into_values().collect())
+        Ok(resolved_by_project_name
+            .into_values()
+            .map(|resolved_wheel| (resolved_wheel.file_name, resolved_wheel))
+            .collect())
     }
 
     #[time("debug", "Pex.{}")]
@@ -543,7 +602,7 @@ mod tests {
     use std::str::FromStr;
 
     use fs_err::File;
-    use indexmap::{IndexSet, indexset};
+    use indexmap::{IndexMap, IndexSet, indexset};
     use interpreter::{Interpreter, SearchPath};
     use pep508_rs::{Requirement, VersionOrUrl};
     use rstest::{fixture, rstest};
@@ -553,6 +612,7 @@ mod tests {
     use zip::write::SimpleFileOptions;
     use zip::{CompressionMethod, ZipWriter};
 
+    use crate::pex::ResolvedWheel;
     use crate::wheel::WheelFile;
     use crate::{Pex, PexPath};
 
@@ -621,11 +681,11 @@ mod tests {
     }
 
     fn assert_wheels(
-        wheels: IndexSet<&str>,
+        wheels: IndexMap<&str, ResolvedWheel>,
         expected_requirements: impl IntoIterator<Item = &'static str>,
     ) {
         let resolved = wheels
-            .into_iter()
+            .keys()
             .map(|file_name| {
                 WheelFile::parse_file_name(file_name)
                     .map(|wheel_file| (wheel_file.project_name, wheel_file.version))

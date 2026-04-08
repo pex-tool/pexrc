@@ -29,9 +29,9 @@ impl<'a> Tag<'a> {
             .ok_or_else(|| anyhow!("Failed to find abi tag in {tag}"))?;
         let platform = tags
             .next()
-            .ok_or_else(|| anyhow!("Failed to find polatform tag in {tag}"))?;
+            .ok_or_else(|| anyhow!("Failed to find platform tag in {tag}"))?;
         if tags.next().is_some() {
-            bail!("336")
+            bail!("Failed to parse tag from {tag}")
         }
         Ok(Self {
             python,
@@ -162,7 +162,9 @@ impl<'a> Display for WheelFile<'a> {
 
 pub struct WheelMetadata<'a> {
     pub(crate) file_name: &'a str,
+    pub(crate) raw_project_name: &'a str,
     pub(crate) project_name: PackageName,
+    pub(crate) raw_version: &'a str,
     pub(crate) version: Version,
     pub(crate) requires_dists: Vec<Requirement<Url>>,
     pub(crate) requires_python: Option<VersionSpecifiers>,
@@ -205,7 +207,9 @@ impl<'a> WheelMetadata<'a> {
 
         Ok(Self {
             file_name: wheel_file.file_name,
+            raw_project_name: wheel_file.raw_project_name,
             project_name: wheel_file.project_name,
+            raw_version: wheel_file.raw_version,
             version: wheel_file.version,
             requires_dists,
             requires_python,

@@ -10,10 +10,11 @@ use std::path::{Path, PathBuf};
 use anyhow::anyhow;
 use fs_err as fs;
 use fs_err::File;
-use indexmap::{IndexMap, IndexSet};
+use indexmap::IndexMap;
+use ini::{Ini, Properties};
 use log::warn;
 use logging_timer::time;
-use pex::{BinPath, InheritPath, Layout, Pex, PexInfo};
+use pex::{BinPath, Layout, Pex, PexInfo, ResolvedWheel};
 use platform::{mark_executable, path_as_bytes, path_as_str, symlink_or_link_or_copy};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use scripts::{Scripts, VenvPex, VenvPexRepl};
@@ -24,7 +25,7 @@ use crate::virtualenv::Virtualenv;
 fn populate_from_loose_pex<'a>(
     venv: &Virtualenv,
     loose_pex: &'a Pex<'a>,
-    resolved_wheels: IndexSet<&'a str>,
+    resolved_wheels: &IndexMap<&'a str, ResolvedWheel<'a>>,
     populate_pex_info: bool,
 ) -> anyhow::Result<()> {
     let site_packages_path = venv.site_packages_path();
@@ -42,7 +43,7 @@ fn populate_from_loose_pex<'a>(
 
 fn collect_wheels_from_directory_pex(
     pex: &Pex,
-    resolved_wheels: IndexSet<&str>,
+    resolved_wheels: &IndexMap<&str, ResolvedWheel>,
 ) -> anyhow::Result<Vec<PathBuf>> {
     let mut wheels = Vec::with_capacity(resolved_wheels.len());
     let deps_dir = pex.path.join(".deps");
@@ -50,7 +51,7 @@ fn collect_wheels_from_directory_pex(
         for entry in fs::read_dir(deps_dir)? {
             let entry = entry?;
             if let Ok(wheel_file_name) = platform::os_str_as_str(&entry.file_name())
-                && resolved_wheels.contains(wheel_file_name)
+                && resolved_wheels.contains_key(wheel_file_name)
             {
                 wheels.push(entry.path())
             }
@@ -59,12 +60,189 @@ fn collect_wheels_from_directory_pex(
     Ok(wheels)
 }
 
+fn spread(
+    pex: &Pex,
+    wheel: ResolvedWheel,
+    virtualenv: &Virtualenv,
+    shebang_interpreter: &Path,
+    shebang_arg: Option<&str>,
+) -> anyhow::Result<()> {
+    let entry_points = virtualenv
+        .site_packages_path()
+        .join(wheel.dist_info_dir())
+        .join("entry_points.txt");
+    if entry_points.exists() {
+        install_scripts(
+            pex,
+            &entry_points,
+            virtualenv,
+            shebang_interpreter,
+            shebang_arg,
+        )?;
+    }
+    Ok(())
+}
+
+fn install_scripts(
+    pex: &Pex,
+    entry_points_txt: &Path,
+    virtualenv: &Virtualenv,
+    shebang_interpreter: &Path,
+    shebang_arg: Option<&str>,
+) -> anyhow::Result<()> {
+    let entry_points = Ini::load_from_file(entry_points_txt)?;
+    if let Some(console_scripts) = entry_points.section(Some("console_scripts"))
+        && !console_scripts.is_empty()
+    {
+        let script_dir = virtualenv.prefix().join(virtualenv.bin_dir_relpath);
+        for (name, entry_point) in console_scripts {
+            create_script(
+                pex,
+                shebang_interpreter,
+                shebang_arg,
+                name,
+                entry_point,
+                &script_dir,
+                false,
+            )?;
+        }
+    }
+    if let Some(gui_scripts) = entry_points.section(Some("gui_scripts"))
+        && !gui_scripts.is_empty()
+    {
+        struct GuiScriptsList<'a>(&'a Properties);
+        impl<'a> Display for GuiScriptsList<'a> {
+            fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+                for (name, _) in self.0 {
+                    writeln!(f, "{name}")?;
+                }
+                Ok(())
+            }
+        }
+        warn!(
+            "There is currently no support for gui scripts, skipping install of {count}.\n\
+            Found these installing {entry_points_txt} in venv at {venv}:\n\
+            {gui_scripts_list}",
+            count = gui_scripts.len(),
+            entry_points_txt = entry_points_txt.display(),
+            venv = virtualenv.prefix().display(),
+            gui_scripts_list = GuiScriptsList(gui_scripts)
+        );
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn create_script(
+    _pex: &Pex,
+    shebang_interpreter: &Path,
+    shebang_arg: Option<&str>,
+    name: &str,
+    entry_point: &str,
+    dest_dir: &Path,
+    gui: bool,
+) -> anyhow::Result<()> {
+    assert!(!gui, "There is no support for gui scripts yet.");
+
+    let script_contents = create_script_contents(shebang_interpreter, shebang_arg, entry_point)?;
+    let mut script_file = File::create(dest_dir.join(name))?;
+    script_file.write_all(script_contents.as_bytes())?;
+    mark_executable(script_file.file_mut())?;
+    Ok(())
+}
+
+#[cfg(windows)]
+fn create_script(
+    pex: &Pex,
+    shebang_interpreter: &Path,
+    shebang_arg: Option<&str>,
+    name: &str,
+    entry_point: &str,
+    dest_dir: &Path,
+    gui: bool,
+) -> anyhow::Result<()> {
+    assert!(!gui, "There is no support for gui scripts yet.");
+
+    let script_file = File::create(dest_dir.join(name).with_extension("exe"))?;
+    let script_contents = create_script_contents(shebang_interpreter, shebang_arg, entry_point)?;
+    python_proxy::create(
+        python_proxy::ProxySource::Pex(pex),
+        shebang_interpreter,
+        script_file.into_file(),
+        Some(script_contents),
+    )
+}
+
+fn create_script_contents(
+    shebang_interpreter: &Path,
+    shebang_arg: Option<&str>,
+    entry_point: &str,
+) -> anyhow::Result<String> {
+    struct RenderShebang<'a>(&'a str, Option<&'a str>);
+    impl<'a> Display for RenderShebang<'a> {
+        fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+            write!(f, "#!{interpreter}", interpreter = self.0)?;
+            if let Some(args) = self.1 {
+                write!(f, " {args}")?;
+            }
+            Ok(())
+        }
+    }
+    let shebang = RenderShebang(path_as_str(shebang_interpreter)?, shebang_arg);
+
+    let mut components = entry_point.splitn(2, ":");
+    let modname = components.next().ok_or_else(|| anyhow!("XXX"))?;
+    if let Some(attrs) = components.next()
+        && !attrs.is_empty()
+    {
+        struct RenderAttrsTuple<'a>(Vec<&'a str>);
+        impl<'a> Display for RenderAttrsTuple<'a> {
+            fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+                write!(f, "(")?;
+                for attr in &self.0 {
+                    write!(f, "\"{attr}\",")?;
+                }
+                write!(f, ")")?;
+                Ok(())
+            }
+        }
+
+        Ok(format!(
+            r##"{shebang}
+# -*- coding: utf-8 -*-
+import importlib
+import sys
+
+entry_point = importlib.import_module("{modname}")
+for attr in {attrs_tuple}:
+    entry_point = getattr(entry_point, attr)
+
+if __name__ == "__main__":
+    sys.exit(entry_point())
+"##,
+            attrs_tuple = RenderAttrsTuple(attrs.split(".").collect())
+        ))
+    } else {
+        Ok(format!(
+            r##"{shebang}
+# -*- coding: utf-8 -*-
+import runpy
+import sys
+
+if __name__ == "__main__":
+    runpy.run_module("{modname}", run_name="__main__", alter_sys=True)
+    sys.exit(0)
+"##,
+        ))
+    }
+}
+
 fn populate_wheel_dir(wheel: &Path, site_packages_path: &Path) -> anyhow::Result<()> {
-    let user_code = walkdir::WalkDir::new(wheel)
+    let wheel_contents = walkdir::WalkDir::new(wheel)
         .min_depth(1)
         .into_iter()
         .collect::<Result<Vec<_>, _>>()?;
-    user_code.into_par_iter().try_for_each(|entry| {
+    wheel_contents.into_par_iter().try_for_each(|entry| {
         let dst_path = site_packages_path.join(entry.path().strip_prefix(wheel).expect(
             "Walked unpacked wheel paths should be child paths of the unpacked wheel root dir.",
         ));
@@ -93,13 +271,13 @@ fn populate_wheel_dir(wheel: &Path, site_packages_path: &Path) -> anyhow::Result
 fn populate_from_packed_pex<'a>(
     venv: &Virtualenv,
     packed_pex: &'a Pex<'a>,
-    resolved_wheels: IndexSet<&'a str>,
+    resolved_wheels: &IndexMap<&'a str, ResolvedWheel<'a>>,
     populate_pex_info: bool,
 ) -> anyhow::Result<()> {
     let site_packages_path = venv.site_packages_path();
     collect_wheels_from_directory_pex(packed_pex, resolved_wheels)?
         .into_par_iter()
-        .try_for_each(|wheel_zip| populate_whl(&wheel_zip, &site_packages_path))?;
+        .try_for_each(|wheel_zip| populate_whl_zip(&wheel_zip, &site_packages_path))?;
     populate_user_code_from_directory_pex(
         packed_pex,
         venv.prefix(),
@@ -109,25 +287,13 @@ fn populate_from_packed_pex<'a>(
     Ok(())
 }
 
-fn populate_whl(wheel: &Path, site_packages_path: &Path) -> anyhow::Result<()> {
-    populate_whl_zip(
-        wheel,
-        ZipArchive::new(File::open(wheel)?.into_file())?,
-        site_packages_path,
-    )
-}
-
-fn populate_whl_zip<P: AsRef<Path> + Send + Sync>(
-    wheel: P,
-    whl_zip: ZipArchive<std::fs::File>,
-    site_packages_path: &Path,
-) -> anyhow::Result<()> {
+fn populate_whl_zip(wheel: &Path, site_packages_path: &Path) -> anyhow::Result<()> {
+    let whl_zip = ZipArchive::new(File::open(wheel)?.into_file())?;
     let metadata = whl_zip.metadata();
     (0..whl_zip.len()).into_par_iter().try_for_each(|index| {
-        let zip_fp = File::open(wheel.as_ref())?;
+        let zip_fp = File::open(wheel)?;
         let mut zip = unsafe { ZipArchive::unsafe_new_with_metadata(zip_fp, metadata.clone()) };
-        extract_idx(site_packages_path, index, &mut zip)?;
-        Ok(())
+        extract_idx(site_packages_path, index, &mut zip)
     })
 }
 
@@ -186,7 +352,7 @@ fn populate_user_code_from_directory_pex<'a>(
 fn populate_from_zip_app_with_whl_deps<'a>(
     venv: &Virtualenv,
     zip_app_pex: &'a Pex<'a>,
-    resolved_wheels: IndexSet<&'a str>,
+    resolved_wheels: &IndexMap<&'a str, ResolvedWheel<'a>>,
     populate_pex_info: bool,
 ) -> anyhow::Result<()> {
     let pex_zip = ZipArchive::new(File::open(zip_app_pex.path)?)?;
@@ -219,7 +385,7 @@ fn populate_from_zip_app_with_whl_deps<'a>(
     let wheel_file_names = resolved_wheels.into_iter().collect::<Vec<_>>();
     wheel_file_names
         .into_par_iter()
-        .try_for_each(|wheel_file_name| {
+        .try_for_each(|(wheel_file_name, _)| {
             let zip_fp = File::open(zip_app_pex.path)?;
             let mut zip = unsafe { ZipArchive::unsafe_new_with_metadata(zip_fp, metadata.clone()) };
             let whl_file = zip.by_name_seek(&[".deps", wheel_file_name].join("/"))?;
@@ -249,7 +415,7 @@ fn populate_from_zip_app_with_whl_deps<'a>(
 fn populate_from_zip_app<'a>(
     venv: &Virtualenv,
     zip_app_pex: &'a Pex<'a>,
-    resolved_wheels: IndexSet<&'a str>,
+    resolved_wheels: &IndexMap<&'a str, ResolvedWheel<'a>>,
     populate_pex_info: bool,
 ) -> anyhow::Result<()> {
     let mut pex_zip = ZipArchive::new(File::open(zip_app_pex.path)?)?;
@@ -265,7 +431,7 @@ fn populate_from_zip_app<'a>(
                     && name[6..]
                         .split("/")
                         .next()
-                        .map(|whl_name| !resolved_wheels.contains(whl_name))
+                        .map(|whl_name| !resolved_wheels.contains_key(whl_name))
                         .unwrap_or(true)
             {
                 None
@@ -294,51 +460,56 @@ fn populate_from_zip_app<'a>(
 #[time("debug", "{}")]
 pub fn populate_user_code_and_wheels<'a>(
     venv: &Virtualenv,
+    shebang_interpreter: &Path,
+    shebang_arg: Option<&str>,
     pex: &'a Pex<'a>,
-    resolved_wheels: IndexSet<&'a str>,
+    resolved_wheels: IndexMap<&'a str, ResolvedWheel<'a>>,
     populate_pex_info: bool,
 ) -> anyhow::Result<()> {
     match pex.layout {
-        Layout::Loose => populate_from_loose_pex(venv, pex, resolved_wheels, populate_pex_info),
-        Layout::Packed => populate_from_packed_pex(venv, pex, resolved_wheels, populate_pex_info),
+        Layout::Loose => populate_from_loose_pex(venv, pex, &resolved_wheels, populate_pex_info)?,
+        Layout::Packed => populate_from_packed_pex(venv, pex, &resolved_wheels, populate_pex_info)?,
         Layout::ZipApp => {
             if pex.info.deps_are_wheel_files {
-                populate_from_zip_app_with_whl_deps(venv, pex, resolved_wheels, populate_pex_info)
+                populate_from_zip_app_with_whl_deps(venv, pex, &resolved_wheels, populate_pex_info)?
             } else {
-                populate_from_zip_app(venv, pex, resolved_wheels, populate_pex_info)
+                populate_from_zip_app(venv, pex, &resolved_wheels, populate_pex_info)?
             }
         }
     }
+    resolved_wheels
+        .into_values()
+        .collect::<Vec<_>>()
+        .into_par_iter()
+        .try_for_each(|resolved_wheel| {
+            spread(pex, resolved_wheel, venv, shebang_interpreter, shebang_arg)
+        })?;
+    Ok(())
 }
 
 #[time("debug", "{}")]
 pub fn populate<'a>(
     venv: &Virtualenv,
-    resting_venv_dir: &Path,
+    shebang_interpreter: &Path,
+    shebang_arg: Option<&str>,
     pex: &'a Pex<'a>,
-    resolved_wheels: IndexSet<&'a str>,
+    resolved_wheels: IndexMap<&'a str, ResolvedWheel<'a>>,
     scripts: &mut Scripts,
 ) -> anyhow::Result<()> {
-    let selected_wheels = resolved_wheels.iter().copied().collect::<Vec<_>>();
-    populate_user_code_and_wheels(venv, pex, resolved_wheels, true)?;
+    let selected_wheels = resolved_wheels.keys().copied().collect::<Vec<_>>();
+    populate_user_code_and_wheels(
+        venv,
+        shebang_interpreter,
+        shebang_arg,
+        pex,
+        resolved_wheels,
+        true,
+    )?;
 
-    let interpreter_relpath = venv
-        .interpreter
-        .path
-        .strip_prefix(&venv.interpreter.prefix)?;
-    let shebang_interpreter = resting_venv_dir.join(interpreter_relpath);
-    let shebang_arg = if (pex.info.venv && pex.info.venv_hermetic_scripts)
-        || (!pex.info.venv
-            && pex.info.inherit_path.unwrap_or(InheritPath::False) == InheritPath::False)
-    {
-        Some(venv.interpreter.hermetic_args())
-    } else {
-        None
-    };
-    write_main(venv, &shebang_interpreter, shebang_arg, &pex.info, scripts)?;
+    write_main(venv, shebang_interpreter, shebang_arg, &pex.info, scripts)?;
     write_repl(
         venv,
-        &shebang_interpreter,
+        shebang_interpreter,
         shebang_arg,
         pex.path,
         &pex.info,
