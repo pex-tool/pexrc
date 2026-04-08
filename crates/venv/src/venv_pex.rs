@@ -85,7 +85,7 @@ fn spread(
 
 fn install_scripts(
     pex: &Pex,
-    entry_points_txt: &PathBuf,
+    entry_points_txt: &Path,
     virtualenv: &Virtualenv,
     shebang_interpreter: &Path,
     shebang_arg: Option<&str>,
