@@ -1,5 +1,9 @@
 # Release Notes
 
+## 0.6.0
+
+This release adds support for installing venv console scripts.
+
 ## 0.5.0
 
 This release wires PEX_VERBOSE to logging levels for both the `pexrc` tool and the runtime of the

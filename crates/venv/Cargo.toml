@@ -16,11 +16,15 @@ logging_timer = { workspace = true }
 pex = { path = "../pex" }
 platform = { path = "../platform" }
 rayon = { workspace = true }
+rust-ini = { workspace = true }
 scripts = { path = "../scripts" }
 target-lexicon = { workspace = true }
 tempfile = { workspace = true }
 walkdir = { workspace = true }
 zip = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+python-proxy = { path = "../python-proxy"}
 
 [dev-dependencies]
 interpreter = { path = "../interpreter" }

@@ -16,7 +16,7 @@ use interpreter::SearchPath;
 use itertools::Itertools;
 use log::{info, warn};
 use logging_timer::time;
-use pex::{Pex, PexPath};
+use pex::{InheritPath, Pex, PexPath};
 use platform::symlink_or_link_or_copy;
 use python_proxy::ProxySource;
 use regex::bytes::Regex;
@@ -25,6 +25,7 @@ use venv::{Linker, Virtualenv, populate, populate_user_code_and_wheels};
 struct PythonProxyLinker<'a>(&'a Pex<'a>);
 
 impl<'a> Linker for PythonProxyLinker<'a> {
+    #[cfg(unix)]
     fn link(&self, dest: &Path, interpreter: Option<&Path>) -> anyhow::Result<()> {
         let file_name = dest.file_name().ok_or_else(|| {
             anyhow!(
@@ -68,6 +69,17 @@ impl<'a> Linker for PythonProxyLinker<'a> {
         }
         symlink_or_link_or_copy(python_proxy, dest, true)?;
         Ok(())
+    }
+
+    #[cfg(windows)]
+    fn link(&self, dest: &Path, interpreter: Option<&Path>) -> anyhow::Result<()> {
+        python_proxy::create(
+            ProxySource::Pex(self.0),
+            interpreter
+                .ok_or_else(|| anyhow!("Windows venvs require an interpreter to link to."))?,
+            fs::File::create(dest)?.into_file(),
+            None,
+        )
     }
 }
 
@@ -154,9 +166,38 @@ fn prepare_venv<'a>(
             &mut resolve.scripts,
             pex.info.venv_system_site_packages,
         )?;
-        populate(&venv, &venv_dir, &pex, resolve.wheels, &mut resolve.scripts)?;
+
+        let interpreter_relpath = venv
+            .interpreter
+            .path
+            .strip_prefix(&venv.interpreter.prefix)?;
+        let shebang_interpreter = venv_dir.join(interpreter_relpath);
+        let shebang_arg = if (pex.info.venv && pex.info.venv_hermetic_scripts)
+            || (!pex.info.venv
+                && pex.info.inherit_path.unwrap_or(InheritPath::False) == InheritPath::False)
+        {
+            Some(venv.interpreter.hermetic_args())
+        } else {
+            None
+        };
+
+        populate(
+            &venv,
+            &shebang_interpreter,
+            shebang_arg,
+            &pex,
+            resolve.wheels,
+            &mut resolve.scripts,
+        )?;
         for (additional_pex, resolved_wheels) in resolve.additional_wheels {
-            populate_user_code_and_wheels(&venv, additional_pex, resolved_wheels, false)?;
+            populate_user_code_and_wheels(
+                &venv,
+                &shebang_interpreter,
+                shebang_arg,
+                additional_pex,
+                resolved_wheels,
+                false,
+            )?;
         }
         Ok(venv.interpreter)
     })? {
