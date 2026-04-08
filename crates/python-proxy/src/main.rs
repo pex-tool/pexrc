@@ -20,14 +20,9 @@ struct PythonProxy {
     has_script: bool,
 }
 
-fn read_proxy() -> Result<PythonProxy, io::Error> {
+fn read_proxy() -> io::Result<PythonProxy> {
     let mut buf = vec![0u8; PATH_MAX];
-    let proxy = PathBuf::from(env::args().next().ok_or_else(|| {
-        io::Error::new(
-            ErrorKind::NotFound,
-            "No argv0 was present; python-proxy cannot run.",
-        )
-    })?);
+    let proxy = proxy_path()?;
     let mut exe_fp = BufReader::new(File::open(&proxy)?);
     exe_fp.seek(SeekFrom::End(-(buf.len() as i64)))?;
     exe_fp.read_to_end(&mut buf)?;
@@ -61,6 +56,24 @@ fn read_proxy() -> Result<PythonProxy, io::Error> {
             "Failed to find Python shebang footer.",
         )),
     }
+}
+
+#[cfg(unix)]
+fn proxy_path() -> io::Result<PathBuf> {
+    env::args()
+        .next()
+        .ok_or_else(|| {
+            io::Error::new(
+                ErrorKind::NotFound,
+                "No argv0 was present; python-proxy cannot run.",
+            )
+        })
+        .map(PathBuf::from)
+}
+
+#[cfg(windows)]
+fn proxy_path() -> io::Result<PathBuf> {
+    env::current_exe()
 }
 
 fn main() {

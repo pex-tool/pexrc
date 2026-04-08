@@ -10,14 +10,13 @@ use std::process::Command;
 use std::{env, mem};
 
 use anyhow::{anyhow, bail};
-use cache::{CacheDir, HashOptions, Key, atomic_dir, atomic_file};
+use cache::{CacheDir, HashOptions, Key, atomic_dir};
 use fs_err as fs;
 use interpreter::SearchPath;
 use itertools::Itertools;
 use log::{info, warn};
 use logging_timer::time;
 use pex::{InheritPath, Pex, PexPath};
-use platform::symlink_or_link_or_copy;
 use python_proxy::ProxySource;
 use regex::bytes::Regex;
 use venv::{Linker, Virtualenv, populate, populate_user_code_and_wheels};
@@ -48,7 +47,7 @@ impl<'a> Linker for PythonProxyLinker<'a> {
             .path()?
             .join(fingerprint.base64_digest());
 
-        atomic_file(&python_proxy, |file| {
+        cache::atomic_file(&python_proxy, |file| {
             python_proxy::create(
                 ProxySource::Pex(self.0),
                 venv_python_file_name.as_ref(),
@@ -58,7 +57,7 @@ impl<'a> Linker for PythonProxyLinker<'a> {
         })?;
 
         if let Some(interpreter) = interpreter {
-            symlink_or_link_or_copy(
+            platform::symlink_or_link_or_copy(
                 interpreter,
                 dest.with_file_name(&venv_python_file_name),
                 false,
@@ -67,7 +66,7 @@ impl<'a> Linker for PythonProxyLinker<'a> {
             let orig_python = dest.with_file_name(&venv_python_file_name);
             fs::rename(dest, &orig_python)?;
         }
-        symlink_or_link_or_copy(python_proxy, dest, true)?;
+        platform::symlink_or_link_or_copy(python_proxy, dest, true)?;
         Ok(())
     }
 
