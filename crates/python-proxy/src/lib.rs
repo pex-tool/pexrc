@@ -60,7 +60,7 @@ pub fn create(
                 "The shebang python path is not UTF-8: {shebang_python}",
                 shebang_python = shebang_python.display()
             ))?
-        ));
+        ))?;
         script_zip.finish()?;
     } else {
         target_python.write_all(SHEBANG_PREFIX.as_bytes())?;
