@@ -96,7 +96,7 @@ pub fn boot(
     if let Ok(tools) = env::var("PEX_TOOLS")
         && tools == "1"
     {
-        if let Err(err) = tools::main(pex.as_ref(), argv) {
+        if let Err(err) = tools::main(python.as_ref(), pex.as_ref(), argv) {
             eprintln!("{err}");
             std::process::exit(1);
         }

@@ -6,8 +6,6 @@ use std::io::Write;
 use std::path::Path;
 
 use fs_err::File;
-use logging_timer::time;
-use pex::Pex;
 use serde::Serialize;
 use serde_json::ser::PrettyFormatter;
 
@@ -25,22 +23,25 @@ fn indent_serializer<W: Write>(
     )
 }
 
-#[time("debug", "{}")]
-pub(crate) fn display(pex: Pex, indent: Option<u8>, output: Option<&Path>) -> anyhow::Result<()> {
+pub(crate) fn serialize(
+    value: &impl Serialize,
+    indent: Option<u8>,
+    output: Option<&Path>,
+) -> anyhow::Result<()> {
     match (indent, output) {
         (Some(indent), Some(path)) => {
             let mut serializer = indent_serializer(indent, File::create(path)?);
-            pex.info.serialize(&mut serializer)?;
+            value.serialize(&mut serializer)?;
         }
         (Some(indent), None) => {
             let mut serializer = indent_serializer(indent, io::stdout());
-            pex.info.serialize(&mut serializer)?;
+            value.serialize(&mut serializer)?;
         }
         (None, Some(path)) => {
-            serde_json::to_writer(File::create(path)?, &pex.info)?;
+            serde_json::to_writer(File::create(path)?, value)?;
         }
         (None, None) => {
-            serde_json::to_writer(io::stdout(), &pex.info)?;
+            serde_json::to_writer(io::stdout(), value)?;
         }
     }
     Ok(())

@@ -10,6 +10,8 @@ use anyhow::anyhow;
 use env_logger::Target;
 use log::LevelFilter;
 
+const DEFAULT_LEVEL: LevelFilter = LevelFilter::Warn;
+
 pub fn init_default() -> anyhow::Result<()> {
     init(None)
 }
@@ -34,7 +36,7 @@ fn calculate_level() -> anyhow::Result<LevelFilter> {
             .copied()
             .chain(parse_rust_level().iter().copied())
             .max()
-            .unwrap_or(LevelFilter::Error)
+            .unwrap_or(DEFAULT_LEVEL)
     })
 }
 
@@ -49,11 +51,13 @@ fn parse_pex_level() -> anyhow::Result<Option<LevelFilter>> {
         match u8::from_str(&level_str).map_err(|err| {
             anyhow!("PEX_VERBOSE must be an un-signed integer. Given {level_str}: {err}")
         })? {
-            0 => LevelFilter::Error,
-            1 => LevelFilter::Warn,
-            2 => LevelFilter::Info,
-            3 => LevelFilter::Debug,
-            _ => LevelFilter::Trace,
+            0 => DEFAULT_LEVEL,
+            1 => DEFAULT_LEVEL.increment_severity(),
+            2 => DEFAULT_LEVEL.increment_severity().increment_severity(),
+            _ => DEFAULT_LEVEL
+                .increment_severity()
+                .increment_severity()
+                .increment_severity(),
         }
     } else {
         return Ok(None);
