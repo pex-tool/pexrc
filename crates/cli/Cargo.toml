@@ -2,16 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 [package]
-name = "clib"
+name = "cli"
 edition = "2024"
 publish = false
 
-[lib]
-name = "pexrc"
-crate-type = ["cdylib"]
-
 [dependencies]
-pexrs = { path = "../pexrs" }
-
-[features]
-tools = ["pexrs/tools"]
+clap = { workspace = true }

@@ -87,7 +87,7 @@ enum PrintFormat {
 
 /// Pexrc Packaging System.
 #[derive(Parser)]
-#[command(version, about, long_about = None)]
+#[command(version, about, long_about = None, styles = cli::STYLES)]
 struct Cli {
     #[command(flatten)]
     verbosity: clap_verbosity_flag::Verbosity,

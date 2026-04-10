@@ -2,22 +2,22 @@
 # SPDX-License-Identifier: Apache-2.0
 
 [package]
-name = "package"
+name = "tools"
 edition = "2024"
+version = "0.1.0"
 publish = false
 
 [dependencies]
-anstream = { workspace = true }
 anyhow = { workspace = true }
-build-system = { path = "../build-system" }
-cache = { path = "../cache" }
 clap = { workspace = true }
 clap-verbosity-flag = { workspace = true }
 cli = { path = "../cli" }
 colorchoice-clap = { workspace = true }
-env_logger = { workspace = true }
 fs-err = { workspace = true }
+logging = { path = "../logging" }
+logging_timer = { workspace = true }
 owo-colors = { workspace = true }
-platform = { path = "../platform" }
+pex = { path = "../pex" }
+serde = { workspace = true }
 serde_json = { workspace = true }
-sha2 = { workspace = true }
+zip = { workspace = true }

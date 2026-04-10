@@ -13,6 +13,7 @@ members = [
     "crates/boot",
     "crates/build-system",
     "crates/cache",
+    "crates/cli",
     "crates/clib",
     "crates/interpreter",
     "crates/logging",
@@ -24,6 +25,7 @@ members = [
     "crates/scripts",
     "crates/target",
     "crates/testing",
+    "crates/tools",
     "crates/venv",
 ]
 
@@ -101,8 +103,7 @@ anstream = "1.0"
 anyhow = "1.0"
 base64 = "0.22"
 bstr = "1.12"
-build-target = "0.8"
-clap = {  version = "4.5", features = ["derive", "string"] }
+clap = {  version = "4.6", features = ["color", "derive", "string"] }
 clap-verbosity-flag = "3.0"
 colorchoice-clap = "1.0"
 const_format = { version = "0.2", features = ["rust_1_64"] }
@@ -168,6 +169,7 @@ boot = { path = "crates/boot" }
 cache = { path = "crates/cache" }
 clap = { workspace = true }
 clap-verbosity-flag = { workspace = true }
+cli = { path = "crates/cli" }
 colorchoice-clap = { workspace = true }
 digest = { workspace = true }
 env_logger = { workspace = true }
