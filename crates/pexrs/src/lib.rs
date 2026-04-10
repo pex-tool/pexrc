@@ -92,6 +92,16 @@ pub fn boot(
         Ok(lock) => lock,
         Err(err) => bail!("Failed to obtain PEXRC cache read lock: {err}"),
     };
+    #[cfg(feature = "tools")]
+    if let Ok(tools) = env::var("PEX_TOOLS")
+        && tools == "1"
+    {
+        if let Err(err) = tools::main(pex.as_ref(), argv) {
+            eprintln!("{err}");
+            std::process::exit(1);
+        }
+        std::process::exit(0);
+    }
     let mut command = prepare_boot(python, python_args, pex, argv)?;
     info!(
         "Booting with {exe} {args}",

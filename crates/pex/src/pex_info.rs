@@ -10,11 +10,11 @@ use anyhow::anyhow;
 use indexmap::IndexMap;
 use interpreter::SelectionStrategy;
 use logging_timer::time;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::wheel::WheelFile;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub enum BinPath {
     #[serde(rename = "false")]
     False,
@@ -34,7 +34,7 @@ impl BinPath {
     }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Deserialize)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub enum InheritPath {
     #[serde(rename = "false")]
     False,
@@ -44,7 +44,7 @@ pub enum InheritPath {
     Fallback,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 pub enum InterpreterSelectionStrategy {
     #[serde(rename = "oldest")]
     Oldest,
@@ -61,7 +61,7 @@ impl From<InterpreterSelectionStrategy> for SelectionStrategy {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct PexInfo {
     pub bind_resource_paths: IndexMap<String, String>,
     pub build_properties: IndexMap<String, String>,

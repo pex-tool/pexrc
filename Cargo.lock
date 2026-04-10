@@ -334,6 +334,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
+name = "cli"
+version = "0.0.0"
+dependencies = [
+ "clap",
+]
+
+[[package]]
 name = "clib"
 version = "0.0.0"
 dependencies = [
@@ -1557,6 +1564,7 @@ dependencies = [
  "cache",
  "clap",
  "clap-verbosity-flag",
+ "cli",
  "colorchoice-clap",
  "env_logger",
  "fs-err",
@@ -1652,6 +1660,7 @@ dependencies = [
  "cache",
  "clap",
  "clap-verbosity-flag",
+ "cli",
  "colorchoice-clap",
  "digest",
  "env_logger",
@@ -1693,6 +1702,7 @@ dependencies = [
  "platform",
  "python-proxy",
  "regex",
+ "tools",
  "venv",
 ]
 
@@ -2768,6 +2778,25 @@ name = "toml_writer"
 version = "1.1.1+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "756daf9b1013ebe47a8776667b466417e2d4c5679d441c26230efd9ef78692db"
+
+[[package]]
+name = "tools"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "clap-verbosity-flag",
+ "cli",
+ "colorchoice-clap",
+ "fs-err",
+ "logging",
+ "logging_timer",
+ "owo-colors",
+ "pex",
+ "serde",
+ "serde_json",
+ "zip",
+]
 
 [[package]]
 name = "tower"

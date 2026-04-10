@@ -19,4 +19,8 @@ pex = { path = "../pex" }
 platform = { path = "../platform" }
 python-proxy = { path = "../python-proxy" }
 regex = { workspace = true }
+tools = { path = "../tools", optional = true}
 venv = { path = "../venv" }
+
+[features]
+tools = ["dep:tools"]

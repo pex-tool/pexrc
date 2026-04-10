@@ -4,6 +4,7 @@
 #![deny(clippy::all)]
 #![feature(exact_size_is_empty)]
 
+use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -169,6 +170,14 @@ fn main() -> anyhow::Result<()> {
         Optimizations::All
     };
 
+    println!("cargo::rerun-if-env-changed=PEXRC_CLIB_FEATURES");
+    let optional_clib_args: &[Cow<'_, str>] =
+        if let Ok(clib_features) = env::var("PEXRC_CLIB_FEATURES") {
+            &[Cow::Borrowed("--features"), Cow::Owned(clib_features)]
+        } else {
+            &[]
+        };
+
     println!("cargo::rerun-if-env-changed=PEXRC_TARGETS");
     if all_targets {
         println!("cargo::rerun-if-changed=rust-toolchain");
@@ -177,6 +186,7 @@ fn main() -> anyhow::Result<()> {
         custom_cargo_build(
             &cargo,
             &["zigbuild", "--target-dir", tgt_arg, "--package", "clib"],
+            optional_clib_args,
             embeds_configuration.profile,
             &found_tools,
             targets
@@ -193,6 +203,7 @@ fn main() -> anyhow::Result<()> {
                 "--package",
                 "python-proxy",
             ],
+            &[],
             embeds_configuration.profile,
             &found_tools,
             targets
@@ -211,6 +222,7 @@ fn main() -> anyhow::Result<()> {
                 "--package",
                 "clib",
             ],
+            optional_clib_args,
             embeds_configuration.profile,
             &found_tools,
             targets.iter_xwin_targets().map(BuildTarget::as_str),
@@ -226,6 +238,7 @@ fn main() -> anyhow::Result<()> {
                 "--package",
                 "python-proxy",
             ],
+            &[],
             embeds_configuration.profile,
             &found_tools,
             targets.iter_xwin_targets().map(BuildTarget::as_str),
@@ -238,6 +251,7 @@ fn main() -> anyhow::Result<()> {
         custom_cargo_build(
             &cargo,
             &["build", "--target-dir", tgt_arg, "--package", "clib"],
+            optional_clib_args,
             embeds_configuration.profile,
             &found_tools,
             [BuildTarget::current(&glibc).as_str()].into_iter(),
@@ -252,6 +266,7 @@ fn main() -> anyhow::Result<()> {
                 "--package",
                 "python-proxy",
             ],
+            &[],
             embeds_configuration.profile,
             &found_tools,
             [BuildTarget::current(&glibc).as_str()].into_iter(),
@@ -264,6 +279,7 @@ fn main() -> anyhow::Result<()> {
 fn custom_cargo_build<'a>(
     cargo: &Path,
     custom_build_args: &[&str],
+    optional_args: &[Cow<'_, str>],
     profile: &str,
     found_tools: &[FoundTool],
     targets: impl ExactSizeIterator<Item = &'a str>,
@@ -290,6 +306,10 @@ fn custom_cargo_build<'a>(
 
     cmd.args(custom_build_args)
         .args(optimizations.cargo_options());
+    for arg in optional_args {
+        cmd.arg(arg.as_ref());
+    }
+
     cmd.args([
         "--profile",
         if profile == "debug" { "dev" } else { profile },

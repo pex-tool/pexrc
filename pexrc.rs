@@ -13,7 +13,7 @@ use target::Target;
 
 /// Pex Runtime Control.
 #[derive(Parser)]
-#[command(version, about, long_about = None)]
+#[command(version, about, long_about = None, styles = cli::STYLES)]
 struct Cli {
     #[command(flatten)]
     verbosity: Option<clap_verbosity_flag::Verbosity>,
