@@ -1,6 +1,7 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::io::Write;
 use std::path::Path;
 
 use indexmap::indexset;
@@ -17,6 +18,8 @@ use rayon::iter::ParallelIterator;
 use scripts::IdentifyInterpreter;
 use serde_json::json;
 
+use crate::output::Output;
+
 pub(crate) fn display(
     python: &Path,
     pex: Pex,
@@ -25,26 +28,26 @@ pub(crate) fn display(
     indent: Option<u8>,
     output: Option<&Path>,
 ) -> anyhow::Result<()> {
+    let mut out = Output::new(output)?;
     for interpreter in compatible_interpreters(python, &pex, all)? {
         match verbosity {
             0 => {
                 if let Some(indent) = indent {
                     warn!("Ignoring --indent={indent} since --verbose mode is not enabled.")
                 }
-                crate::output::using(output, |mut out| {
-                    writeln!(out, "{path}", path = interpreter.path.display())
-                })?
+                writeln!(&mut out, "{path}", path = interpreter.path.display())?
             }
             1 => crate::json::serialize(
+                &mut out,
                 &json!({
                     "path": interpreter.path,
                     "requirement": InterpreterConstraint::exact_version(&interpreter).to_string(),
                     "platform": Platform::of(&interpreter)?.to_string()
                 }),
                 indent,
-                output,
             )?,
             2 => crate::json::serialize(
+                &mut out,
                 &json!({
                     "path": interpreter.path,
                     "requirement": InterpreterConstraint::exact_version(&interpreter).to_string(),
@@ -52,7 +55,6 @@ pub(crate) fn display(
                     "supported_tags": interpreter.supported_tags
                 }),
                 indent,
-                output,
             )?,
             _ => {
                 if interpreter.is_venv() {
@@ -60,6 +62,7 @@ pub(crate) fn display(
                     let base_interpreter =
                         interpreter.clone().resolve_base_interpreter(&mut scripts)?;
                     crate::json::serialize(
+                        &mut out,
                         &json!({
                             "path": interpreter.path,
                             "requirement": InterpreterConstraint::exact_version(&interpreter).to_string(),
@@ -70,10 +73,10 @@ pub(crate) fn display(
                             "base_interpreter": base_interpreter.path
                         }),
                         indent,
-                        output,
                     )?
                 } else {
                     crate::json::serialize(
+                        &mut out,
                         &json!({
                             "path": interpreter.path,
                             "requirement": InterpreterConstraint::exact_version(&interpreter).to_string(),
@@ -83,7 +86,6 @@ pub(crate) fn display(
                             "venv": false
                         }),
                         indent,
-                        output,
                     )?
                 }
             }

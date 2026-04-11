@@ -9,6 +9,7 @@ publish = false
 
 [dependencies]
 anyhow = { workspace = true }
+cache = { path = "../cache" }
 clap = { workspace = true }
 clap-verbosity-flag = { workspace = true }
 cli = { path = "../cli" }
@@ -26,4 +27,5 @@ scripts = { path = "../scripts" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 textwrap = { workspace = true }
+venv = { path = "../venv" }
 zip = { workspace = true }

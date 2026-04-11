@@ -7,16 +7,33 @@ use std::path::Path;
 
 use fs_err::File;
 
-pub(crate) fn using(
-    output: Option<&Path>,
-    func: impl Fn(Box<dyn Write>) -> io::Result<()>,
-) -> anyhow::Result<()> {
-    if let Some(path) = output {
-        let file = Box::new(File::create(path)?);
-        func(file)?
-    } else {
-        let stdout = Box::new(io::stdout());
-        func(stdout)?
+pub(crate) enum Output {
+    File(File),
+    Stdout(io::Stdout),
+}
+
+impl Output {
+    pub(crate) fn new(file: Option<&Path>) -> anyhow::Result<Self> {
+        Ok(if let Some(path) = file {
+            Self::File(File::create(path)?)
+        } else {
+            Self::Stdout(io::stdout())
+        })
     }
-    Ok(())
+}
+
+impl Write for Output {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self {
+            Output::File(file) => file.write(buf),
+            Output::Stdout(stdout) => stdout.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            Output::File(file) => file.flush(),
+            Output::Stdout(stdout) => stdout.flush(),
+        }
+    }
 }

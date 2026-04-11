@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::wheel::WheelFile;
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum BinPath {
     #[serde(rename = "false")]
     False,

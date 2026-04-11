@@ -495,6 +495,7 @@ pub fn populate<'a>(
     pex: &'a Pex<'a>,
     resolved_wheels: IndexMap<&'a str, ResolvedWheel<'a>>,
     scripts: &mut Scripts,
+    bin_path_override: Option<BinPath>,
 ) -> anyhow::Result<()> {
     let selected_wheels = resolved_wheels.keys().copied().collect::<Vec<_>>();
     populate_user_code_and_wheels(
@@ -506,7 +507,14 @@ pub fn populate<'a>(
         true,
     )?;
 
-    write_main(venv, shebang_interpreter, shebang_arg, &pex.info, scripts)?;
+    write_main(
+        venv,
+        shebang_interpreter,
+        shebang_arg,
+        &pex.info,
+        scripts,
+        bin_path_override,
+    )?;
     write_repl(
         venv,
         shebang_interpreter,
@@ -623,6 +631,7 @@ fn write_main(
     shebang_arg: Option<&str>,
     pex_info: &PexInfo,
     scripts: &mut Scripts,
+    bin_path_override: Option<BinPath>,
 ) -> anyhow::Result<()> {
     let main_py = venv.prefix().join("__main__.py");
     let mut main_py_fp = File::create_new(&main_py)?;
@@ -652,10 +661,9 @@ if __name__ == "__main__":
 "#,
             shebang_python = path_as_str(shebang_interpreter)?,
             venv_bin_dir = venv.bin_dir_relpath,
-            bin_path = pex_info
-                .venv_bin_path
+            bin_path = bin_path_override
                 .as_ref()
-                .unwrap_or(&BinPath::False)
+                .unwrap_or_else(|| pex_info.venv_bin_path.as_ref().unwrap_or(&BinPath::False))
                 .as_str(),
             strip_pex_env = as_python_bool(pex_info.strip_pex_env.unwrap_or(true)),
             bind_resource_paths = PythonListTupleStrStr(&pex_info.bind_resource_paths),
