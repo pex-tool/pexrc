@@ -2784,6 +2784,7 @@ name = "tools"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "cache",
  "clap",
  "clap-verbosity-flag",
  "cli",
@@ -2801,6 +2802,7 @@ dependencies = [
  "serde",
  "serde_json",
  "textwrap",
+ "venv",
  "zip",
 ]
 

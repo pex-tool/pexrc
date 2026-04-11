@@ -12,9 +12,11 @@ mod output;
 use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
-use commands::{extract, info};
 use logging_timer::time;
 use pex::Pex;
+
+use crate::commands::venv::VenvArgs;
+use crate::commands::{extract, info, venv};
 
 /// Pex Tools.
 #[derive(Parser)]
@@ -77,18 +79,18 @@ Thrice: include the interpreter's environment markers and its venv affiliation, 
     /// Interact with the Python distribution repository contained in a PEX.
     Repository,
     /// Creates a venv from the PEX.
-    Venv,
+    Venv(VenvArgs),
 }
 
 impl AsRef<str> for Commands {
     fn as_ref(&self) -> &str {
         match self {
             Commands::Extract { .. } => "extract",
+            Commands::Graph => "graph",
             Commands::Info { .. } => "info",
             Commands::Interpreter { .. } => "interpreter",
-            Commands::Graph => "graph",
             Commands::Repository => "repository",
-            Commands::Venv => "venv",
+            Commands::Venv { .. } => "venv",
         }
     }
 }
@@ -126,6 +128,7 @@ pub fn main(python: &Path, pex: &Path, argv: Vec<String>) -> anyhow::Result<()> 
             indent,
             output.as_deref(),
         ),
+        Commands::Venv(venv_args) => venv::create(python, Pex::load(pex)?, venv_args),
         command => todo!(
             "`PEX_TOOLS=1 {pex} {command}` is under development.",
             pex = pex.display(),
