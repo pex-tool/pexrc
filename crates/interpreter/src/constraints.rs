@@ -11,7 +11,7 @@ use std::sync::LazyLock;
 use anyhow::bail;
 use indexmap::{IndexSet, indexset};
 use log::{debug, warn};
-use pep440_rs::{Version, VersionSpecifiers};
+use pep440_rs::{Operator, Version, VersionSpecifier, VersionSpecifiers};
 use pep508_rs::{ExtraName, MarkerTree, PackageName, Requirement, VersionOrUrl};
 use time::Month;
 use url::Url;
@@ -92,7 +92,7 @@ impl InterpreterImplementation {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-struct InterpreterConstraint {
+pub struct InterpreterConstraint {
     implementation: Option<InterpreterImplementation>,
     version_specifiers: Option<VersionSpecifiers>,
 }
@@ -102,6 +102,23 @@ impl InterpreterConstraint {
         implementation: None,
         version_specifiers: None,
     };
+
+    pub fn exact_version(interpreter: &Interpreter) -> Self {
+        let python_version = Version::new(
+            [
+                u64::from(interpreter.version.major),
+                u64::from(interpreter.version.minor),
+                u64::from(interpreter.version.micro),
+            ]
+            .iter(),
+        );
+        let version_specifier = VersionSpecifier::from_version(Operator::Equal, python_version)
+            .expect("An exact version specifier is always valid.");
+        Self {
+            implementation: InterpreterImplementation::of(interpreter),
+            version_specifiers: Some(VersionSpecifiers::from_iter([version_specifier])),
+        }
+    }
 
     fn parse(constraint: &str) -> anyhow::Result<Self> {
         if let Ok(version_specifiers) = VersionSpecifiers::from_str(constraint) {

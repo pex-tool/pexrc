@@ -5,12 +5,14 @@
 #![feature(const_convert)]
 #![feature(const_trait_impl)]
 
-mod extract;
-mod info;
+mod commands;
+mod json;
+mod output;
 
 use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
+use commands::{extract, info};
 use logging_timer::time;
 use pex::Pex;
 
@@ -47,7 +49,29 @@ enum Commands {
         output: Option<PathBuf>,
     },
     /// Prints the path of the preferred interpreter to run the given PEX with, if any.
-    Interpreter,
+    Interpreter {
+        /// Print all compatible interpreters, preferred first.
+        #[arg(short = 'a', long, default_value_t = false)]
+        all: bool,
+
+        /// Provide more information about the interpreter in JSON format.
+        #[arg(short = 'v', long, action = clap::ArgAction::Count, long_help = "\
+Provide more information about the interpreter in JSON format.
+Once: include the interpreter requirement and platform in addition to its path.
+Twice: include the interpreter's supported tags.
+Thrice: include the interpreter's environment markers and its venv affiliation, if any.
+"
+        )]
+        verbose: u8,
+
+        /// Pretty-print verbose output JSON with the given indent.
+        #[arg(short = 'i', long)]
+        indent: Option<u8>,
+
+        /// A file to output the Python interpreter path to; STDOUT by default.
+        #[arg(short = 'o', long)]
+        output: Option<PathBuf>,
+    },
     /// Generates a dot graph of the dependencies contained in a PEX.
     Graph,
     /// Interact with the Python distribution repository contained in a PEX.
@@ -61,7 +85,7 @@ impl AsRef<str> for Commands {
         match self {
             Commands::Extract { .. } => "extract",
             Commands::Info { .. } => "info",
-            Commands::Interpreter => "interpreter",
+            Commands::Interpreter { .. } => "interpreter",
             Commands::Graph => "graph",
             Commands::Repository => "repository",
             Commands::Venv => "venv",
@@ -82,13 +106,26 @@ fn parse_cli(pex: &Path, argv: Vec<String>) -> anyhow::Result<Cli> {
 }
 
 #[time("debug", "{}")]
-pub fn main(pex: &Path, argv: Vec<String>) -> anyhow::Result<()> {
+pub fn main(python: &Path, pex: &Path, argv: Vec<String>) -> anyhow::Result<()> {
     let cli = parse_cli(pex, argv)?;
     match cli.command {
         Commands::Extract { dest_dir } => extract::unzip(pex, &dest_dir),
         Commands::Info { indent, output } => {
             info::display(Pex::load(pex)?, indent, output.as_deref())
         }
+        Commands::Interpreter {
+            all,
+            verbose,
+            indent,
+            output,
+        } => commands::interpreter::display(
+            python,
+            Pex::load(pex)?,
+            all,
+            verbose,
+            indent,
+            output.as_deref(),
+        ),
         command => todo!(
             "`PEX_TOOLS=1 {pex} {command}` is under development.",
             pex = pex.display(),

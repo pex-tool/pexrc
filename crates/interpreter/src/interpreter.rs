@@ -15,7 +15,7 @@ use pep508_rs::MarkerEnvironment;
 use scripts::{IdentifyInterpreter, Scripts};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Deserialize, Serialize)]
 pub struct PythonVersion {
     pub major: u8,
     pub minor: u8,
@@ -48,7 +48,7 @@ impl Display for PythonVersion {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Deserialize, Serialize)]
 pub struct PyPyVersion(u8, u8, u8);
 
 impl Display for PyPyVersion {
@@ -61,7 +61,7 @@ impl Display for PyPyVersion {
         ))
     }
 }
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Deserialize, Serialize)]
 pub struct Interpreter {
     pub path: PathBuf,
     pub realpath: PathBuf,
@@ -354,6 +354,16 @@ impl Interpreter {
             return resolved.resolve_base_interpreter(scripts);
         }
         Ok(self)
+    }
+
+    pub fn is_venv(&self) -> bool {
+        if let Some(base_prefix) = self.base_prefix.as_deref()
+            && base_prefix != self.prefix.as_path()
+        {
+            true
+        } else {
+            false
+        }
     }
 }
 

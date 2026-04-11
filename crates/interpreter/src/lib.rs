@@ -9,8 +9,12 @@ mod interpreter;
 #[cfg(target_os = "linux")]
 mod linux;
 
+mod platform;
 mod search_path;
+mod tag;
 
-pub use constraints::{InterpreterConstraints, SelectionStrategy};
+pub use constraints::{InterpreterConstraint, InterpreterConstraints, SelectionStrategy};
 pub use interpreter::Interpreter;
+pub use platform::Platform;
 pub use search_path::SearchPath;
+pub use tag::Tag;

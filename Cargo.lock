@@ -2789,12 +2789,18 @@ dependencies = [
  "cli",
  "colorchoice-clap",
  "fs-err",
+ "indexmap",
+ "interpreter",
+ "log",
  "logging",
  "logging_timer",
  "owo-colors",
  "pex",
+ "rayon",
+ "scripts",
  "serde",
  "serde_json",
+ "textwrap",
  "zip",
 ]
 

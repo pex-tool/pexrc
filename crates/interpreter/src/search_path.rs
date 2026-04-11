@@ -10,6 +10,7 @@ use indexmap::{IndexSet, indexset};
 use logging_timer::time;
 use same_file::is_same_file;
 
+#[derive(Clone)]
 pub struct SearchPath {
     pex_python: Option<OsString>,
     pex_python_path: Option<Vec<PathBuf>>,

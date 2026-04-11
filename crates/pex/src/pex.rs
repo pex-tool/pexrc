@@ -14,7 +14,7 @@ use anyhow::{anyhow, bail};
 use fs_err as fs;
 use fs_err::File;
 use indexmap::IndexMap;
-use interpreter::{Interpreter, InterpreterConstraints, SearchPath};
+use interpreter::{Interpreter, InterpreterConstraints, SearchPath, Tag};
 use itertools::Itertools;
 use log::{Level, debug, warn};
 use logging_timer::{time, timer};
@@ -27,7 +27,7 @@ use url::Url;
 use zip::ZipArchive;
 
 use crate::PexInfo;
-use crate::wheel::{MetadataReader, Tag, WheelFile, WheelMetadata};
+use crate::wheel::{MetadataReader, WheelFile, WheelMetadata};
 
 #[derive(AsRefStr, EnumString)]
 pub enum Layout {
@@ -68,6 +68,16 @@ pub struct Pex<'a> {
     pub path: &'a Path,
     pub info: PexInfo,
     pub layout: Layout,
+}
+
+pub struct ResolvedWheels<'a> {
+    pub interpreter: Interpreter,
+    pub wheels: IndexMap<&'a str, ResolvedWheel<'a>>,
+}
+
+pub struct ResolveError {
+    pub python_exe: PathBuf,
+    pub err: anyhow::Error,
 }
 
 pub struct ResolvedWheel<'a> {
@@ -325,6 +335,47 @@ impl<'a> Pex<'a> {
             .collect())
     }
 
+    pub fn resolve_all(
+        &'a self,
+        identification_script: &IdentifyInterpreter,
+        interpreter_constraints: &InterpreterConstraints,
+        search_path: SearchPath,
+    ) -> anyhow::Result<impl ParallelIterator<Item = Result<ResolvedWheels<'a>, ResolveError>>>
+    {
+        let interpreters_to_try = interpreter_constraints
+            .iter_possibly_compatible_python_exes(
+                self.info.interpreter_selection_strategy.into(),
+                search_path,
+            )?
+            .collect::<Vec<_>>();
+
+        Ok(interpreters_to_try
+            .into_par_iter()
+            .filter_map(
+                |python_exe| match Interpreter::load(&python_exe, identification_script) {
+                    Ok(interpreter) => Some(interpreter),
+                    Err(err) => {
+                        warn!(
+                            "Failed to load {python_exe}: {err}",
+                            python_exe = python_exe.display()
+                        );
+                        None
+                    }
+                },
+            )
+            .filter(|interpreter| interpreter_constraints.contains(interpreter))
+            .map(|interpreter| match self.resolve_wheels(&interpreter) {
+                Ok(selected_wheels) => Ok(ResolvedWheels {
+                    interpreter,
+                    wheels: selected_wheels,
+                }),
+                Err(err) => Err(ResolveError {
+                    python_exe: interpreter.path,
+                    err,
+                }),
+            }))
+    }
+
     #[time("debug", "Pex.{}")]
     pub fn resolve(
         &'a self,
@@ -359,43 +410,25 @@ impl<'a> Pex<'a> {
             }
         }
 
-        let interpreters_to_try = interpreter_constraints
-            .iter_possibly_compatible_python_exes(
-                self.info.interpreter_selection_strategy.into(),
-                search_path,
-            )?
-            .collect::<Vec<_>>();
-        let resolve_results_iter = interpreters_to_try
-            .into_par_iter()
-            .filter_map(
-                |python_exe| match Interpreter::load(&python_exe, &identification_script) {
-                    Ok(interpreter) => Some(interpreter),
-                    Err(err) => {
-                        warn!(
-                            "Failed to load {python_exe}: {err}",
-                            python_exe = python_exe.display()
-                        );
-                        None
-                    }
-                },
-            )
-            .filter(|interpreter| interpreter_constraints.contains(interpreter))
-            .map(|interpreter| match self.resolve_wheels(&interpreter) {
-                Ok(selected_wheels) => Ok((interpreter, selected_wheels)),
-                Err(err) => Err((interpreter.path, err)),
-            });
-
+        let resolve_results_iter = self.resolve_all(
+            &identification_script,
+            &interpreter_constraints,
+            search_path,
+        )?;
         let errors: Arc<Mutex<Vec<(PathBuf, anyhow::Error)>>> = Arc::new(Mutex::new(errors));
         if let Some((interpreter, wheels)) =
             resolve_results_iter.find_map_first(|result| match result {
-                Ok((interpreter, selected_wheels)) => Some((interpreter, selected_wheels)),
-                Err((interpreter, resolve_err)) => {
+                Ok(ResolvedWheels {
+                    interpreter,
+                    wheels,
+                }) => Some((interpreter, wheels)),
+                Err(ResolveError { python_exe, err }) => {
                     if let Err(lock_err) = errors.lock().map(|mut errors| {
                         debug!(
-                            "Failed to resolve for {python_exe}: {resolve_err}",
-                            python_exe = interpreter.display()
+                            "Failed to resolve for {python_exe}: {err}",
+                            python_exe = python_exe.display()
                         );
-                        errors.push((interpreter, resolve_err))
+                        errors.push((python_exe, err))
                     }) {
                         debug!("Failed to record resolve error due to lock poisoning: {lock_err}");
                     }

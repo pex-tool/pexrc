@@ -6,40 +6,11 @@ use std::str::FromStr;
 
 use anyhow::{anyhow, bail};
 use indexmap::IndexSet;
+use interpreter::Tag;
 use pep440_rs::{Version, VersionSpecifiers};
 use pep508_rs::{PackageName, Requirement};
 use python_pkginfo::Metadata;
 use url::Url;
-
-#[derive(Debug, Eq, Hash, PartialEq)]
-pub struct Tag<'a> {
-    python: &'a str,
-    abi: &'a str,
-    platform: &'a str,
-}
-
-impl<'a> Tag<'a> {
-    pub(crate) fn parse(tag: &'a str) -> anyhow::Result<Self> {
-        let mut tags = tag.split("-");
-        let python = tags
-            .next()
-            .ok_or_else(|| anyhow!("Failed to find python tag in {tag}"))?;
-        let abi = tags
-            .next()
-            .ok_or_else(|| anyhow!("Failed to find abi tag in {tag}"))?;
-        let platform = tags
-            .next()
-            .ok_or_else(|| anyhow!("Failed to find platform tag in {tag}"))?;
-        if tags.next().is_some() {
-            bail!("Failed to parse tag from {tag}")
-        }
-        Ok(Self {
-            python,
-            abi,
-            platform,
-        })
-    }
-}
 
 pub struct WheelFile<'a> {
     pub(crate) file_name: &'a str,
@@ -226,13 +197,14 @@ mod tests {
     use std::str::FromStr;
 
     use fs_err::File;
+    use interpreter::Tag;
     use pep440_rs::{Version, VersionSpecifiers};
     use pep508_rs::{PackageName, Requirement};
     use rstest::*;
     use testing::{tmp_dir, venv_python_exe};
     use zip::ZipArchive;
 
-    use crate::wheel::{MetadataReader, Tag, WheelFile, WheelMetadata};
+    use crate::wheel::{MetadataReader, WheelFile, WheelMetadata};
 
     #[test]
     fn test_parse_wheel_file_name_simple() {

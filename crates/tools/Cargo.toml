@@ -14,10 +14,16 @@ clap-verbosity-flag = { workspace = true }
 cli = { path = "../cli" }
 colorchoice-clap = { workspace = true }
 fs-err = { workspace = true }
+indexmap = { workspace = true }
+interpreter = { path = "../interpreter" }
+log = { workspace = true }
 logging = { path = "../logging" }
 logging_timer = { workspace = true }
 owo-colors = { workspace = true }
 pex = { path = "../pex" }
+rayon = { workspace = true }
+scripts = { path = "../scripts" }
 serde = { workspace = true }
 serde_json = { workspace = true }
+textwrap = { workspace = true }
 zip = { workspace = true }
