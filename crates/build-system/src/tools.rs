@@ -284,6 +284,7 @@ fn install_tools<'a>(
             fs::create_dir_all(&install_dirs.bin_dir)?;
             let result = Command::new("uv")
                 .args(["tool", "install", "--force", &zig_requirement])
+                .env("UV_TOOL_DIR", install_dirs.data_dir.join("uv").as_os_str())
                 .env("UV_TOOL_BIN_DIR", install_dirs.bin_dir.as_os_str())
                 .stderr(Stdio::piped())
                 .spawn()?
