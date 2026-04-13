@@ -287,6 +287,16 @@ fn install_tools<'a>(
         Zig::MissingVersion(version) => {
             let zig_requirement = format!("ziglang=={version}");
             fs::create_dir_all(&install_dirs.bin_dir)?;
+            let python_zig = install_dirs.bin_dir.join("python-zig");
+            if python_zig.exists() {
+                fs::remove_file(&python_zig)?;
+            }
+            if !env::consts::EXE_EXTENSION.is_empty() {
+                let python_zig_exe = python_zig.with_extension(env::consts::EXE_EXTENSION);
+                if python_zig_exe.exists() {
+                    fs::remove_file(python_zig_exe)?;
+                }
+            }
             let result = Command::new("uv")
                 .args(["tool", "install", "--force", &zig_requirement])
                 .env("UV_TOOL_DIR", install_dirs.data_dir.join("uv").as_os_str())
