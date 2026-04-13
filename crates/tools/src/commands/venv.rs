@@ -234,6 +234,7 @@ pub(crate) fn create(python: &Path, pex: Pex, args: VenvArgs) -> anyhow::Result<
         resolve.wheels,
         &mut scripts,
         args.bin_path.map(BinPath::into_inner),
+        args.collisions_ok,
     )?;
     for (pex, wheels) in resolve.additional_wheels {
         venv_pex::populate_user_code_and_wheels(
@@ -243,6 +244,7 @@ pub(crate) fn create(python: &Path, pex: Pex, args: VenvArgs) -> anyhow::Result<
             pex,
             wheels,
             false,
+            args.collisions_ok,
         )?;
     }
 
