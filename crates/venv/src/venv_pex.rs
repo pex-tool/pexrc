@@ -7,7 +7,7 @@ use std::io;
 use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
 
-use anyhow::anyhow;
+use anyhow::{anyhow, bail};
 use fs_err as fs;
 use fs_err::File;
 use indexmap::IndexMap;
@@ -27,11 +27,14 @@ fn populate_from_loose_pex<'a>(
     loose_pex: &'a Pex<'a>,
     resolved_wheels: &IndexMap<&'a str, ResolvedWheel<'a>>,
     populate_pex_info: bool,
+    collisions_ok: bool,
 ) -> anyhow::Result<()> {
     let site_packages_path = venv.site_packages_path();
     collect_wheels_from_directory_pex(loose_pex, resolved_wheels)?
         .into_par_iter()
-        .try_for_each(|wheel_dir| populate_wheel_dir(&wheel_dir, &site_packages_path))?;
+        .try_for_each(|wheel_dir| {
+            populate_wheel_dir(&wheel_dir, &site_packages_path, collisions_ok)
+        })?;
     populate_user_code_from_directory_pex(
         loose_pex,
         venv.prefix(),
@@ -66,6 +69,7 @@ fn spread(
     virtualenv: &Virtualenv,
     shebang_interpreter: &Path,
     shebang_arg: Option<&str>,
+    collisions_ok: bool,
 ) -> anyhow::Result<()> {
     let entry_points = virtualenv
         .site_packages_path()
@@ -78,6 +82,7 @@ fn spread(
             virtualenv,
             shebang_interpreter,
             shebang_arg,
+            collisions_ok,
         )?;
     }
     Ok(())
@@ -89,6 +94,7 @@ fn install_scripts(
     virtualenv: &Virtualenv,
     shebang_interpreter: &Path,
     shebang_arg: Option<&str>,
+    collisions_ok: bool,
 ) -> anyhow::Result<()> {
     let entry_points = Ini::load_from_file(entry_points_txt)?;
     if let Some(console_scripts) = entry_points.section(Some("console_scripts"))
@@ -104,6 +110,7 @@ fn install_scripts(
                 entry_point,
                 &script_dir,
                 false,
+                collisions_ok,
             )?;
         }
     }
@@ -132,6 +139,7 @@ fn install_scripts(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 #[cfg(unix)]
 fn create_script(
     _pex: &Pex,
@@ -141,11 +149,30 @@ fn create_script(
     entry_point: &str,
     dest_dir: &Path,
     gui: bool,
+    collisions_ok: bool,
 ) -> anyhow::Result<()> {
     assert!(!gui, "There is no support for gui scripts yet.");
 
     let script_contents = create_script_contents(shebang_interpreter, shebang_arg, entry_point)?;
-    let mut script_file = File::create(dest_dir.join(name))?;
+    let script_path = dest_dir.join(name);
+    let mut script_file = match File::create_new(&script_path) {
+        Ok(script_file) => script_file,
+        Err(err) => {
+            // TODO: Track provenance.
+            if collisions_ok {
+                warn!(
+                    "Collision for {script_path}",
+                    script_path = script_path.display()
+                );
+            } else {
+                bail!(
+                    "Collision for {script_path}: {err}",
+                    script_path = script_path.display()
+                )
+            }
+            return Ok(());
+        }
+    };
     script_file.write_all(script_contents.as_bytes())?;
     mark_executable(script_file.file_mut())?;
     Ok(())
@@ -160,10 +187,29 @@ fn create_script(
     entry_point: &str,
     dest_dir: &Path,
     gui: bool,
+    collisions_ok: bool,
 ) -> anyhow::Result<()> {
     assert!(!gui, "There is no support for gui scripts yet.");
 
-    let script_file = File::create(dest_dir.join(name).with_extension("exe"))?;
+    let script_path = dest_dir.join(name).with_extension("exe");
+    let script_file = match File::create_new(&script_path) {
+        Ok(script_file) => script_file,
+        Err(err) => {
+            // TODO: Track provenance.
+            if collisions_ok {
+                warn!(
+                    "Collision for {script_path}",
+                    script_path = script_path.display()
+                );
+            } else {
+                bail!(
+                    "Collision for {script_path}: {err}",
+                    script_path = script_path.display()
+                )
+            }
+            return Ok(());
+        }
+    };
     let script_contents = create_script_contents(shebang_interpreter, shebang_arg, entry_point)?;
     python_proxy::create(
         python_proxy::ProxySource::Pex(pex),
@@ -237,7 +283,11 @@ if __name__ == "__main__":
     }
 }
 
-fn populate_wheel_dir(wheel: &Path, site_packages_path: &Path) -> anyhow::Result<()> {
+fn populate_wheel_dir(
+    wheel: &Path,
+    site_packages_path: &Path,
+    collisions_ok: bool,
+) -> anyhow::Result<()> {
     let wheel_contents = walkdir::WalkDir::new(wheel)
         .min_depth(1)
         .into_iter()
@@ -256,13 +306,24 @@ fn populate_wheel_dir(wheel: &Path, site_packages_path: &Path) -> anyhow::Result
                 Ok(mut dst_file) => {
                     let mut src = File::open(entry.path())?;
                     io::copy(&mut src, &mut dst_file)?;
+                    Ok(())
                 }
-                Err(_) => {
+                Err(err) => {
                     // TODO: Track provenance.
-                    warn!("Collision for {dst_path}", dst_path = dst_path.display());
+                    if collisions_ok {
+                        warn!("Collision for {dst_path}", dst_path = dst_path.display());
+                        Ok(())
+                    } else {
+                        Err(io::Error::new(
+                            err.kind(),
+                            format!(
+                                "Collision for {dst_path}: {err}",
+                                dst_path = dst_path.display()
+                            ),
+                        ))
+                    }
                 }
             }
-            Ok(())
         }
     })?;
     Ok(())
@@ -273,11 +334,14 @@ fn populate_from_packed_pex<'a>(
     packed_pex: &'a Pex<'a>,
     resolved_wheels: &IndexMap<&'a str, ResolvedWheel<'a>>,
     populate_pex_info: bool,
+    collisions_ok: bool,
 ) -> anyhow::Result<()> {
     let site_packages_path = venv.site_packages_path();
     collect_wheels_from_directory_pex(packed_pex, resolved_wheels)?
         .into_par_iter()
-        .try_for_each(|wheel_zip| populate_whl_zip(&wheel_zip, &site_packages_path))?;
+        .try_for_each(|wheel_zip| {
+            populate_whl_zip(&wheel_zip, &site_packages_path, collisions_ok)
+        })?;
     populate_user_code_from_directory_pex(
         packed_pex,
         venv.prefix(),
@@ -287,13 +351,17 @@ fn populate_from_packed_pex<'a>(
     Ok(())
 }
 
-fn populate_whl_zip(wheel: &Path, site_packages_path: &Path) -> anyhow::Result<()> {
+fn populate_whl_zip(
+    wheel: &Path,
+    site_packages_path: &Path,
+    collisions_ok: bool,
+) -> anyhow::Result<()> {
     let whl_zip = ZipArchive::new(File::open(wheel)?.into_file())?;
     let metadata = whl_zip.metadata();
     (0..whl_zip.len()).into_par_iter().try_for_each(|index| {
         let zip_fp = File::open(wheel)?;
         let mut zip = unsafe { ZipArchive::unsafe_new_with_metadata(zip_fp, metadata.clone()) };
-        extract_idx(site_packages_path, index, &mut zip)
+        extract_idx(site_packages_path, index, &mut zip, collisions_ok)
     })
 }
 
@@ -354,6 +422,7 @@ fn populate_from_zip_app_with_whl_deps<'a>(
     zip_app_pex: &'a Pex<'a>,
     resolved_wheels: &IndexMap<&'a str, ResolvedWheel<'a>>,
     populate_pex_info: bool,
+    collisions_ok: bool,
 ) -> anyhow::Result<()> {
     let pex_zip = ZipArchive::new(File::open(zip_app_pex.path)?)?;
     let metadata = pex_zip.metadata();
@@ -378,7 +447,7 @@ fn populate_from_zip_app_with_whl_deps<'a>(
         .try_for_each(|index| -> anyhow::Result<()> {
             let zip_fp = File::open(zip_app_pex.path)?;
             let mut zip = unsafe { ZipArchive::unsafe_new_with_metadata(zip_fp, metadata.clone()) };
-            extract_idx(&site_packages_path, index, &mut zip)?;
+            extract_idx(&site_packages_path, index, &mut zip, collisions_ok)?;
             Ok(())
         })?;
 
@@ -399,7 +468,7 @@ fn populate_from_zip_app_with_whl_deps<'a>(
                 let mut whl_zip = unsafe {
                     ZipArchive::unsafe_new_with_metadata(whl_file, whl_zip_metadata.clone())
                 };
-                extract_idx(&site_packages_path, index, &mut whl_zip)
+                extract_idx(&site_packages_path, index, &mut whl_zip, collisions_ok)
             })
         })?;
 
@@ -417,6 +486,7 @@ fn populate_from_zip_app<'a>(
     zip_app_pex: &'a Pex<'a>,
     resolved_wheels: &IndexMap<&'a str, ResolvedWheel<'a>>,
     populate_pex_info: bool,
+    collisions_ok: bool,
 ) -> anyhow::Result<()> {
     let mut pex_zip = ZipArchive::new(File::open(zip_app_pex.path)?)?;
     let metadata = pex_zip.metadata();
@@ -446,7 +516,7 @@ fn populate_from_zip_app<'a>(
         .try_for_each(|index| -> anyhow::Result<()> {
             let zip_fp = File::open(zip_app_pex.path)?;
             let mut zip = unsafe { ZipArchive::unsafe_new_with_metadata(zip_fp, metadata.clone()) };
-            extract_idx(&site_packages_path, index, &mut zip)?;
+            extract_idx(&site_packages_path, index, &mut zip, collisions_ok)?;
             Ok(())
         })?;
     if populate_pex_info {
@@ -465,15 +535,40 @@ pub fn populate_user_code_and_wheels<'a>(
     pex: &'a Pex<'a>,
     resolved_wheels: IndexMap<&'a str, ResolvedWheel<'a>>,
     populate_pex_info: bool,
+    collisions_ok: bool,
 ) -> anyhow::Result<()> {
     match pex.layout {
-        Layout::Loose => populate_from_loose_pex(venv, pex, &resolved_wheels, populate_pex_info)?,
-        Layout::Packed => populate_from_packed_pex(venv, pex, &resolved_wheels, populate_pex_info)?,
+        Layout::Loose => populate_from_loose_pex(
+            venv,
+            pex,
+            &resolved_wheels,
+            populate_pex_info,
+            collisions_ok,
+        )?,
+        Layout::Packed => populate_from_packed_pex(
+            venv,
+            pex,
+            &resolved_wheels,
+            populate_pex_info,
+            collisions_ok,
+        )?,
         Layout::ZipApp => {
             if pex.info.deps_are_wheel_files {
-                populate_from_zip_app_with_whl_deps(venv, pex, &resolved_wheels, populate_pex_info)?
+                populate_from_zip_app_with_whl_deps(
+                    venv,
+                    pex,
+                    &resolved_wheels,
+                    populate_pex_info,
+                    collisions_ok,
+                )?
             } else {
-                populate_from_zip_app(venv, pex, &resolved_wheels, populate_pex_info)?
+                populate_from_zip_app(
+                    venv,
+                    pex,
+                    &resolved_wheels,
+                    populate_pex_info,
+                    collisions_ok,
+                )?
             }
         }
     }
@@ -482,11 +577,19 @@ pub fn populate_user_code_and_wheels<'a>(
         .collect::<Vec<_>>()
         .into_par_iter()
         .try_for_each(|resolved_wheel| {
-            spread(pex, resolved_wheel, venv, shebang_interpreter, shebang_arg)
+            spread(
+                pex,
+                resolved_wheel,
+                venv,
+                shebang_interpreter,
+                shebang_arg,
+                collisions_ok,
+            )
         })?;
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 #[time("debug", "{}")]
 pub fn populate<'a>(
     venv: &Virtualenv,
@@ -496,6 +599,7 @@ pub fn populate<'a>(
     resolved_wheels: IndexMap<&'a str, ResolvedWheel<'a>>,
     scripts: &mut Scripts,
     bin_path_override: Option<BinPath>,
+    collisions_ok: bool,
 ) -> anyhow::Result<()> {
     let selected_wheels = resolved_wheels.keys().copied().collect::<Vec<_>>();
     populate_user_code_and_wheels(
@@ -505,6 +609,7 @@ pub fn populate<'a>(
         pex,
         resolved_wheels,
         true,
+        collisions_ok,
     )?;
 
     write_main(
@@ -530,6 +635,7 @@ fn extract_idx<R>(
     dst_dir: impl AsRef<Path>,
     index: usize,
     zip: &mut ZipArchive<R>,
+    collisions_ok: bool,
 ) -> anyhow::Result<()>
 where
     R: Read + Seek,
@@ -555,9 +661,16 @@ where
             Ok(mut dst_file) => {
                 io::copy(&mut zip_file, &mut dst_file)?;
             }
-            Err(_) => {
+            Err(err) => {
                 // TODO: Track provenance.
-                warn!("Collision for {dst_path}", dst_path = dst_path.display());
+                if collisions_ok {
+                    warn!("Collision for {dst_path}", dst_path = dst_path.display());
+                } else {
+                    bail!(
+                        "Collision for {dst_path}: {err}",
+                        dst_path = dst_path.display()
+                    )
+                }
             }
         }
     }

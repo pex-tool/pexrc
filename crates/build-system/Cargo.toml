@@ -9,12 +9,14 @@ publish = false
 [dependencies]
 anyhow = { workspace = true }
 bstr = { workspace = true }
+cache = { path = "../cache" }
 const_format = { workspace = true }
 dirs = { workspace = true }
 flate2 = { workspace = true }
 fs-err = { workspace = true }
 hex = { workspace = true }
 itertools = { workspace = true }
+platform = { path = "../platform" }
 reqwest = { workspace = true }
 serde = { workspace = true }
 sha2 = { workspace = true }

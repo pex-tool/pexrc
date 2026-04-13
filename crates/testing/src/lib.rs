@@ -3,12 +3,12 @@
 
 #![deny(clippy::all)]
 
+use std::env;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{LazyLock, Mutex};
 
-use anyhow::anyhow;
 use ctor::dtor;
 use fs_err as fs;
 use rstest::fixture;
@@ -44,36 +44,43 @@ pub fn tmp_dir() -> PathBuf {
     create_tmp_dir()
 }
 
-static PEXRC_TESTING_CACHE_ROOT: LazyLock<anyhow::Result<PathBuf>> = LazyLock::new(|| {
-    let cache_dir = cache::cache_dir("pexrc-dev", ".pexrc-dev")
-        .ok_or_else(|| anyhow!("Failed to establish a testing cache dir."))?;
-    fs::create_dir_all(&cache_dir)?;
-    Ok(cache_dir)
+static PEXRC_TESTING_CACHE_ROOT: LazyLock<PathBuf> = LazyLock::new(|| {
+    let cache_dir = cache::cache_dir("pexrc-dev", ".pexrc-dev").unwrap();
+    fs::create_dir_all(&cache_dir).unwrap();
+    cache_dir
 });
 
-const MANAGED_PYTHON_VERSION: &str = "cpython-3.14.3";
+static MANAGED_PYTHON_VERSION: LazyLock<String> = LazyLock::new(|| {
+    let workspace_root = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap())
+        .join("..")
+        .join("..");
+    fs::read_to_string(workspace_root.join(".python-version"))
+        .unwrap()
+        .trim()
+        .to_string()
+});
 
 #[fixture]
 #[once]
 pub fn python_exe() -> PathBuf {
-    let install_dir = PEXRC_TESTING_CACHE_ROOT
-        .as_ref()
-        .unwrap()
-        .join("interpreters");
+    let install_dir = PEXRC_TESTING_CACHE_ROOT.join("interpreters");
 
+    // N.B.: We force arch to get arm64 PBS builds for Windows arm64 machines.
+    // See: https://github.com/astral-sh/uv/issues/12906
+    let python_spec = format!(
+        "cpython-{version}-{os}-{arch}",
+        version = MANAGED_PYTHON_VERSION.as_str(),
+        os = HOST.operating_system.into_str(),
+        arch = HOST.architecture.into_str()
+    );
     assert!(
         Command::new("uv")
             .args([
                 "python",
                 "install",
                 "--managed-python",
-                // N.B.: We force arch to get arm64 PBS builds for Windows arm64 machines.
-                // See: https://github.com/astral-sh/uv/issues/12906
-                &format!(
-                    "{MANAGED_PYTHON_VERSION}-{os}-{arch}",
-                    os = HOST.operating_system.into_str(),
-                    arch = HOST.architecture.into_str()
-                )
+                "--force",
+                &python_spec
             ])
             .env("UV_PYTHON_INSTALL_DIR", &install_dir)
             .spawn()
@@ -84,7 +91,7 @@ pub fn python_exe() -> PathBuf {
     );
 
     let output = Command::new("uv")
-        .args(["python", "find", "--managed-python", MANAGED_PYTHON_VERSION])
+        .args(["python", "find", "--managed-python", &python_spec])
         .env("UV_PYTHON_INSTALL_DIR", install_dir)
         .stdout(Stdio::piped())
         .spawn()

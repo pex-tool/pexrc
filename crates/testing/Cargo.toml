@@ -7,7 +7,6 @@ edition = "2024"
 publish = false
 
 [dependencies]
-anyhow = { workspace = true }
 cache = { path = "../cache" }
 ctor = { workspace = true }
 fs-err = { workspace = true }
