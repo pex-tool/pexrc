@@ -11,8 +11,11 @@ mod tools;
 use std::borrow::Cow;
 use std::env;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use anyhow::bail;
+use cache::atomic_dir;
+use fs_err as fs;
 use itertools::Itertools;
 pub use metadata::{Embeds, EmbedsConfiguration, Glibc};
 pub use rust_toolchain::{BuildTarget, ClassifiedTargets};
@@ -25,10 +28,30 @@ pub use crate::tools::{BinstallTool, FoundTool, InstallDirs, ToolInstallation, Z
 
 pub fn download_virtualenv(
     cargo_manifest_contents: &str,
-    install_dirs: InstallDirs,
+    install_dirs: &InstallDirs,
 ) -> anyhow::Result<PathBuf> {
     let metadata: Metadata = parse_metadata(cargo_manifest_contents)?;
     ensure_download(&metadata.build.virtualenv, &install_dirs.download_dir)
+}
+
+pub fn prepare_venv_activation_scripts(
+    workspace_root: &Path,
+    install_dirs: &InstallDirs,
+) -> anyhow::Result<PathBuf> {
+    let python_version = fs::read_to_string(workspace_root.join(".python-version"))?;
+    let venv_activation_scripts_dir = install_dirs
+        .data_dir
+        .join("venv-activation-scripts")
+        .join(python_version.trim());
+    atomic_dir(&venv_activation_scripts_dir, |work_dir| {
+        Ok(Command::new("uv")
+            .args(["run", "dev-cmd", "prepare-venv-activation-scripts", "--"])
+            .arg(work_dir)
+            .current_dir(workspace_root)
+            .spawn()?
+            .wait()?)
+    })?;
+    Ok(venv_activation_scripts_dir)
 }
 
 pub fn all_targets(rust_toolchain_contents: &str) -> anyhow::Result<Vec<String>> {

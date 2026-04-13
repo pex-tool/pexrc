@@ -37,7 +37,7 @@ const DEFAULT_RUSTFLAGS: &[&str] = &[
     "-Ctarget-feature=-crt-static",
 ];
 
-static OPTIMIZE_SIZE_RUSTFLAGS: &[&str] = &[
+const OPTIMIZE_SIZE_RUSTFLAGS: &[&str] = &[
     // See https://github.com/johnthagen/min-sized-rust for the inspiration.
     "-Zunstable-options",
     "-Zfmt-debug=none",

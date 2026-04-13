@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::borrow::Cow;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use anyhow::anyhow;
 use cache::CacheDir;
 use clap::builder::PossibleValue;
 use clap::{Args, ValueEnum};
@@ -12,6 +14,7 @@ use fs_err as fs;
 use interpreter::SearchPath;
 use log::warn;
 use pex::{Layout, Pex, PexPath};
+use shell_quote::Quote;
 use venv::virtualenv::FileSystemLinker;
 use venv::{Virtualenv, venv_pex};
 
@@ -63,13 +66,6 @@ enum RemoveScope {
 
 #[derive(Args)]
 pub(crate) struct VenvArgs {
-    // *  --collisions-ok       Don't error if population of the ven-v encounters distributions in the PEX file with colliding files, just emit a warning. (default: False)
-    //   -p, --pip             Add pip (and setuptools) to the venv. If the PEX already contains its own conflicting versions pip (or setuptools), the command will error and you must pass
-    //                         --collisions-ok to have the PEX versions over-ride the natural venv versions installed by --pip. (default: False)
-    // *  --copies              Create the venv using copies of system files instead of symlinks. (default: False)
-    // *  --site-packages-copies
-    //                         Create the venv using copies of distributions instead of links or symlinks. (default: False)
-    //   --prompt PROMPT       A custom prompt for the venv activation scripts to use. (default: None)
     /// The scope of code contained in the Pex that is installed in the venv.
     #[arg(long, value_enum, default_value_t = InstallScope::All, long_help = "\
 The scope of code contained in the Pex that is installed in the venv.
@@ -114,9 +110,39 @@ This can be used to enable running the venv PEX itself or its Python scripts wit
     #[arg(short = 'f', long, default_value_t = false)]
     force: bool,
 
+    /// Add pip to the venv.
+    #[arg(long, default_value_t = false)]
+    pip: bool,
+
+    /// A custom prompt for the venv activation scripts to use.
+    #[arg(long)]
+    prompt: Option<String>,
+
+    /// Don't error if population of the ven-v encounters distributions in the PEX file with colliding files, just emit a warning.
+    #[arg(long, default_value_t = false)]
+    collisions_ok: bool,
+
+    /// DEPRECATED: Create the venv using copies of system files instead of symlinks (ignored).
+    #[arg(long, default_value_t = false)]
+    copies: bool,
+
+    /// DEPRECATED: Create the venv using copies of distributions instead of links or symlinks
+    /// (ignored).
+    #[arg(long, default_value_t = false)]
+    site_packages_copies: bool,
+
     /// The directory to create the venv in.
     #[arg()]
     venv_dir: PathBuf,
+}
+
+fn powershell_quote(value: &str) -> String {
+    // N.B.: Stolen from https://github.com/python/cpython/blob/88e378cc1cd55429e08268a8da17e54ede104fb5/Lib/venv/__init__.py#L498-L506
+    // This should satisfy PowerShell quoting rules [1], unless the quoted string is
+    // passed directly to Windows native commands [2].
+    // [1]: https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_quoting_rules
+    // [2]: https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_parsing#passing-arguments-that-contain-quote-characters
+    format!("'{value}'", value = value.replace("'", "''"))
 }
 
 pub(crate) fn create(python: &Path, pex: Pex, args: VenvArgs) -> anyhow::Result<()> {
@@ -143,7 +169,50 @@ pub(crate) fn create(python: &Path, pex: Pex, args: VenvArgs) -> anyhow::Result<
         FileSystemLinker(),
         &mut scripts,
         args.system_site_packages,
+        args.pip,
+        args.prompt.as_deref(),
     )?;
+
+    let scripts_dir = venv.prefix().join(venv.bin_dir_relpath);
+    let prompt = args
+        .prompt
+        .as_deref()
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            format!(
+                "({venv_name})",
+                venv_name = args.venv_dir.file_name().expect("XXX").display()
+            )
+        });
+    let venv_dir = args
+        .venv_dir
+        .as_os_str()
+        .to_os_string()
+        .into_string()
+        .map_err(|err| anyhow!("Venv path must be valid UTF-8: {err}", err = err.display()))?;
+    for activation_script in scripts.activation_scripts()? {
+        let file_name: &OsStr = activation_script.file_name.as_ref();
+        let (prompt, venv_dir) = match Path::new(file_name).extension() {
+            Some(ext) if ext.as_encoded_bytes() == b"bat" => (prompt.clone(), venv_dir.clone()),
+            Some(ext) if ext.as_encoded_bytes() == b"fish" => (
+                shell_quote::Fish::quote(&prompt),
+                shell_quote::Fish::quote(&venv_dir),
+            ),
+            Some(ext) if ext.as_encoded_bytes() == b"ps1" => {
+                (powershell_quote(&prompt), powershell_quote(&venv_dir))
+            }
+            _ => (
+                String::from_utf8(shell_quote::Sh::quote_vec(&prompt))?,
+                String::from_utf8(shell_quote::Sh::quote_vec(&venv_dir))?,
+            ),
+        };
+        let contents = activation_script
+            .contents
+            .replace("__PEXRC_VENV_PROMPT__", &prompt)
+            .replace("__PEXRC_VENV_DIR__", &venv_dir);
+
+        fs::write(scripts_dir.join(file_name), contents)?;
+    }
 
     let shebang_arg = if args.non_hermetic_scripts {
         None

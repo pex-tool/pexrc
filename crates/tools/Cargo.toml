@@ -24,6 +24,7 @@ owo-colors = { workspace = true }
 pex = { path = "../pex" }
 rayon = { workspace = true }
 scripts = { path = "../scripts" }
+shell-quote = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 textwrap = { workspace = true }

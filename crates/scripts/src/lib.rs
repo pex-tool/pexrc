@@ -4,14 +4,17 @@
 #![deny(clippy::all)]
 
 use std::borrow::Cow;
+use std::ffi::{OsStr, OsString};
 use std::io;
-use std::io::{Seek, Write};
+use std::io::{Read, Seek, Write};
 use std::iter::Iterator;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
+use const_format::concatcp;
 use fs_err as fs;
 use fs_err::File;
+use include_dir::{Dir, include_dir};
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use zip::write::{FileOptionExtension, FileOptions, SimpleFileOptions};
@@ -46,6 +49,17 @@ pub enum Scripts {
 const ZIP_REL_PATH: &str = "__pex__/.scripts";
 static HOST_REL_PATH: LazyLock<PathBuf> = LazyLock::new(|| ZIP_REL_PATH.split("/").collect());
 
+const ACTIVATION_SCRIPTS_DIR: Dir<'static> = include_dir!("$ACTIVATION_SCRIPTS_DIR");
+
+pub struct ActivationScript {
+    pub file_name: Cow<'static, OsStr>,
+    pub contents: Cow<'static, str>,
+}
+
+const ZIP_ACTIVATION_SCRIPTS_REL_PATH: &str = concatcp!(ZIP_REL_PATH, "/venv-activation");
+static HOST_ACTIVATION_SCRIPTS_REL_PATH: LazyLock<PathBuf> =
+    LazyLock::new(|| ZIP_ACTIVATION_SCRIPTS_REL_PATH.split("/").collect());
+
 impl Scripts {
     pub fn read(&mut self, script: Script) -> anyhow::Result<Cow<'static, str>> {
         match self {
@@ -71,6 +85,66 @@ impl Scripts {
         }
     }
 
+    pub fn activation_scripts(&mut self) -> anyhow::Result<Vec<ActivationScript>> {
+        match self {
+            #[cfg(feature = "embedded")]
+            Scripts::Embedded => Ok(ACTIVATION_SCRIPTS_DIR
+                .files()
+                .map(|file| ActivationScript {
+                    file_name: Cow::Borrowed(
+                        file.path()
+                            .file_name()
+                            .expect("The embedded activation scripts always have a file name."),
+                    ),
+                    contents: Cow::Borrowed(file.contents_utf8().expect(
+                        "The embedded activations scripts always have valid UTF-8 content.",
+                    )),
+                })
+                .collect()),
+            Scripts::Loose(base_dir) => {
+                let listing =
+                    fs::read_dir(base_dir.join(HOST_ACTIVATION_SCRIPTS_REL_PATH.as_path()))?
+                        .collect::<Result<Vec<_>, _>>()?;
+                let mut activation_scripts = Vec::with_capacity(listing.len());
+                for entry in listing {
+                    let contents = fs::read_to_string(entry.path())?;
+                    activation_scripts.push(ActivationScript {
+                        file_name: Cow::Owned(entry.file_name()),
+                        contents: Cow::Owned(contents),
+                    });
+                }
+                Ok(activation_scripts)
+            }
+            Scripts::Zipped(zip) => {
+                // N.B.: These names will include the dir name, which we want to skip and for which
+                // we compensate below.
+                let activation_script_file_names = zip
+                    .file_names()
+                    .filter(|file_name| file_name.starts_with(ZIP_ACTIVATION_SCRIPTS_REL_PATH))
+                    .map(String::from)
+                    .collect::<Vec<_>>();
+                let mut activation_scripts =
+                    Vec::with_capacity(activation_script_file_names.len() - 1);
+                for file_name in activation_script_file_names {
+                    let mut entry = zip.by_name(&file_name)?;
+                    if !entry.is_file() {
+                        continue;
+                    }
+
+                    let mut contents = String::with_capacity(usize::try_from(entry.size())?);
+                    entry.read_to_string(&mut contents)?;
+                    activation_scripts.push(ActivationScript {
+                        file_name: Cow::Owned(OsString::from(file_name.rsplit("/").next().expect(
+                            "We ensured the activation script was nested under a directory above.",
+                        ))),
+                        contents: Cow::Owned(contents),
+                    });
+                }
+                Ok(activation_scripts)
+            }
+        }
+    }
+
     pub fn inject<'a, T: FileOptionExtension + Copy>(
         &mut self,
         zip: &'a mut ZipWriter<impl Write + Seek>,
@@ -80,14 +154,21 @@ impl Scripts {
         zip.add_directory(ZIP_REL_PATH, directory_options)?;
         for resource_path in Script::iter() {
             let text = self.read(resource_path)?;
-            zip.start_file(
-                format!(
-                    "{ZIP_REL_PATH}/{script}",
-                    script = resource_path.file_name()
-                ),
-                file_options,
-            )?;
+            let script_path = format!(
+                "{ZIP_REL_PATH}/{script}",
+                script = resource_path.file_name()
+            );
+            zip.start_file(script_path, file_options)?;
             zip.write_all(text.as_bytes())?;
+        }
+        zip.add_directory(ZIP_ACTIVATION_SCRIPTS_REL_PATH, directory_options)?;
+        for activation_script in self.activation_scripts()? {
+            let activation_script_path = format!(
+                "{ZIP_ACTIVATION_SCRIPTS_REL_PATH}/{script}",
+                script = activation_script.file_name.display()
+            );
+            zip.start_file(activation_script_path, file_options)?;
+            zip.write_all(activation_script.contents.as_ref().as_bytes())?;
         }
         Ok(())
     }
@@ -99,6 +180,13 @@ impl Scripts {
             let text = self.read(resource_path)?;
             let mut file = File::create_new(scripts_dir.join(resource_path.file_name()))?;
             file.write_all(text.as_bytes())?;
+        }
+        let activation_scripts_dir = dest_dir.join(HOST_ACTIVATION_SCRIPTS_REL_PATH.as_path());
+        fs::create_dir_all(&activation_scripts_dir)?;
+        for activation_script in self.activation_scripts()? {
+            let mut file =
+                File::create_new(activation_scripts_dir.join(activation_script.file_name))?;
+            file.write_all(activation_script.contents.as_ref().as_bytes())?;
         }
         Ok(())
     }

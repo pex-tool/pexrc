@@ -654,7 +654,8 @@ def cpython_abis(py_version):
         # N.B.: There is no imp from 3.12 on.
         import imp  # type: ignore[import-not-found]
 
-        EXTENSION_SUFFIXES = [x[0] for x in imp.get_suffixes()]
+        # N.B.: MyPy: Cannot assign to final name "EXTENSION_SUFFIXES"
+        EXTENSION_SUFFIXES = [x[0] for x in imp.get_suffixes()]  # type: ignore[misc]
         del imp
 
     py_version = tuple(py_version)  # To allow for version comparison.

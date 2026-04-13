@@ -181,6 +181,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "bstr",
+ "cache",
  "const_format",
  "dirs",
  "flate2",
@@ -2281,8 +2282,10 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "build-system",
+ "const_format",
  "env_logger",
  "fs-err",
+ "include_dir",
  "strum",
  "strum_macros",
  "zip",
@@ -2378,6 +2381,15 @@ dependencies = [
  "cfg-if",
  "cpufeatures",
  "digest",
+]
+
+[[package]]
+name = "shell-quote"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb502615975ae2365825521fa1529ca7648fd03ce0b0746604e0683856ecd7e4"
+dependencies = [
+ "bstr",
 ]
 
 [[package]]
@@ -2577,7 +2589,6 @@ dependencies = [
 name = "testing"
 version = "0.0.0"
 dependencies = [
- "anyhow",
  "cache",
  "ctor",
  "fs-err",
@@ -2801,6 +2812,7 @@ dependencies = [
  "scripts",
  "serde",
  "serde_json",
+ "shell-quote",
  "textwrap",
  "venv",
  "zip",

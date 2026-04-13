@@ -6,7 +6,12 @@
 use std::env;
 use std::path::PathBuf;
 
-use build_system::{InstallDirs, download_virtualenv};
+use build_system::{
+    InstallDirs,
+    download_virtualenv,
+    ensure_tools_installed,
+    prepare_venv_activation_scripts,
+};
 use fs_err as fs;
 
 fn main() -> anyhow::Result<()> {
@@ -40,10 +45,23 @@ fn main() -> anyhow::Result<()> {
         fs::read_to_string(workspace_manifest_path)?
     };
 
-    let virtualenv_py = download_virtualenv(&cargo_manifest_contents, install_dirs)?;
+    let virtualenv_py = download_virtualenv(&cargo_manifest_contents, &install_dirs)?;
     println!(
         "cargo::rustc-env=VIRTUALENV_PY={virtualenv_py}",
         virtualenv_py = virtualenv_py.display()
+    );
+
+    let cargo: PathBuf = env::var("CARGO")?.into();
+    ensure_tools_installed(&cargo, &cargo_manifest_contents, &target_dir, true)?;
+    let venv_activation_scripts_dir =
+        prepare_venv_activation_scripts(&workspace_root, &install_dirs)?;
+    println!(
+        "cargo::rerun-if-changed={activation_scripts_dir}",
+        activation_scripts_dir = venv_activation_scripts_dir.display()
+    );
+    println!(
+        "cargo::rustc-env=ACTIVATION_SCRIPTS_DIR={activation_scripts_dir}",
+        activation_scripts_dir = venv_activation_scripts_dir.display()
     );
 
     Ok(())

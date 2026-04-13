@@ -130,6 +130,7 @@ fn get_zig_version(zig: &Path) -> Option<String> {
 
 pub struct InstallDirs {
     bin_dir: PathBuf,
+    pub(crate) data_dir: PathBuf,
     pub(crate) download_dir: PathBuf,
 }
 
@@ -141,6 +142,7 @@ impl InstallDirs {
     pub fn new(cache_dir: PathBuf) -> Self {
         Self {
             bin_dir: cache_dir.join("bin"),
+            data_dir: cache_dir.join("data"),
             download_dir: cache_dir.join("downloads"),
         }
     }

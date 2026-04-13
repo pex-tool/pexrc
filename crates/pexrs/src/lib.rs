@@ -174,6 +174,8 @@ fn prepare_venv<'a>(
             PythonProxyLinker(&pex),
             &mut resolve.scripts,
             pex.info.venv_system_site_packages,
+            false,
+            None,
         )?;
 
         let interpreter_relpath = venv
