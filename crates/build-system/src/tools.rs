@@ -98,13 +98,18 @@ pub fn find_zig(binary_names: &[&str], version: &str, search_path: &OsStr) -> Op
     for binary_name in binary_names {
         if let Ok(zig_paths) = which_in_global(binary_name, Some(search_path)) {
             for zig in zig_paths {
-                if let Some(zig_version) = get_zig_version(&zig)
-                    && zig_version == version
-                {
-                    return Some(FoundTool {
-                        env_var: "CARGO_ZIGBUILD_ZIG_PATH",
-                        path: zig,
-                    });
+                if let Some(zig_version) = get_zig_version(&zig) {
+                    if zig_version == version {
+                        return Some(FoundTool {
+                            env_var: "CARGO_ZIGBUILD_ZIG_PATH",
+                            path: zig,
+                        });
+                    } else {
+                        eprintln!(
+                            "Found zig at zig {zig_version} at {path} but want version {version}.",
+                            path = zig.display()
+                        );
+                    }
                 }
             }
         }
