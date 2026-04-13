@@ -123,6 +123,11 @@ jobs:
         uses: actions/checkout@v6
       - name: Run Tests
         run: |
+          if [ "${{ matrix.os }}" == "windows-11-arm" ]; then
+            # N.B.: We force arch to get arm64 PBS builds for Windows arm64 machines.
+            # See: https://github.com/astral-sh/uv/issues/12906
+            export UV_PYTHON="cpython-$(cat .python-version)-windows-aarch64"
+          fi
           cargo --color always test --all
           PEXRC_PROFILE=release uv run dev-cmd --color always test -- -vvs
 
