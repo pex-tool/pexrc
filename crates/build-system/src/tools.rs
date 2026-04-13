@@ -94,6 +94,8 @@ pub struct FoundTool {
     pub path: PathBuf,
 }
 
+const ZIG_TOOL_ENV_VAR: &str = "CARGO_ZIGBUILD_ZIG_PATH";
+
 pub fn find_zig(binary_names: &[&str], version: &str, search_path: &OsStr) -> Option<FoundTool> {
     for binary_name in binary_names {
         if let Ok(zig_paths) = which_in_global(binary_name, Some(search_path)) {
@@ -101,7 +103,7 @@ pub fn find_zig(binary_names: &[&str], version: &str, search_path: &OsStr) -> Op
                 if let Some(zig_version) = get_zig_version(&zig) {
                     if zig_version == version {
                         return Some(FoundTool {
-                            env_var: "CARGO_ZIGBUILD_ZIG_PATH",
+                            env_var: ZIG_TOOL_ENV_VAR,
                             path: zig,
                         });
                     } else {
@@ -285,18 +287,34 @@ fn install_tools<'a>(
     match zig {
         Zig::Found(zig) => Ok(Cow::Borrowed(zig)),
         Zig::MissingVersion(version) => {
-            let zig_requirement = format!("ziglang=={version}");
             fs::create_dir_all(&install_dirs.bin_dir)?;
+
+            let lock_file = File::create(install_dirs.bin_dir.join(".python-zig.lck"))?;
+            lock_file.lock()?;
             let python_zig = install_dirs.bin_dir.join("python-zig");
-            if python_zig.exists() {
-                fs::remove_file(&python_zig)?;
+            if platform::is_executable(&python_zig)
+                .ok()
+                .unwrap_or_default()
+            {
+                return Ok(Cow::Owned(FoundTool {
+                    env_var: ZIG_TOOL_ENV_VAR,
+                    path: python_zig,
+                }));
             }
             if !env::consts::EXE_EXTENSION.is_empty() {
                 let python_zig_exe = python_zig.with_extension(env::consts::EXE_EXTENSION);
-                if python_zig_exe.exists() {
-                    fs::remove_file(python_zig_exe)?;
+                if platform::is_executable(&python_zig_exe)
+                    .ok()
+                    .unwrap_or_default()
+                {
+                    return Ok(Cow::Owned(FoundTool {
+                        env_var: ZIG_TOOL_ENV_VAR,
+                        path: python_zig_exe,
+                    }));
                 }
             }
+
+            let zig_requirement = format!("ziglang=={version}");
             let result = Command::new("uv")
                 .args(["tool", "install", "--force", &zig_requirement])
                 .env("UV_TOOL_DIR", install_dirs.data_dir.join("uv").as_os_str())

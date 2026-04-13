@@ -188,6 +188,7 @@ dependencies = [
  "fs-err",
  "hex",
  "itertools 0.14.0",
+ "platform",
  "reqwest",
  "serde",
  "sha2",
