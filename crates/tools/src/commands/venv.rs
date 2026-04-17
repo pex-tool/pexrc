@@ -3,10 +3,11 @@
 
 use std::borrow::Cow;
 use std::ffi::OsStr;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use anyhow::anyhow;
+use anyhow::{anyhow, bail};
 use cache::CacheDir;
 use clap::builder::PossibleValue;
 use clap::{Args, ValueEnum};
@@ -41,20 +42,49 @@ impl ValueEnum for BinPath {
     }
 }
 
-#[derive(Clone, Eq, PartialEq, ValueEnum)]
-enum InstallScope {
-    All,
-    Deps,
-    Srcs,
-}
+#[derive(Clone)]
+struct InstallScope(venv_pex::InstallScope);
 
 impl InstallScope {
-    fn as_str(&self) -> &str {
-        match self {
-            InstallScope::All => "all",
-            InstallScope::Deps => "deps",
-            InstallScope::Srcs => "srcs",
+    fn into_inner(self) -> venv_pex::InstallScope {
+        self.0
+    }
+}
+
+impl AsRef<str> for InstallScope {
+    fn as_ref(&self) -> &str {
+        match self.0 {
+            venv_pex::InstallScope::All => "all",
+            venv_pex::InstallScope::Deps => "deps",
+            venv_pex::InstallScope::Srcs => "srcs",
         }
+    }
+}
+
+impl TryFrom<&str> for InstallScope {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &str) -> anyhow::Result<Self> {
+        Ok(Self(match value {
+            "all" => venv_pex::InstallScope::All,
+            "deps" => venv_pex::InstallScope::Deps,
+            "srcs" => venv_pex::InstallScope::Srcs,
+            _ => bail!("Not a recognized InstallScope value: {value}"),
+        }))
+    }
+}
+
+impl ValueEnum for InstallScope {
+    fn value_variants<'a>() -> &'a [Self] {
+        &[
+            InstallScope(venv_pex::InstallScope::All),
+            InstallScope(venv_pex::InstallScope::Deps),
+            InstallScope(venv_pex::InstallScope::Srcs),
+        ]
+    }
+
+    fn to_possible_value(&self) -> Option<PossibleValue> {
+        Some(PossibleValue::new(self.0.as_str()))
     }
 }
 
@@ -67,7 +97,11 @@ enum RemoveScope {
 #[derive(Args)]
 pub(crate) struct VenvArgs {
     /// The scope of code contained in the Pex that is installed in the venv.
-    #[arg(long, value_enum, default_value_t = InstallScope::All, long_help = "\
+    #[arg(
+        long,
+        value_enum,
+        default_value_t = InstallScope(venv_pex::InstallScope::All),
+        long_help = "\
 The scope of code contained in the Pex that is installed in the venv.
 By default, all code is installed and this is generally what you want. However, in some situations
 it's beneficial to split the venv installation into deps and srcs steps. This is particularly useful
@@ -145,14 +179,82 @@ fn powershell_quote(value: &str) -> String {
     format!("'{value}'", value = value.replace("'", "''"))
 }
 
-pub(crate) fn create(python: &Path, pex: Pex, args: VenvArgs) -> anyhow::Result<()> {
-    if args.scope != InstallScope::All {
-        todo!(
-            "Support for --scope {scope} is under development.",
-            scope = args.scope.as_str()
-        );
+// @attr.s(frozen=True)
+// class InstallScopeState(object):
+//     @classmethod
+//     def load(cls, venv_dir):
+//         # type: (str) -> InstallScopeState
+//
+//         state_file = os.path.join(venv_dir, ".pex-venv-scope")
+//         prior_state = None  # type: Optional[InstallScope.Value]
+//         try:
+//             with open(state_file) as fp:
+//                 prior_state = InstallScope.for_value(fp.read().strip())
+//         except IOError as e:
+//             if e.errno != errno.ENOENT:
+//                 raise e
+//
+//         return cls(venv_dir=venv_dir, state_file=state_file, prior_state=prior_state)
+//
+//     venv_dir = attr.ib()  # type: str
+//     _state_file = attr.ib()  # type: str
+//     _prior_state = attr.ib(default=None)  # type: Optional[InstallScope.Value]
+//
+//     @property
+//     def is_partial_install(self):
+//         return self._prior_state in (InstallScope.DEPS_ONLY, InstallScope.SOURCE_ONLY)
+//
+//     def save(self, install_scope):
+//         # type: (InstallScope.Value) -> None
+//         if {InstallScope.DEPS_ONLY, InstallScope.SOURCE_ONLY} == {self._prior_state, install_scope}:
+//             install_scope = InstallScope.ALL
+//         with open(self._state_file, "w") as fp:
+//             fp.write(str(install_scope))
+
+struct InstallScopeState {
+    state_file: PathBuf,
+    prior_state: Option<InstallScope>,
+}
+
+impl InstallScopeState {
+    fn load(venv_dir: &Path) -> anyhow::Result<Self> {
+        let state_file = venv_dir.join(".pex-venv-scope");
+        let prior_state = match fs::read_to_string(&state_file) {
+            Ok(contents) => Some(InstallScope::try_from(contents.trim())?),
+            Err(err) => match err.kind() {
+                ErrorKind::NotFound => None,
+                _ => bail!("Failed to read state file from prior venv: {err}"),
+            },
+        };
+        Ok(Self {
+            state_file,
+            prior_state,
+        })
     }
 
+    fn is_partial_install(&self) -> bool {
+        matches!(
+            self.prior_state,
+            Some(InstallScope(
+                venv_pex::InstallScope::Deps | venv_pex::InstallScope::Srcs
+            ))
+        )
+    }
+
+    fn save(&self, mut install_scope: InstallScope) -> anyhow::Result<()> {
+        if let Some(prior_state) = self.prior_state.as_ref()
+            && ((prior_state.0 == venv_pex::InstallScope::Srcs
+                && install_scope.0 == venv_pex::InstallScope::Deps)
+                || (prior_state.0 == venv_pex::InstallScope::Deps
+                    && install_scope.0 == venv_pex::InstallScope::Srcs))
+        {
+            install_scope = InstallScope(venv_pex::InstallScope::All)
+        }
+        Ok(fs::write(&self.state_file, install_scope.as_ref())?)
+    }
+}
+
+pub(crate) fn create(python: &Path, pex: Pex, args: VenvArgs) -> anyhow::Result<()> {
     let search_path = SearchPath::from_env()?;
     let pex_path = PexPath::from_pex_info(&pex.info, true);
     let additional_pexes = pex_path.load_pexes()?;
@@ -163,15 +265,21 @@ pub(crate) fn create(python: &Path, pex: Pex, args: VenvArgs) -> anyhow::Result<
         fs::remove_dir_all(&args.venv_dir)?;
     }
     fs::create_dir_all(&args.venv_dir)?;
-    let venv = Virtualenv::create(
-        resolve.interpreter,
-        Cow::Borrowed(&args.venv_dir),
-        FileSystemLinker(),
-        &mut scripts,
-        args.system_site_packages,
-        args.pip,
-        args.prompt.as_deref(),
-    )?;
+
+    let install_scope_state = InstallScopeState::load(&args.venv_dir)?;
+    let venv = if install_scope_state.is_partial_install() && !args.force {
+        Virtualenv::load(Cow::Borrowed(&args.venv_dir), &mut scripts)
+    } else {
+        Virtualenv::create(
+            resolve.interpreter,
+            Cow::Borrowed(&args.venv_dir),
+            FileSystemLinker(),
+            &mut scripts,
+            args.system_site_packages,
+            args.pip,
+            args.prompt.as_deref(),
+        )
+    }?;
 
     let scripts_dir = venv.prefix().join(venv.bin_dir_relpath);
     let prompt = args
@@ -226,6 +334,7 @@ pub(crate) fn create(python: &Path, pex: Pex, args: VenvArgs) -> anyhow::Result<
         Some("-sE")
     };
 
+    let scope = args.scope.into_inner();
     venv_pex::populate(
         &venv,
         &venv.interpreter.path,
@@ -235,6 +344,7 @@ pub(crate) fn create(python: &Path, pex: Pex, args: VenvArgs) -> anyhow::Result<
         &mut scripts,
         args.bin_path.map(BinPath::into_inner),
         args.collisions_ok,
+        scope,
     )?;
     for (pex, wheels) in resolve.additional_wheels {
         venv_pex::populate_user_code_and_wheels(
@@ -245,6 +355,7 @@ pub(crate) fn create(python: &Path, pex: Pex, args: VenvArgs) -> anyhow::Result<
             wheels,
             false,
             args.collisions_ok,
+            scope,
         )?;
     }
 
@@ -277,5 +388,6 @@ pub(crate) fn create(python: &Path, pex: Pex, args: VenvArgs) -> anyhow::Result<
             }
         }
     }
+    install_scope_state.save(InstallScope(scope))?;
     Ok(())
 }

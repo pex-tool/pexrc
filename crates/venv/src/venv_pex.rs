@@ -22,25 +22,47 @@ use zip::ZipArchive;
 
 use crate::virtualenv::Virtualenv;
 
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub enum InstallScope {
+    All,
+    Deps,
+    Srcs,
+}
+
+impl InstallScope {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            InstallScope::All => "all",
+            InstallScope::Deps => "deps",
+            InstallScope::Srcs => "srcs",
+        }
+    }
+}
+
 fn populate_from_loose_pex<'a>(
     venv: &Virtualenv,
     loose_pex: &'a Pex<'a>,
     resolved_wheels: &IndexMap<&'a str, ResolvedWheel<'a>>,
     populate_pex_info: bool,
     collisions_ok: bool,
+    scope: InstallScope,
 ) -> anyhow::Result<()> {
     let site_packages_path = venv.site_packages_path();
-    collect_wheels_from_directory_pex(loose_pex, resolved_wheels)?
-        .into_par_iter()
-        .try_for_each(|wheel_dir| {
-            populate_wheel_dir(&wheel_dir, &site_packages_path, collisions_ok)
-        })?;
-    populate_user_code_from_directory_pex(
-        loose_pex,
-        venv.prefix(),
-        &site_packages_path,
-        populate_pex_info,
-    )?;
+    if matches!(scope, InstallScope::All | InstallScope::Deps) {
+        collect_wheels_from_directory_pex(loose_pex, resolved_wheels)?
+            .into_par_iter()
+            .try_for_each(|wheel_dir| {
+                populate_wheel_dir(&wheel_dir, &site_packages_path, collisions_ok)
+            })?;
+    }
+    if matches!(scope, InstallScope::All | InstallScope::Srcs) {
+        populate_user_code_from_directory_pex(
+            loose_pex,
+            venv,
+            &site_packages_path,
+            populate_pex_info,
+        )?;
+    }
     Ok(())
 }
 
@@ -237,7 +259,9 @@ fn create_script_contents(
     let shebang = RenderShebang(path_as_str(shebang_interpreter)?, shebang_arg);
 
     let mut components = entry_point.splitn(2, ":");
-    let modname = components.next().ok_or_else(|| anyhow!("XXX"))?;
+    let modname = components
+        .next()
+        .expect("A split always yield at least one item.");
     if let Some(attrs) = components.next()
         && !attrs.is_empty()
     {
@@ -335,19 +359,24 @@ fn populate_from_packed_pex<'a>(
     resolved_wheels: &IndexMap<&'a str, ResolvedWheel<'a>>,
     populate_pex_info: bool,
     collisions_ok: bool,
+    scope: InstallScope,
 ) -> anyhow::Result<()> {
     let site_packages_path = venv.site_packages_path();
-    collect_wheels_from_directory_pex(packed_pex, resolved_wheels)?
-        .into_par_iter()
-        .try_for_each(|wheel_zip| {
-            populate_whl_zip(&wheel_zip, &site_packages_path, collisions_ok)
-        })?;
-    populate_user_code_from_directory_pex(
-        packed_pex,
-        venv.prefix(),
-        &site_packages_path,
-        populate_pex_info,
-    )?;
+    if matches!(scope, InstallScope::All | InstallScope::Deps) {
+        collect_wheels_from_directory_pex(packed_pex, resolved_wheels)?
+            .into_par_iter()
+            .try_for_each(|wheel_zip| {
+                populate_whl_zip(&wheel_zip, &site_packages_path, collisions_ok)
+            })?;
+    }
+    if matches!(scope, InstallScope::All | InstallScope::Srcs) {
+        populate_user_code_from_directory_pex(
+            packed_pex,
+            venv,
+            &site_packages_path,
+            populate_pex_info,
+        )?;
+    }
     Ok(())
 }
 
@@ -367,7 +396,7 @@ fn populate_whl_zip(
 
 fn populate_user_code_from_directory_pex<'a>(
     directory_pex: &'a Pex<'a>,
-    venv_dir: &Path,
+    venv: &Virtualenv,
     site_packages_path: &Path,
     populate_pex_info: bool,
 ) -> anyhow::Result<()> {
@@ -383,11 +412,6 @@ fn populate_user_code_from_directory_pex<'a>(
     .into_iter()
     .map(|rel_path| directory_pex.path.join(rel_path))
     .collect();
-    let _pex_info_exclude = if populate_pex_info {
-        None
-    } else {
-        Some(directory_pex.path.join("PEX-INFO"))
-    };
     let user_code = walkdir::WalkDir::new(directory_pex.path)
         .min_depth(1)
         .into_iter()
@@ -407,11 +431,10 @@ fn populate_user_code_from_directory_pex<'a>(
             fs::copy(entry.path(), dst_path).map(|_| ())
         }
     })?;
-
     if populate_pex_info {
         fs::copy(
             directory_pex.path.join("PEX-INFO"),
-            venv_dir.join("PEX-INFO"),
+            venv.prefix().join("PEX-INFO"),
         )?;
     }
     Ok(())
@@ -423,62 +446,88 @@ fn populate_from_zip_app_with_whl_deps<'a>(
     resolved_wheels: &IndexMap<&'a str, ResolvedWheel<'a>>,
     populate_pex_info: bool,
     collisions_ok: bool,
+    scope: InstallScope,
 ) -> anyhow::Result<()> {
     let pex_zip = ZipArchive::new(File::open(zip_app_pex.path)?)?;
     let metadata = pex_zip.metadata();
-    let extract_indexes = pex_zip
-        .file_names()
-        .enumerate()
-        .filter_map(|(idx, name)| {
-            if [".deps/", "__pex__/"]
-                .iter()
-                .any(|exclude_dir| name.starts_with(exclude_dir))
-                || ["PEX-INFO", "__main__.py"].contains(&name)
-            {
-                None
-            } else {
-                Some(idx)
-            }
-        })
-        .collect::<Vec<_>>();
     let site_packages_path = venv.site_packages_path();
-    extract_indexes
-        .into_par_iter()
-        .try_for_each(|index| -> anyhow::Result<()> {
-            let zip_fp = File::open(zip_app_pex.path)?;
-            let mut zip = unsafe { ZipArchive::unsafe_new_with_metadata(zip_fp, metadata.clone()) };
-            extract_idx(&site_packages_path, index, &mut zip, collisions_ok)?;
-            Ok(())
-        })?;
 
-    let wheel_file_names = resolved_wheels.into_iter().collect::<Vec<_>>();
-    wheel_file_names
-        .into_par_iter()
-        .try_for_each(|(wheel_file_name, _)| {
-            let zip_fp = File::open(zip_app_pex.path)?;
-            let mut zip = unsafe { ZipArchive::unsafe_new_with_metadata(zip_fp, metadata.clone()) };
-            let whl_file = zip.by_name_seek(&[".deps", wheel_file_name].join("/"))?;
-            let whl_zip = ZipArchive::new(whl_file)?;
-            let whl_zip_metadata = whl_zip.metadata();
-            (0..whl_zip.len()).into_par_iter().try_for_each(|index| {
+    if matches!(scope, InstallScope::All | InstallScope::Deps) {
+        let wheel_file_names = resolved_wheels.into_iter().collect::<Vec<_>>();
+        wheel_file_names
+            .into_par_iter()
+            .try_for_each(|(wheel_file_name, _)| {
                 let zip_fp = File::open(zip_app_pex.path)?;
                 let mut zip =
                     unsafe { ZipArchive::unsafe_new_with_metadata(zip_fp, metadata.clone()) };
                 let whl_file = zip.by_name_seek(&[".deps", wheel_file_name].join("/"))?;
-                let mut whl_zip = unsafe {
-                    ZipArchive::unsafe_new_with_metadata(whl_file, whl_zip_metadata.clone())
-                };
-                extract_idx(&site_packages_path, index, &mut whl_zip, collisions_ok)
+                let whl_zip = ZipArchive::new(whl_file)?;
+                let whl_zip_metadata = whl_zip.metadata();
+                (0..whl_zip.len()).into_par_iter().try_for_each(|index| {
+                    let zip_fp = File::open(zip_app_pex.path)?;
+                    let mut zip =
+                        unsafe { ZipArchive::unsafe_new_with_metadata(zip_fp, metadata.clone()) };
+                    let whl_file = zip.by_name_seek(&[".deps", wheel_file_name].join("/"))?;
+                    let mut whl_zip = unsafe {
+                        ZipArchive::unsafe_new_with_metadata(whl_file, whl_zip_metadata.clone())
+                    };
+                    extract_idx(&site_packages_path, index, &mut whl_zip, collisions_ok)
+                })
+            })?;
+    }
+    if matches!(scope, InstallScope::All | InstallScope::Srcs) {
+        let extract_indexes = pex_zip
+            .file_names()
+            .enumerate()
+            .filter_map(|(idx, name)| {
+                if [".deps/", "__pex__/"]
+                    .iter()
+                    .any(|exclude_dir| name.starts_with(exclude_dir))
+                    || ["PEX-INFO", "__main__.py"].contains(&name)
+                {
+                    None
+                } else {
+                    Some(idx)
+                }
             })
-        })?;
-
-    if populate_pex_info {
-        let mut pex_zip = ZipArchive::new(File::open(zip_app_pex.path)?)?;
-        let mut pex_info_src_fp = pex_zip.by_name("PEX-INFO")?;
-        let mut pex_info_dst_fp = File::create_new(venv.prefix().join("PEX-INFO"))?;
-        io::copy(&mut pex_info_src_fp, &mut pex_info_dst_fp)?;
+            .collect::<Vec<_>>();
+        extract_indexes
+            .into_par_iter()
+            .try_for_each(|index| -> anyhow::Result<()> {
+                let zip_fp = File::open(zip_app_pex.path)?;
+                let mut zip =
+                    unsafe { ZipArchive::unsafe_new_with_metadata(zip_fp, metadata.clone()) };
+                extract_idx(&site_packages_path, index, &mut zip, collisions_ok)?;
+                Ok(())
+            })?;
+        if populate_pex_info {
+            let mut pex_zip = ZipArchive::new(File::open(zip_app_pex.path)?)?;
+            let mut pex_info_src_fp = pex_zip.by_name("PEX-INFO")?;
+            let mut pex_info_dst_fp = File::create(venv.prefix().join("PEX-INFO"))?;
+            io::copy(&mut pex_info_src_fp, &mut pex_info_dst_fp)?;
+        }
     }
     Ok(())
+}
+
+struct DepFilter<'a>(&'a IndexMap<&'a str, ResolvedWheel<'a>>);
+
+impl<'a> DepFilter<'a> {
+    fn filter_deps(&self, file_name: &str) -> bool {
+        file_name.starts_with(".deps/")
+            && file_name[6..]
+                .split("/")
+                .next()
+                .map(|whl_name| self.0.contains_key(whl_name))
+                .unwrap_or_default()
+    }
+}
+
+fn filter_srcs(file_name: &str) -> bool {
+    ![".deps/", "__pex__/"]
+        .iter()
+        .any(|dir_prefix| file_name.starts_with(dir_prefix))
+        && ![".deps/", "__pex__/", "PEX-INFO", "__main__.py"].contains(&file_name)
 }
 
 fn populate_from_zip_app<'a>(
@@ -487,26 +536,24 @@ fn populate_from_zip_app<'a>(
     resolved_wheels: &IndexMap<&'a str, ResolvedWheel<'a>>,
     populate_pex_info: bool,
     collisions_ok: bool,
+    scope: InstallScope,
 ) -> anyhow::Result<()> {
     let mut pex_zip = ZipArchive::new(File::open(zip_app_pex.path)?)?;
     let metadata = pex_zip.metadata();
+    let dep_filter = DepFilter(resolved_wheels);
     let extract_indexes = pex_zip
         .file_names()
         .enumerate()
         .filter_map(|(idx, name)| {
             // TODO: XXX: Deal with .layout and .prefix/ in wheel chroots.
-            if name.starts_with("__pex__/")
-                || [".deps/", "PEX-INFO", "__main__.py"].contains(&name)
-                || name.starts_with(".deps/")
-                    && name[6..]
-                        .split("/")
-                        .next()
-                        .map(|whl_name| !resolved_wheels.contains_key(whl_name))
-                        .unwrap_or(true)
-            {
-                None
-            } else {
+            if match scope {
+                InstallScope::All => dep_filter.filter_deps(name) || filter_srcs(name),
+                InstallScope::Deps => dep_filter.filter_deps(name),
+                InstallScope::Srcs => filter_srcs(name),
+            } {
                 Some(idx)
+            } else {
+                None
             }
         })
         .collect::<Vec<_>>();
@@ -519,14 +566,15 @@ fn populate_from_zip_app<'a>(
             extract_idx(&site_packages_path, index, &mut zip, collisions_ok)?;
             Ok(())
         })?;
-    if populate_pex_info {
+    if populate_pex_info && matches!(scope, InstallScope::All | InstallScope::Srcs) {
         let mut pex_info_src_fp = pex_zip.by_name("PEX-INFO")?;
-        let mut pex_info_dst_fp = File::create_new(venv.prefix().join("PEX-INFO"))?;
+        let mut pex_info_dst_fp = File::create(venv.prefix().join("PEX-INFO"))?;
         io::copy(&mut pex_info_src_fp, &mut pex_info_dst_fp)?;
     }
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 #[time("debug", "{}")]
 pub fn populate_user_code_and_wheels<'a>(
     venv: &Virtualenv,
@@ -536,6 +584,7 @@ pub fn populate_user_code_and_wheels<'a>(
     resolved_wheels: IndexMap<&'a str, ResolvedWheel<'a>>,
     populate_pex_info: bool,
     collisions_ok: bool,
+    scope: InstallScope,
 ) -> anyhow::Result<()> {
     match pex.layout {
         Layout::Loose => populate_from_loose_pex(
@@ -544,6 +593,7 @@ pub fn populate_user_code_and_wheels<'a>(
             &resolved_wheels,
             populate_pex_info,
             collisions_ok,
+            scope,
         )?,
         Layout::Packed => populate_from_packed_pex(
             venv,
@@ -551,6 +601,7 @@ pub fn populate_user_code_and_wheels<'a>(
             &resolved_wheels,
             populate_pex_info,
             collisions_ok,
+            scope,
         )?,
         Layout::ZipApp => {
             if pex.info.deps_are_wheel_files {
@@ -560,6 +611,7 @@ pub fn populate_user_code_and_wheels<'a>(
                     &resolved_wheels,
                     populate_pex_info,
                     collisions_ok,
+                    scope,
                 )?
             } else {
                 populate_from_zip_app(
@@ -568,24 +620,27 @@ pub fn populate_user_code_and_wheels<'a>(
                     &resolved_wheels,
                     populate_pex_info,
                     collisions_ok,
+                    scope,
                 )?
             }
         }
     }
-    resolved_wheels
-        .into_values()
-        .collect::<Vec<_>>()
-        .into_par_iter()
-        .try_for_each(|resolved_wheel| {
-            spread(
-                pex,
-                resolved_wheel,
-                venv,
-                shebang_interpreter,
-                shebang_arg,
-                collisions_ok,
-            )
-        })?;
+    if matches!(scope, InstallScope::All | InstallScope::Deps) {
+        resolved_wheels
+            .into_values()
+            .collect::<Vec<_>>()
+            .into_par_iter()
+            .try_for_each(|resolved_wheel| {
+                spread(
+                    pex,
+                    resolved_wheel,
+                    venv,
+                    shebang_interpreter,
+                    shebang_arg,
+                    collisions_ok,
+                )
+            })?;
+    }
     Ok(())
 }
 
@@ -600,6 +655,7 @@ pub fn populate<'a>(
     scripts: &mut Scripts,
     bin_path_override: Option<BinPath>,
     collisions_ok: bool,
+    scope: InstallScope,
 ) -> anyhow::Result<()> {
     let selected_wheels = resolved_wheels.keys().copied().collect::<Vec<_>>();
     populate_user_code_and_wheels(
@@ -610,25 +666,28 @@ pub fn populate<'a>(
         resolved_wheels,
         true,
         collisions_ok,
+        scope,
     )?;
-
-    write_main(
-        venv,
-        shebang_interpreter,
-        shebang_arg,
-        &pex.info,
-        scripts,
-        bin_path_override,
-    )?;
-    write_repl(
-        venv,
-        shebang_interpreter,
-        shebang_arg,
-        pex.path,
-        &pex.info,
-        selected_wheels,
-        scripts,
-    )
+    if matches!(scope, InstallScope::All | InstallScope::Srcs) {
+        write_main(
+            venv,
+            shebang_interpreter,
+            shebang_arg,
+            &pex.info,
+            scripts,
+            bin_path_override,
+        )?;
+        write_repl(
+            venv,
+            shebang_interpreter,
+            shebang_arg,
+            pex.path,
+            &pex.info,
+            selected_wheels,
+            scripts,
+        )?;
+    }
+    Ok(())
 }
 
 fn extract_idx<R>(
