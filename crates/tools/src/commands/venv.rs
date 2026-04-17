@@ -179,38 +179,6 @@ fn powershell_quote(value: &str) -> String {
     format!("'{value}'", value = value.replace("'", "''"))
 }
 
-// @attr.s(frozen=True)
-// class InstallScopeState(object):
-//     @classmethod
-//     def load(cls, venv_dir):
-//         # type: (str) -> InstallScopeState
-//
-//         state_file = os.path.join(venv_dir, ".pex-venv-scope")
-//         prior_state = None  # type: Optional[InstallScope.Value]
-//         try:
-//             with open(state_file) as fp:
-//                 prior_state = InstallScope.for_value(fp.read().strip())
-//         except IOError as e:
-//             if e.errno != errno.ENOENT:
-//                 raise e
-//
-//         return cls(venv_dir=venv_dir, state_file=state_file, prior_state=prior_state)
-//
-//     venv_dir = attr.ib()  # type: str
-//     _state_file = attr.ib()  # type: str
-//     _prior_state = attr.ib(default=None)  # type: Optional[InstallScope.Value]
-//
-//     @property
-//     def is_partial_install(self):
-//         return self._prior_state in (InstallScope.DEPS_ONLY, InstallScope.SOURCE_ONLY)
-//
-//     def save(self, install_scope):
-//         # type: (InstallScope.Value) -> None
-//         if {InstallScope.DEPS_ONLY, InstallScope.SOURCE_ONLY} == {self._prior_state, install_scope}:
-//             install_scope = InstallScope.ALL
-//         with open(self._state_file, "w") as fp:
-//             fp.write(str(install_scope))
-
 struct InstallScopeState {
     state_file: PathBuf,
     prior_state: Option<InstallScope>,
