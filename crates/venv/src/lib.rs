@@ -7,5 +7,5 @@
 pub mod venv_pex;
 pub mod virtualenv;
 
-pub use venv_pex::{populate, populate_user_code_and_wheels};
+pub use venv_pex::{InstallScope, populate, populate_user_code_and_wheels};
 pub use virtualenv::{Linker, Virtualenv};

@@ -19,7 +19,7 @@ use logging_timer::time;
 use pex::{InheritPath, Pex, PexPath};
 use python_proxy::ProxySource;
 use regex::bytes::Regex;
-use venv::{Linker, Virtualenv, populate, populate_user_code_and_wheels};
+use venv::{InstallScope, Linker, Virtualenv, populate, populate_user_code_and_wheels};
 
 struct PythonProxyLinker<'a>(&'a Pex<'a>);
 
@@ -201,6 +201,7 @@ fn prepare_venv<'a>(
             &mut resolve.scripts,
             None,
             true,
+            InstallScope::All,
         )?;
         for (additional_pex, resolved_wheels) in resolve.additional_wheels {
             populate_user_code_and_wheels(
@@ -211,6 +212,7 @@ fn prepare_venv<'a>(
                 resolved_wheels,
                 false,
                 true,
+                InstallScope::All,
             )?;
         }
         Ok(venv.interpreter)

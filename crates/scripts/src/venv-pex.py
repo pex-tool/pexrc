@@ -125,7 +125,9 @@ def boot(
 
     def sys_executable_paths():
         exe = sys.executable
-        executables = {exe}
+        # N.B.: __PEXRC_PYVENV_LAUNCHER__ is our python-proxy launcher, which is a valid venv
+        # Python to use.
+        executables = {exe, os.environ.pop("__PEXRC_PYVENV_LAUNCHER__", sys.executable)}
         while os.path.islink(exe):
             exe = os.readlink(exe)
             if not os.path.isabs(exe):
