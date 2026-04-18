@@ -35,6 +35,34 @@ fn executable_rel_path(interpreter: &Interpreter) -> Cow<'static, str> {
     }
 }
 
+#[cfg(unix)]
+fn additional_executable_rel_paths(interpreter: &Interpreter) -> Vec<Cow<'static, str>> {
+    let mut rel_paths: Vec<Cow<'static, str>> =
+        Vec::with_capacity(if interpreter.pypy_version.is_some() {
+            5
+        } else {
+            2
+        });
+    if interpreter.pypy_version.is_some() {
+        rel_paths.push(Cow::Owned(format!(
+            "{SCRIPTS_DIR}/pypy{major}",
+            major = interpreter.version.major,
+        )));
+        rel_paths.push(Cow::Borrowed("bin/pypy"));
+        rel_paths.push(Cow::Owned(format!(
+            "{SCRIPTS_DIR}/python{major}.{minor}",
+            major = interpreter.version.major,
+            minor = interpreter.version.minor
+        )));
+    }
+    rel_paths.push(Cow::Owned(format!(
+        "{SCRIPTS_DIR}/python{major}",
+        major = interpreter.version.major,
+    )));
+    rel_paths.push(Cow::Borrowed("bin/python"));
+    rel_paths
+}
+
 #[cfg(windows)]
 const SCRIPTS_DIR: &str = "Scripts";
 
@@ -160,6 +188,17 @@ impl<'a> Virtualenv<'a> {
 
     pub fn site_packages_path(&self) -> PathBuf {
         self.interpreter.prefix.join(&self.site_packages_relpath)
+    }
+
+    #[cfg(unix)]
+    pub fn create_additional_python_links(&self) -> anyhow::Result<()> {
+        for rel_path in additional_executable_rel_paths(&self.interpreter) {
+            let dest = self.interpreter.prefix.join(rel_path.as_ref());
+            if !dest.exists() {
+                symlink_or_link_or_copy(&self.interpreter.path, dest, true)?;
+            }
+        }
+        Ok(())
     }
 }
 

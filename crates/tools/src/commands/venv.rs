@@ -236,9 +236,9 @@ pub(crate) fn create(python: &Path, pex: Pex, args: VenvArgs) -> anyhow::Result<
 
     let install_scope_state = InstallScopeState::load(&args.venv_dir)?;
     let venv = if install_scope_state.is_partial_install() && !args.force {
-        Virtualenv::load(Cow::Borrowed(&args.venv_dir), &mut scripts)
+        Virtualenv::load(Cow::Borrowed(&args.venv_dir), &mut scripts)?
     } else {
-        Virtualenv::create(
+        let venv = Virtualenv::create(
             resolve.interpreter,
             Cow::Borrowed(&args.venv_dir),
             FileSystemLinker(),
@@ -246,8 +246,11 @@ pub(crate) fn create(python: &Path, pex: Pex, args: VenvArgs) -> anyhow::Result<
             args.system_site_packages,
             args.pip,
             args.prompt.as_deref(),
-        )
-    }?;
+        )?;
+        #[cfg(unix)]
+        venv.create_additional_python_links()?;
+        venv
+    };
 
     let scripts_dir = venv.prefix().join(venv.bin_dir_relpath);
     let prompt = args
