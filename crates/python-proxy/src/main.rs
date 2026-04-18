@@ -102,6 +102,12 @@ fn main() {
     }
     command.args(env::args_os().skip(1));
     command.env("__PYVENV_LAUNCHER__", &python_proxy.proxy);
+
+    // N.B.: For Mac Python Framework builds (and Windows Python builds) __PYVENV_LAUNCHER__ is
+    // deleted from the env on launch. We need to know about the launcher in the venv `pex` script;
+    // so we duplicate that knowledge in our own env var.
+    command.env("__PEXRC_PYVENV_LAUNCHER__", &python_proxy.proxy);
+
     let lock = match cache::read_lock() {
         Ok(lock) => lock,
         Err(err) => {
