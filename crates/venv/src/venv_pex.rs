@@ -4,10 +4,12 @@
 use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
 use std::io;
-use std::io::{Read, Seek, Write};
+use std::io::{BufReader, ErrorKind, Read, Seek, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::{anyhow, bail};
+use cache::{Fingerprint, default_digest, fingerprint_file};
 use fs_err as fs;
 use fs_err::File;
 use indexmap::IndexMap;
@@ -20,6 +22,7 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use scripts::{Scripts, VenvPex, VenvPexRepl};
 use zip::ZipArchive;
 
+use crate::Provenance;
 use crate::virtualenv::Virtualenv;
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -44,15 +47,15 @@ fn populate_from_loose_pex<'a>(
     loose_pex: &'a Pex<'a>,
     resolved_wheels: &IndexMap<&'a str, ResolvedWheel<'a>>,
     populate_pex_info: bool,
-    collisions_ok: bool,
     scope: InstallScope,
+    provenance: Arc<Provenance>,
 ) -> anyhow::Result<()> {
     let site_packages_path = venv.site_packages_path();
     if matches!(scope, InstallScope::All | InstallScope::Deps) {
         collect_wheels_from_directory_pex(loose_pex, resolved_wheels)?
             .into_par_iter()
             .try_for_each(|wheel_dir| {
-                populate_wheel_dir(&wheel_dir, &site_packages_path, collisions_ok)
+                populate_wheel_dir(&wheel_dir, &site_packages_path, provenance.clone())
             })?;
     }
     if matches!(scope, InstallScope::All | InstallScope::Srcs) {
@@ -61,6 +64,7 @@ fn populate_from_loose_pex<'a>(
             venv,
             &site_packages_path,
             populate_pex_info,
+            provenance,
         )?;
     }
     Ok(())
@@ -91,7 +95,7 @@ fn spread(
     virtualenv: &Virtualenv,
     shebang_interpreter: &Path,
     shebang_arg: Option<&str>,
-    collisions_ok: bool,
+    provenance: Arc<Provenance>,
 ) -> anyhow::Result<()> {
     let entry_points = virtualenv
         .site_packages_path()
@@ -104,7 +108,7 @@ fn spread(
             virtualenv,
             shebang_interpreter,
             shebang_arg,
-            collisions_ok,
+            provenance,
         )?;
     }
     Ok(())
@@ -116,7 +120,7 @@ fn install_scripts(
     virtualenv: &Virtualenv,
     shebang_interpreter: &Path,
     shebang_arg: Option<&str>,
-    collisions_ok: bool,
+    provenance: Arc<Provenance>,
 ) -> anyhow::Result<()> {
     let entry_points = Ini::load_from_file(entry_points_txt)?;
     if let Some(console_scripts) = entry_points.section(Some("console_scripts"))
@@ -132,7 +136,7 @@ fn install_scripts(
                 entry_point,
                 &script_dir,
                 false,
-                collisions_ok,
+                provenance.clone(),
             )?;
         }
     }
@@ -171,29 +175,28 @@ fn create_script(
     entry_point: &str,
     dest_dir: &Path,
     gui: bool,
-    collisions_ok: bool,
+    provenance: Arc<Provenance>,
 ) -> anyhow::Result<()> {
     assert!(!gui, "There is no support for gui scripts yet.");
 
-    let script_contents = create_script_contents(shebang_interpreter, shebang_arg, entry_point)?;
     let script_path = dest_dir.join(name);
+    let script_contents = create_script_contents(shebang_interpreter, shebang_arg, entry_point)?;
     let mut script_file = match File::create_new(&script_path) {
-        Ok(script_file) => script_file,
-        Err(err) => {
-            // TODO: Track provenance.
-            if collisions_ok {
-                warn!(
-                    "Collision for {script_path}",
-                    script_path = script_path.display()
-                );
-            } else {
-                bail!(
-                    "Collision for {script_path}: {err}",
-                    script_path = script_path.display()
-                )
-            }
+        Ok(script_file) => {
+            provenance.record(entry_point, script_path);
+            script_file
+        }
+        Err(err) if err.kind() == ErrorKind::AlreadyExists => {
+            let fingerprint = Fingerprint::try_from(BufReader::new(script_contents.as_bytes()))?;
+            provenance.record_collision(
+                entry_point,
+                fingerprint,
+                script_contents.len(),
+                script_path,
+            );
             return Ok(());
         }
+        Err(err) => bail!("{err}"),
     };
     script_file.write_all(script_contents.as_bytes())?;
     mark_executable(script_file.file_mut())?;
@@ -209,30 +212,23 @@ fn create_script(
     entry_point: &str,
     dest_dir: &Path,
     gui: bool,
-    collisions_ok: bool,
+    provenance: Arc<Provenance>,
 ) -> anyhow::Result<()> {
     assert!(!gui, "There is no support for gui scripts yet.");
 
     let script_path = dest_dir.join(name).with_extension("exe");
-    let script_file = match File::create_new(&script_path) {
-        Ok(script_file) => script_file,
-        Err(err) => {
-            // TODO: Track provenance.
-            if collisions_ok {
-                warn!(
-                    "Collision for {script_path}",
-                    script_path = script_path.display()
-                );
-            } else {
-                bail!(
-                    "Collision for {script_path}: {err}",
-                    script_path = script_path.display()
-                )
-            }
+    let script_contents = create_script_contents(shebang_interpreter, shebang_arg, entry_point)?;
+    let mut script_file = match File::create_new(&script_path) {
+        Ok(script_file) => {
+            provenance.record(entry_point, script_path);
+            script_file
+        }
+        Err(err) if err.kind() == ErrorKind::AlreadyExists => {
+            provenance.record_collision(entry_point, script_path);
             return Ok(());
         }
+        Err(err) => bail!("{err}"),
     };
-    let script_contents = create_script_contents(shebang_interpreter, shebang_arg, entry_point)?;
     python_proxy::create(
         python_proxy::ProxySource::Pex(pex),
         shebang_interpreter,
@@ -310,7 +306,7 @@ if __name__ == "__main__":
 fn populate_wheel_dir(
     wheel: &Path,
     site_packages_path: &Path,
-    collisions_ok: bool,
+    provenance: Arc<Provenance>,
 ) -> anyhow::Result<()> {
     let wheel_contents = walkdir::WalkDir::new(wheel)
         .min_depth(1)
@@ -321,36 +317,31 @@ fn populate_wheel_dir(
             "Walked unpacked wheel paths should be child paths of the unpacked wheel root dir.",
         ));
         if entry.path().is_dir() {
-            fs::create_dir_all(&dst_path)
+            fs::create_dir_all(&dst_path)?;
         } else {
             if let Some(parent_dir) = dst_path.parent() {
                 fs::create_dir_all(parent_dir)?;
             }
             match File::create_new(&dst_path) {
                 Ok(mut dst_file) => {
+                    provenance.record(entry.path().display(), dst_path);
                     let mut src = File::open(entry.path())?;
                     io::copy(&mut src, &mut dst_file)?;
-                    Ok(())
                 }
-                Err(err) => {
-                    // TODO: Track provenance.
-                    if collisions_ok {
-                        warn!("Collision for {dst_path}", dst_path = dst_path.display());
-                        Ok(())
-                    } else {
-                        Err(io::Error::new(
-                            err.kind(),
-                            format!(
-                                "Collision for {dst_path}: {err}",
-                                dst_path = dst_path.display()
-                            ),
-                        ))
-                    }
+                Err(err) if err.kind() == ErrorKind::AlreadyExists => {
+                    let (size, fingerprint) = fingerprint_file(entry.path(), default_digest())?;
+                    provenance.record_collision(
+                        entry.path().display(),
+                        fingerprint,
+                        size,
+                        dst_path,
+                    );
                 }
+                Err(err) => bail!("{err}"),
             }
         }
-    })?;
-    Ok(())
+        Ok(())
+    })
 }
 
 fn populate_from_packed_pex<'a>(
@@ -358,15 +349,15 @@ fn populate_from_packed_pex<'a>(
     packed_pex: &'a Pex<'a>,
     resolved_wheels: &IndexMap<&'a str, ResolvedWheel<'a>>,
     populate_pex_info: bool,
-    collisions_ok: bool,
     scope: InstallScope,
+    provenance: Arc<Provenance>,
 ) -> anyhow::Result<()> {
     let site_packages_path = venv.site_packages_path();
     if matches!(scope, InstallScope::All | InstallScope::Deps) {
         collect_wheels_from_directory_pex(packed_pex, resolved_wheels)?
             .into_par_iter()
             .try_for_each(|wheel_zip| {
-                populate_whl_zip(&wheel_zip, &site_packages_path, collisions_ok)
+                populate_whl_zip(&wheel_zip, &site_packages_path, provenance.clone())
             })?;
     }
     if matches!(scope, InstallScope::All | InstallScope::Srcs) {
@@ -375,6 +366,7 @@ fn populate_from_packed_pex<'a>(
             venv,
             &site_packages_path,
             populate_pex_info,
+            provenance,
         )?;
     }
     Ok(())
@@ -383,14 +375,20 @@ fn populate_from_packed_pex<'a>(
 fn populate_whl_zip(
     wheel: &Path,
     site_packages_path: &Path,
-    collisions_ok: bool,
+    provenance: Arc<Provenance>,
 ) -> anyhow::Result<()> {
     let whl_zip = ZipArchive::new(File::open(wheel)?.into_file())?;
     let metadata = whl_zip.metadata();
     (0..whl_zip.len()).into_par_iter().try_for_each(|index| {
         let zip_fp = File::open(wheel)?;
         let mut zip = unsafe { ZipArchive::unsafe_new_with_metadata(zip_fp, metadata.clone()) };
-        extract_idx(site_packages_path, index, &mut zip, collisions_ok)
+        extract_idx(
+            site_packages_path,
+            index,
+            &mut zip,
+            wheel.display(),
+            provenance.clone(),
+        )
     })
 }
 
@@ -399,6 +397,7 @@ fn populate_user_code_from_directory_pex<'a>(
     venv: &Virtualenv,
     site_packages_path: &Path,
     populate_pex_info: bool,
+    provenance: Arc<Provenance>,
 ) -> anyhow::Result<()> {
     let excludes: HashSet<PathBuf> = [
         ".deps",
@@ -423,13 +422,29 @@ fn populate_user_code_from_directory_pex<'a>(
                 "Walked directory PEX paths should be child paths of the directory PEX root dir.",
             ));
         if entry.file_type().is_dir() {
-            fs::create_dir_all(dst_path)
+            fs::create_dir_all(dst_path)?;
         } else {
             if let Some(parent) = dst_path.parent() {
                 fs::create_dir_all(parent)?;
             }
-            fs::copy(entry.path(), dst_path).map(|_| ())
+            match File::create_new(&dst_path) {
+                Ok(mut dst) => {
+                    provenance.record(entry.path().display(), dst_path);
+                    io::copy(&mut File::open(entry.path())?, &mut dst)?;
+                }
+                Err(err) if err.kind() == ErrorKind::AlreadyExists => {
+                    let (size, fingerprint) = fingerprint_file(entry.path(), default_digest())?;
+                    provenance.record_collision(
+                        entry.path().display(),
+                        fingerprint,
+                        size,
+                        dst_path,
+                    );
+                }
+                Err(err) => bail!("{err}"),
+            }
         }
+        Ok(())
     })?;
     if populate_pex_info {
         fs::copy(
@@ -445,8 +460,8 @@ fn populate_from_zip_app_with_whl_deps<'a>(
     zip_app_pex: &'a Pex<'a>,
     resolved_wheels: &IndexMap<&'a str, ResolvedWheel<'a>>,
     populate_pex_info: bool,
-    collisions_ok: bool,
     scope: InstallScope,
+    provenance: Arc<Provenance>,
 ) -> anyhow::Result<()> {
     let pex_zip = ZipArchive::new(File::open(zip_app_pex.path)?)?;
     let metadata = pex_zip.metadata();
@@ -467,11 +482,18 @@ fn populate_from_zip_app_with_whl_deps<'a>(
                     let zip_fp = File::open(zip_app_pex.path)?;
                     let mut zip =
                         unsafe { ZipArchive::unsafe_new_with_metadata(zip_fp, metadata.clone()) };
-                    let whl_file = zip.by_name_seek(&[".deps", wheel_file_name].join("/"))?;
+                    let whl_name = [".deps", wheel_file_name].join("/");
+                    let whl_file = zip.by_name_seek(&whl_name)?;
                     let mut whl_zip = unsafe {
                         ZipArchive::unsafe_new_with_metadata(whl_file, whl_zip_metadata.clone())
                     };
-                    extract_idx(&site_packages_path, index, &mut whl_zip, collisions_ok)
+                    extract_idx(
+                        &site_packages_path,
+                        index,
+                        &mut whl_zip,
+                        format!("{zip}/{whl_name}", zip = zip_app_pex.path.display()),
+                        provenance.clone(),
+                    )
                 })
             })?;
     }
@@ -497,13 +519,19 @@ fn populate_from_zip_app_with_whl_deps<'a>(
                 let zip_fp = File::open(zip_app_pex.path)?;
                 let mut zip =
                     unsafe { ZipArchive::unsafe_new_with_metadata(zip_fp, metadata.clone()) };
-                extract_idx(&site_packages_path, index, &mut zip, collisions_ok)?;
+                extract_idx(
+                    &site_packages_path,
+                    index,
+                    &mut zip,
+                    zip_app_pex.path.display(),
+                    provenance.clone(),
+                )?;
                 Ok(())
             })?;
         if populate_pex_info {
             let mut pex_zip = ZipArchive::new(File::open(zip_app_pex.path)?)?;
             let mut pex_info_src_fp = pex_zip.by_name("PEX-INFO")?;
-            let mut pex_info_dst_fp = File::create(venv.prefix().join("PEX-INFO"))?;
+            let mut pex_info_dst_fp = File::create_new(venv.prefix().join("PEX-INFO"))?;
             io::copy(&mut pex_info_src_fp, &mut pex_info_dst_fp)?;
         }
     }
@@ -535,8 +563,8 @@ fn populate_from_zip_app<'a>(
     zip_app_pex: &'a Pex<'a>,
     resolved_wheels: &IndexMap<&'a str, ResolvedWheel<'a>>,
     populate_pex_info: bool,
-    collisions_ok: bool,
     scope: InstallScope,
+    provenance: Arc<Provenance>,
 ) -> anyhow::Result<()> {
     let mut pex_zip = ZipArchive::new(File::open(zip_app_pex.path)?)?;
     let metadata = pex_zip.metadata();
@@ -563,12 +591,18 @@ fn populate_from_zip_app<'a>(
         .try_for_each(|index| -> anyhow::Result<()> {
             let zip_fp = File::open(zip_app_pex.path)?;
             let mut zip = unsafe { ZipArchive::unsafe_new_with_metadata(zip_fp, metadata.clone()) };
-            extract_idx(&site_packages_path, index, &mut zip, collisions_ok)?;
+            extract_idx(
+                &site_packages_path,
+                index,
+                &mut zip,
+                zip_app_pex.path.display(),
+                provenance.clone(),
+            )?;
             Ok(())
         })?;
     if populate_pex_info && matches!(scope, InstallScope::All | InstallScope::Srcs) {
         let mut pex_info_src_fp = pex_zip.by_name("PEX-INFO")?;
-        let mut pex_info_dst_fp = File::create(venv.prefix().join("PEX-INFO"))?;
+        let mut pex_info_dst_fp = File::create_new(venv.prefix().join("PEX-INFO"))?;
         io::copy(&mut pex_info_src_fp, &mut pex_info_dst_fp)?;
     }
     Ok(())
@@ -583,8 +617,8 @@ pub fn populate_user_code_and_wheels<'a>(
     pex: &'a Pex<'a>,
     resolved_wheels: IndexMap<&'a str, ResolvedWheel<'a>>,
     populate_pex_info: bool,
-    collisions_ok: bool,
     scope: InstallScope,
+    provenance: Arc<Provenance>,
 ) -> anyhow::Result<()> {
     match pex.layout {
         Layout::Loose => populate_from_loose_pex(
@@ -592,16 +626,16 @@ pub fn populate_user_code_and_wheels<'a>(
             pex,
             &resolved_wheels,
             populate_pex_info,
-            collisions_ok,
             scope,
+            provenance.clone(),
         )?,
         Layout::Packed => populate_from_packed_pex(
             venv,
             pex,
             &resolved_wheels,
             populate_pex_info,
-            collisions_ok,
             scope,
+            provenance.clone(),
         )?,
         Layout::ZipApp => {
             if pex.info.deps_are_wheel_files {
@@ -610,8 +644,8 @@ pub fn populate_user_code_and_wheels<'a>(
                     pex,
                     &resolved_wheels,
                     populate_pex_info,
-                    collisions_ok,
                     scope,
+                    provenance.clone(),
                 )?
             } else {
                 populate_from_zip_app(
@@ -619,8 +653,8 @@ pub fn populate_user_code_and_wheels<'a>(
                     pex,
                     &resolved_wheels,
                     populate_pex_info,
-                    collisions_ok,
                     scope,
+                    provenance.clone(),
                 )?
             }
         }
@@ -637,7 +671,7 @@ pub fn populate_user_code_and_wheels<'a>(
                     venv,
                     shebang_interpreter,
                     shebang_arg,
-                    collisions_ok,
+                    provenance.clone(),
                 )
             })?;
     }
@@ -654,8 +688,8 @@ pub fn populate<'a>(
     resolved_wheels: IndexMap<&'a str, ResolvedWheel<'a>>,
     scripts: &mut Scripts,
     bin_path_override: Option<BinPath>,
-    collisions_ok: bool,
     scope: InstallScope,
+    provenance: Arc<Provenance>,
 ) -> anyhow::Result<()> {
     let selected_wheels = resolved_wheels.keys().copied().collect::<Vec<_>>();
     populate_user_code_and_wheels(
@@ -665,8 +699,8 @@ pub fn populate<'a>(
         pex,
         resolved_wheels,
         true,
-        collisions_ok,
         scope,
+        provenance,
     )?;
     if matches!(scope, InstallScope::All | InstallScope::Srcs) {
         write_main(
@@ -694,7 +728,8 @@ fn extract_idx<R>(
     dst_dir: impl AsRef<Path>,
     index: usize,
     zip: &mut ZipArchive<R>,
-    collisions_ok: bool,
+    source: impl Display,
+    provenance: Arc<Provenance>,
 ) -> anyhow::Result<()>
 where
     R: Read + Seek,
@@ -718,19 +753,21 @@ where
         }
         match File::create_new(&dst_path) {
             Ok(mut dst_file) => {
+                provenance.record(format!("{source}/{name}", name = zip_file.name()), dst_path);
                 io::copy(&mut zip_file, &mut dst_file)?;
             }
-            Err(err) => {
-                // TODO: Track provenance.
-                if collisions_ok {
-                    warn!("Collision for {dst_path}", dst_path = dst_path.display());
-                } else {
-                    bail!(
-                        "Collision for {dst_path}: {err}",
-                        dst_path = dst_path.display()
-                    )
-                }
+            Err(err) if err.kind() == ErrorKind::AlreadyExists => {
+                let size = usize::try_from(zip_file.size())?;
+                let name = zip_file.name().to_string();
+                let fingerprint = Fingerprint::try_from(BufReader::new(zip_file))?;
+                provenance.record_collision(
+                    format!("{source}/{name}"),
+                    fingerprint,
+                    size,
+                    dst_path,
+                );
             }
+            Err(err) => bail!("{err}"),
         }
     }
     Ok(())

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::fmt::{Display, Formatter};
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 use std::time::SystemTime;
 
@@ -14,6 +14,11 @@ use fs_err::File;
 use logging_timer::time;
 use sha2::Sha256;
 
+pub fn default_digest() -> impl Digest {
+    Sha256::new()
+}
+
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct Fingerprint(Vec<u8>);
 
 impl Fingerprint {
@@ -35,6 +40,16 @@ impl Fingerprint {
 impl Display for Fingerprint {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         Base64Display::new(&self.0, &URL_SAFE_NO_PAD).fmt(f)
+    }
+}
+
+impl<R: Read> TryFrom<BufReader<R>> for Fingerprint {
+    type Error = anyhow::Error;
+
+    fn try_from(value: BufReader<R>) -> anyhow::Result<Self> {
+        let mut digest = default_digest();
+        digest_reader(value, &mut digest)?;
+        Ok(Self::new(digest))
     }
 }
 
@@ -79,7 +94,7 @@ impl HashOptions {
 
 #[time("debug", "fingerprint.{}")]
 pub fn hash_file(path: &Path, options: &HashOptions) -> anyhow::Result<Fingerprint> {
-    let mut digest = Sha256::new();
+    let mut digest = default_digest();
     digest_file(path, options, &mut digest)?;
     Ok(Fingerprint::new(digest))
 }
@@ -132,8 +147,14 @@ fn digest_path<D>(path: &Path, digest: &mut D) -> anyhow::Result<usize>
 where
     D: Digest,
 {
+    digest_reader(BufReader::new(File::open(path)?), digest)
+}
+
+fn digest_reader<D>(mut reader: BufReader<impl Read>, digest: &mut D) -> anyhow::Result<usize>
+where
+    D: Digest,
+{
     let mut size: usize = 0;
-    let mut reader = BufReader::new(File::open(path)?);
     loop {
         let amount_read = {
             let buf = reader.fill_buf()?;

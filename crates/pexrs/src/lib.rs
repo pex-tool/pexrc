@@ -7,6 +7,7 @@ use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 use std::{env, mem};
 
 use anyhow::{anyhow, bail};
@@ -19,7 +20,7 @@ use logging_timer::time;
 use pex::{InheritPath, Pex, PexPath};
 use python_proxy::ProxySource;
 use regex::bytes::Regex;
-use venv::{InstallScope, Linker, Virtualenv, populate, populate_user_code_and_wheels};
+use venv::{InstallScope, Linker, Provenance, Virtualenv, populate, populate_user_code_and_wheels};
 
 struct PythonProxyLinker<'a>(&'a Pex<'a>);
 
@@ -191,7 +192,10 @@ fn prepare_venv<'a>(
         } else {
             None
         };
-
+        let provenance = Arc::new(Provenance::new(format!(
+            "populating venv for {pex}",
+            pex = pex.path.display()
+        )));
         populate(
             &venv,
             &shebang_interpreter,
@@ -200,8 +204,8 @@ fn prepare_venv<'a>(
             resolve.wheels,
             &mut resolve.scripts,
             None,
-            true,
             InstallScope::All,
+            provenance.clone(),
         )?;
         for (additional_pex, resolved_wheels) in resolve.additional_wheels {
             populate_user_code_and_wheels(
@@ -211,9 +215,15 @@ fn prepare_venv<'a>(
                 additional_pex,
                 resolved_wheels,
                 false,
-                true,
                 InstallScope::All,
+                provenance.clone(),
             )?;
+        }
+        if let Some(collision_report) = Arc::try_unwrap(provenance)
+            .expect("Provenance use is complete")
+            .into_collision_report()?
+        {
+            warn!("{collision_report}");
         }
         Ok(venv.interpreter)
     })? {
