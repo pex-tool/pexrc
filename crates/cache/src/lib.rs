@@ -14,7 +14,7 @@ use std::sync::LazyLock;
 
 use anyhow::anyhow;
 pub use atomic::{atomic_dir, atomic_file};
-pub use fingerprint::{Fingerprint, HashOptions, fingerprint_file, hash_file};
+pub use fingerprint::{Fingerprint, HashOptions, default_digest, fingerprint_file, hash_file};
 pub use key::Key;
 use logging_timer::time;
 

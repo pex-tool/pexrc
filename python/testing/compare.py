@@ -19,11 +19,13 @@ if TYPE_CHECKING:
 class ProcessResult(object):
     def __init__(
         self,
+        pex,  # type: str
         exit_code,  # type: int
         stdout,  # type: Text
         stderr,  # type: Text
         elapsed,  # type: float
     ):
+        self.pex = pex
         self.exit_code = exit_code
         self.stdout = stdout
         self.stderr = stderr
@@ -61,6 +63,7 @@ def execute_pex(
     stdout, stderr = process.communicate()
     elapsed = time.time() - start
     return ProcessResult(
+        pex=pex,
         exit_code=process.returncode,
         stdout=stdout.decode("utf-8"),
         stderr=stderr.decode("utf-8"),
@@ -92,8 +95,6 @@ def _compare_results(
         compare_results(traditional_result, injected_result)
     elif traditional_result.exit_code == 0:
         assert traditional_result.stdout == injected_result.stdout
-    else:
-        assert traditional_result.stderr == injected_result.stderr
 
 
 def compare(

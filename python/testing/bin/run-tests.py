@@ -24,8 +24,10 @@ if TYPE_CHECKING:
 def ensure_pexrc():
     # type: () -> str
 
-    profile = os.environ.get("PEXRC_PROFILE", "dev")
-    subprocess.check_call(args=["cargo", "build", "--profile", profile])
+    profile = os.environ.pop("PEXRC_PROFILE", "dev")
+    env = os.environ.copy()
+    env.update(PEXRC_CLIB_FEATURES="tools")
+    subprocess.check_call(args=["cargo", "build", "--profile", profile], env=env)
     profile_dir = "debug" if profile == "dev" else profile
     return os.path.abspath(
         os.path.join("target", profile_dir, "pexrc" + sysconfig.get_config_vars()["EXE"])

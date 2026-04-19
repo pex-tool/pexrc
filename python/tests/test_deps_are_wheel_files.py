@@ -72,6 +72,7 @@ def test_no_pre_install_wheels(
         traditional_result,  # type: ProcessResult
         injected_result,  # type: ProcessResult
     ):
+        # type: (...) -> None
         if is_windows_non_loose_pex:
             return
         assert traditional_result.stdout == injected_result.stdout

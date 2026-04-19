@@ -6,6 +6,7 @@ use std::ffi::OsStr;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 
 use anyhow::{anyhow, bail};
 use cache::CacheDir;
@@ -17,7 +18,7 @@ use log::warn;
 use pex::{Layout, Pex, PexPath};
 use shell_quote::Quote;
 use venv::virtualenv::FileSystemLinker;
-use venv::{Virtualenv, venv_pex};
+use venv::{Provenance, Virtualenv, venv_pex};
 
 #[derive(Clone)]
 struct BinPath(pex::BinPath);
@@ -306,6 +307,10 @@ pub(crate) fn create(python: &Path, pex: Pex, args: VenvArgs) -> anyhow::Result<
     };
 
     let scope = args.scope.into_inner();
+    let provenance = Arc::new(Provenance::new(format!(
+        "populating venv at {venv_dir} for {pex}",
+        pex = pex.path.display()
+    )));
     venv_pex::populate(
         &venv,
         &venv.interpreter.path,
@@ -314,8 +319,8 @@ pub(crate) fn create(python: &Path, pex: Pex, args: VenvArgs) -> anyhow::Result<
         resolve.wheels,
         &mut scripts,
         args.bin_path.map(BinPath::into_inner),
-        args.collisions_ok,
         scope,
+        provenance.clone(),
     )?;
     for (pex, wheels) in resolve.additional_wheels {
         venv_pex::populate_user_code_and_wheels(
@@ -325,9 +330,19 @@ pub(crate) fn create(python: &Path, pex: Pex, args: VenvArgs) -> anyhow::Result<
             pex,
             wheels,
             false,
-            args.collisions_ok,
             scope,
+            provenance.clone(),
         )?;
+    }
+    if let Some(collision_report) = Arc::try_unwrap(provenance)
+        .expect("Provenance use is complete")
+        .into_collision_report()?
+    {
+        if args.collisions_ok {
+            warn!("{collision_report}");
+        } else {
+            bail!("{collision_report}");
+        }
     }
 
     if args.compile {
