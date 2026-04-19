@@ -218,7 +218,7 @@ fn create_script(
 
     let script_path = dest_dir.join(name).with_extension("exe");
     let script_contents = create_script_contents(shebang_interpreter, shebang_arg, entry_point)?;
-    let mut script_file = match File::create_new(&script_path) {
+    let script_file = match File::create_new(&script_path) {
         Ok(script_file) => {
             provenance.record(entry_point, script_path);
             script_file
