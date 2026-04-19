@@ -224,7 +224,13 @@ fn create_script(
             script_file
         }
         Err(err) if err.kind() == ErrorKind::AlreadyExists => {
-            provenance.record_collision(entry_point, script_path);
+            let fingerprint = Fingerprint::try_from(BufReader::new(script_contents.as_bytes()))?;
+            provenance.record_collision(
+                entry_point,
+                fingerprint,
+                script_contents.len(),
+                script_path,
+            );
             return Ok(());
         }
         Err(err) => bail!("{err}"),
