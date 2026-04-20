@@ -8,6 +8,7 @@
 mod commands;
 mod json;
 mod output;
+mod resolve;
 
 use std::path::{Path, PathBuf};
 
@@ -16,8 +17,9 @@ use logging_timer::time;
 use pex::Pex;
 
 use crate::commands::graph::GraphArgs;
+use crate::commands::repository::Repository;
 use crate::commands::venv::VenvArgs;
-use crate::commands::{extract, graph, info, venv};
+use crate::commands::{extract, graph, info, interpreter, repository, venv};
 
 /// Pex Tools.
 #[derive(Parser)]
@@ -78,7 +80,8 @@ Thrice: include the interpreter's environment markers and its venv affiliation, 
     /// Generates a dot graph of the dependencies contained in a PEX.
     Graph(GraphArgs),
     /// Interact with the Python distribution repository contained in a PEX.
-    Repository,
+    #[command(subcommand)]
+    Repository(Repository),
     /// Creates a venv from the PEX.
     Venv(VenvArgs),
 }
@@ -90,7 +93,7 @@ impl AsRef<str> for Commands {
             Commands::Graph { .. } => "graph",
             Commands::Info { .. } => "info",
             Commands::Interpreter { .. } => "interpreter",
-            Commands::Repository => "repository",
+            Commands::Repository { .. } => "repository",
             Commands::Venv { .. } => "venv",
         }
     }
@@ -122,7 +125,7 @@ pub fn main(python: &Path, pex: &Path, argv: Vec<String>) -> anyhow::Result<()> 
             verbose,
             indent,
             output,
-        } => commands::interpreter::display(
+        } => interpreter::display(
             python,
             Pex::load(pex)?,
             all,
@@ -130,11 +133,14 @@ pub fn main(python: &Path, pex: &Path, argv: Vec<String>) -> anyhow::Result<()> 
             indent,
             output.as_deref(),
         ),
+        Commands::Repository(repository) => match repository {
+            Repository::Info {
+                verbose,
+                indent,
+                output,
+            } => repository::info(python, Pex::load(pex)?, verbose, indent, output.as_deref()),
+            Repository::Extract => repository::extract(),
+        },
         Commands::Venv(venv_args) => venv::create(python, Pex::load(pex)?, venv_args),
-        command => todo!(
-            "`PEX_TOOLS=1 {pex} {command}` is under development.",
-            pex = pex.display(),
-            command = command.as_ref()
-        ),
     }
 }
