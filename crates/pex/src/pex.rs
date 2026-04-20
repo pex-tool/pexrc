@@ -11,7 +11,7 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, bail};
-use dashmap::{DashMap, ReadOnlyView};
+use dashmap::DashMap;
 use fs_err as fs;
 use fs_err::File;
 use indexmap::IndexMap;
@@ -110,41 +110,29 @@ impl<'a> ResolvedWheel<'a> {
     }
 }
 
-pub struct MetadataLookups<'a>(ReadOnlyView<&'a str, WheelMetadata<'a>>);
-
-impl<'a> MetadataLookups<'a> {
-    pub fn for_whl(&self, whl: &ResolvedWheel) -> Option<&WheelMetadata<'a>> {
-        self.0.get(whl.file_name)
-    }
-}
-
 #[derive(Clone)]
-pub struct CollectExtraMetadata<'a> {
-    metadata: Arc<DashMap<&'a str, WheelMetadata<'a>>>,
-}
+pub struct CollectWheelMetadata<'a>(Arc<DashMap<&'a str, WheelMetadata<'a>>>);
 
-impl<'a> Default for CollectExtraMetadata<'a> {
+impl<'a> Default for CollectWheelMetadata<'a> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<'a> CollectExtraMetadata<'a> {
+impl<'a> CollectWheelMetadata<'a> {
     pub fn new() -> Self {
-        Self {
-            metadata: Arc::new(DashMap::new()),
-        }
+        Self(Arc::new(DashMap::new()))
     }
 
-    pub fn into_lookups(self) -> anyhow::Result<MetadataLookups<'a>> {
-        let metadata = Arc::try_unwrap(self.metadata)
+    pub fn into_collected(self) -> anyhow::Result<Vec<WheelMetadata<'a>>> {
+        let metadata = Arc::try_unwrap(self.0)
             .ok()
-            .ok_or_else(|| anyhow!("ExtraMetadata is still being collected."))?;
-        Ok(MetadataLookups(metadata.into_read_only()))
+            .ok_or_else(|| anyhow!("Metadata is still being collected."))?;
+        Ok(metadata.into_iter().map(|(_, metadata)| metadata).collect())
     }
 
-    fn register(&self, file_name: &'a str, metadata: WheelMetadata<'a>) {
-        self.metadata.insert(file_name, metadata);
+    fn collect(&self, file_name: &'a str, metadata_func: impl FnOnce() -> WheelMetadata<'a>) {
+        self.0.entry(file_name).or_insert_with(metadata_func);
     }
 }
 
@@ -207,7 +195,7 @@ impl<'a> Pex<'a> {
     fn resolve_wheels(
         &'a self,
         interpreter: &Interpreter,
-        collect_extra_metadata: Option<CollectExtraMetadata<'a>>,
+        collect_extra_metadata: Option<CollectWheelMetadata<'a>>,
     ) -> anyhow::Result<IndexMap<&'a str, ResolvedWheel<'a>>> {
         let supported_tags: HashMap<Tag, usize> = interpreter
             .supported_tags
@@ -359,18 +347,15 @@ impl<'a> Pex<'a> {
                     idx
                 };
                 if let Some(extra_metadata) = collect_extra_metadata.as_ref() {
-                    extra_metadata.register(
+                    extra_metadata.collect(file_name, || WheelMetadata {
                         file_name,
-                        WheelMetadata {
-                            file_name,
-                            raw_project_name,
-                            project_name: requirement.name.clone(),
-                            raw_version,
-                            version,
-                            requires_dists: requires_dists.clone(),
-                            requires_python,
-                        },
-                    )
+                        raw_project_name,
+                        project_name: requirement.name.clone(),
+                        raw_version,
+                        version,
+                        requires_dists: requires_dists.clone(),
+                        requires_python,
+                    })
                 }
                 resolved_by_project_name.insert(
                     requirement.name,
@@ -397,7 +382,7 @@ impl<'a> Pex<'a> {
         identification_script: &IdentifyInterpreter,
         interpreter_constraints: &InterpreterConstraints,
         search_path: SearchPath,
-        collect_extra_metadata: Option<CollectExtraMetadata<'a>>,
+        collect_extra_metadata: Option<CollectWheelMetadata<'a>>,
     ) -> anyhow::Result<impl ParallelIterator<Item = Result<ResolvedWheels<'a>, ResolveError>>>
     {
         let interpreters_to_try = interpreter_constraints
@@ -442,7 +427,7 @@ impl<'a> Pex<'a> {
         python_exe: Option<&Path>,
         additional_pexes: impl Iterator<Item = &'a Pex<'a>>,
         search_path: SearchPath,
-        collect_extra_metadata: Option<CollectExtraMetadata<'a>>,
+        collect_extra_metadata: Option<CollectWheelMetadata<'a>>,
     ) -> anyhow::Result<Resolve<'a>> {
         let mut scripts = self.scripts()?;
         let identification_script = IdentifyInterpreter::read(&mut scripts)?;

@@ -9,9 +9,8 @@ mod pex_path;
 mod wheel;
 
 pub use pex::{
-    CollectExtraMetadata,
+    CollectWheelMetadata,
     Layout,
-    MetadataLookups,
     Pex,
     Resolve,
     ResolveError,

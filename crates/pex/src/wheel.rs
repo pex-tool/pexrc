@@ -131,7 +131,6 @@ impl<'a> Display for WheelFile<'a> {
     }
 }
 
-#[derive(Clone, Debug)]
 pub struct WheelMetadata<'a> {
     pub file_name: &'a str,
     pub raw_project_name: &'a str,
