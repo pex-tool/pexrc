@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::fmt::{Display, Formatter, Write};
+use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 
 use anyhow::{anyhow, bail};
@@ -131,7 +132,6 @@ impl<'a> Display for WheelFile<'a> {
     }
 }
 
-#[derive(Clone, Debug)]
 pub struct WheelMetadata<'a> {
     pub file_name: &'a str,
     pub raw_project_name: &'a str,
@@ -142,6 +142,19 @@ pub struct WheelMetadata<'a> {
     pub requires_python: Option<VersionSpecifiers>,
 }
 
+impl<'a> PartialEq<Self> for WheelMetadata<'a> {
+    fn eq(&self, other: &Self) -> bool {
+        self.file_name == other.file_name
+    }
+}
+
+impl<'a> Hash for WheelMetadata<'a> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.file_name.hash(state)
+    }
+}
+
+impl<'a> Eq for WheelMetadata<'a> {}
 pub trait MetadataReader<'a> {
     fn read(
         &mut self,

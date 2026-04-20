@@ -7,7 +7,7 @@ use indexmap::IndexMap;
 use interpreter::{Interpreter, SearchPath};
 use pep440_rs::{Version, VersionSpecifiers};
 use pep508_rs::{PackageName, Requirement};
-use pex::{CollectExtraMetadata, Pex};
+use pex::{CollectWheelMetadata, Pex};
 use url::Url;
 
 pub(crate) struct WheeInfo<'a> {
@@ -25,36 +25,31 @@ pub(crate) fn resolve<'a>(
     additional_pexes: &'a [Pex<'a>],
 ) -> anyhow::Result<(Interpreter, IndexMap<PackageName, WheeInfo<'a>>)> {
     let search_path = SearchPath::from_env()?;
-    let extra_metadata = CollectExtraMetadata::new();
+    let collect_metadata = CollectWheelMetadata::new();
     let resolve = pex.resolve(
         Some(python),
         additional_pexes.iter(),
         search_path,
-        Some(extra_metadata.clone()),
+        Some(collect_metadata.clone()),
     )?;
-    let metadata_lookups = extra_metadata.into_lookups()?;
 
-    let mut wheels: IndexMap<PackageName, WheeInfo<'a>> = IndexMap::new();
-    for wheel in resolve.wheels.values().chain(
-        resolve
-            .additional_wheels
-            .iter()
-            .flat_map(|(_, additional_wheels)| additional_wheels.values()),
-    ) {
-        let wheel_metadata = metadata_lookups
-            .for_whl(wheel)
-            .expect("Each resolved wheel should be paired with metadata");
-        wheels.insert(
-            wheel_metadata.project_name.clone(),
-            WheeInfo {
-                file_name: wheel_metadata.file_name,
-                raw_project_name: wheel_metadata.raw_project_name,
-                raw_version: wheel_metadata.raw_version,
-                version: wheel_metadata.version.clone(),
-                requires_dists: wheel_metadata.requires_dists.clone(),
-                requires_python: wheel_metadata.requires_python.clone(),
-            },
-        );
-    }
-    Ok((resolve.interpreter, wheels))
+    let mut resolved_metadata = collect_metadata.into_collected()?;
+    resolved_metadata.sort_by_key(|metadata| metadata.file_name);
+    let wheel_info = resolved_metadata
+        .into_iter()
+        .map(|metadata| {
+            (
+                metadata.project_name,
+                WheeInfo {
+                    file_name: metadata.file_name,
+                    raw_project_name: metadata.raw_project_name,
+                    raw_version: metadata.raw_version,
+                    version: metadata.version,
+                    requires_dists: metadata.requires_dists,
+                    requires_python: metadata.requires_python,
+                },
+            )
+        })
+        .collect();
+    Ok((resolve.interpreter, wheel_info))
 }
