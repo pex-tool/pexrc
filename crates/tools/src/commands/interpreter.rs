@@ -102,7 +102,7 @@ fn compatible_interpreters(
     let search_path = SearchPath::from_env()?;
     if all {
         let mut interpreters = indexset![
-            pex.resolve(Some(python), [].iter(), search_path.clone())?
+            pex.resolve(Some(python), [].iter(), search_path.clone(), None)?
                 .interpreter
         ];
         let mut scripts = pex.scripts()?;
@@ -113,6 +113,7 @@ fn compatible_interpreters(
             &identification_script,
             &interpreter_constraints,
             search_path,
+            None,
         )?;
         let filter = |result| match result {
             Ok(ResolvedWheels { interpreter, .. }) => Some(interpreter),
@@ -124,7 +125,7 @@ fn compatible_interpreters(
         Ok(interpreters)
     } else {
         Ok(indexset![
-            pex.resolve(Some(python), [].iter(), search_path)?
+            pex.resolve(Some(python), [].iter(), search_path, None)?
                 .interpreter
         ])
     }

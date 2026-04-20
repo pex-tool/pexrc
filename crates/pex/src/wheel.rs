@@ -131,14 +131,15 @@ impl<'a> Display for WheelFile<'a> {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct WheelMetadata<'a> {
-    pub(crate) file_name: &'a str,
-    pub(crate) raw_project_name: &'a str,
-    pub(crate) project_name: PackageName,
-    pub(crate) raw_version: &'a str,
-    pub(crate) version: Version,
-    pub(crate) requires_dists: Vec<Requirement<Url>>,
-    pub(crate) requires_python: Option<VersionSpecifiers>,
+    pub file_name: &'a str,
+    pub raw_project_name: &'a str,
+    pub project_name: PackageName,
+    pub raw_version: &'a str,
+    pub version: Version,
+    pub requires_dists: Vec<Requirement<Url>>,
+    pub requires_python: Option<VersionSpecifiers>,
 }
 
 pub trait MetadataReader<'a> {

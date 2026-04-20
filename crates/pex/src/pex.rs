@@ -11,6 +11,7 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, bail};
+use dashmap::{DashMap, ReadOnlyView};
 use fs_err as fs;
 use fs_err::File;
 use indexmap::IndexMap;
@@ -18,7 +19,7 @@ use interpreter::{Interpreter, InterpreterConstraints, SearchPath, Tag};
 use itertools::Itertools;
 use log::{Level, debug, warn};
 use logging_timer::{time, timer};
-use pep440_rs::Version;
+use pep440_rs::{Version, VersionSpecifiers};
 use pep508_rs::{ExtraName, PackageName, Requirement, VersionOrUrl};
 use rayon::prelude::*;
 use scripts::{IdentifyInterpreter, Scripts};
@@ -82,8 +83,8 @@ pub struct ResolveError {
 
 pub struct ResolvedWheel<'a> {
     file_name: &'a str,
-    project_name: &'a str,
-    version: &'a str,
+    pub project_name: &'a str,
+    pub version: &'a str,
 }
 
 impl<'a> ResolvedWheel<'a> {
@@ -106,6 +107,44 @@ impl<'a> ResolvedWheel<'a> {
             version = self.version
         )
         .into()
+    }
+}
+
+pub struct MetadataLookups<'a>(ReadOnlyView<&'a str, WheelMetadata<'a>>);
+
+impl<'a> MetadataLookups<'a> {
+    pub fn for_whl(&self, whl: &ResolvedWheel) -> Option<&WheelMetadata<'a>> {
+        self.0.get(whl.file_name)
+    }
+}
+
+#[derive(Clone)]
+pub struct CollectExtraMetadata<'a> {
+    metadata: Arc<DashMap<&'a str, WheelMetadata<'a>>>,
+}
+
+impl<'a> Default for CollectExtraMetadata<'a> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<'a> CollectExtraMetadata<'a> {
+    pub fn new() -> Self {
+        Self {
+            metadata: Arc::new(DashMap::new()),
+        }
+    }
+
+    pub fn into_lookups(self) -> anyhow::Result<MetadataLookups<'a>> {
+        let metadata = Arc::try_unwrap(self.metadata)
+            .ok()
+            .ok_or_else(|| anyhow!("ExtraMetadata is still being collected."))?;
+        Ok(MetadataLookups(metadata.into_read_only()))
+    }
+
+    fn register(&self, file_name: &'a str, metadata: WheelMetadata<'a>) {
+        self.metadata.insert(file_name, metadata);
     }
 }
 
@@ -168,6 +207,7 @@ impl<'a> Pex<'a> {
     fn resolve_wheels(
         &'a self,
         interpreter: &Interpreter,
+        collect_extra_metadata: Option<CollectExtraMetadata<'a>>,
     ) -> anyhow::Result<IndexMap<&'a str, ResolvedWheel<'a>>> {
         let supported_tags: HashMap<Tag, usize> = interpreter
             .supported_tags
@@ -204,6 +244,7 @@ impl<'a> Pex<'a> {
             raw_version: &'b str,
             version: Version,
             requires_dists: Vec<Requirement<Url>>,
+            requires_python: Option<VersionSpecifiers>,
             rank: usize,
         }
 
@@ -219,6 +260,7 @@ impl<'a> Pex<'a> {
                     raw_version: ranked_wheel.metadata.raw_version,
                     version: ranked_wheel.metadata.version,
                     requires_dists: ranked_wheel.metadata.requires_dists,
+                    requires_python: ranked_wheel.metadata.requires_python,
                     rank: ranked_wheel.rank,
                 })
         }
@@ -291,6 +333,7 @@ impl<'a> Pex<'a> {
                 raw_version,
                 version,
                 requires_dists,
+                requires_python,
                 ..
             } in wheels
             {
@@ -315,6 +358,20 @@ impl<'a> Pex<'a> {
                     indexed_extras.push(requirement.extras);
                     idx
                 };
+                if let Some(extra_metadata) = collect_extra_metadata.as_ref() {
+                    extra_metadata.register(
+                        file_name,
+                        WheelMetadata {
+                            file_name,
+                            raw_project_name,
+                            project_name: requirement.name.clone(),
+                            raw_version,
+                            version,
+                            requires_dists: requires_dists.clone(),
+                            requires_python,
+                        },
+                    )
+                }
                 resolved_by_project_name.insert(
                     requirement.name,
                     ResolvedWheel {
@@ -340,6 +397,7 @@ impl<'a> Pex<'a> {
         identification_script: &IdentifyInterpreter,
         interpreter_constraints: &InterpreterConstraints,
         search_path: SearchPath,
+        collect_extra_metadata: Option<CollectExtraMetadata<'a>>,
     ) -> anyhow::Result<impl ParallelIterator<Item = Result<ResolvedWheels<'a>, ResolveError>>>
     {
         let interpreters_to_try = interpreter_constraints
@@ -364,15 +422,17 @@ impl<'a> Pex<'a> {
                 },
             )
             .filter(|interpreter| interpreter_constraints.contains(interpreter))
-            .map(|interpreter| match self.resolve_wheels(&interpreter) {
-                Ok(selected_wheels) => Ok(ResolvedWheels {
-                    interpreter,
-                    wheels: selected_wheels,
-                }),
-                Err(err) => Err(ResolveError {
-                    python_exe: interpreter.path,
-                    err,
-                }),
+            .map(move |interpreter| {
+                match self.resolve_wheels(&interpreter, collect_extra_metadata.clone()) {
+                    Ok(selected_wheels) => Ok(ResolvedWheels {
+                        interpreter,
+                        wheels: selected_wheels,
+                    }),
+                    Err(err) => Err(ResolveError {
+                        python_exe: interpreter.path,
+                        err,
+                    }),
+                }
             }))
     }
 
@@ -382,6 +442,7 @@ impl<'a> Pex<'a> {
         python_exe: Option<&Path>,
         additional_pexes: impl Iterator<Item = &'a Pex<'a>>,
         search_path: SearchPath,
+        collect_extra_metadata: Option<CollectExtraMetadata<'a>>,
     ) -> anyhow::Result<Resolve<'a>> {
         let mut scripts = self.scripts()?;
         let identification_script = IdentifyInterpreter::read(&mut scripts)?;
@@ -394,10 +455,13 @@ impl<'a> Pex<'a> {
             && interpreter_constraints.contains(&interpreter)
             && search_path.contains(python_exe)
         {
-            match self.resolve_wheels(&interpreter) {
+            match self.resolve_wheels(&interpreter, collect_extra_metadata.clone()) {
                 Ok(wheels) => {
                     let additional_wheels = additional_pexes
-                        .map(|pex| pex.resolve_wheels(&interpreter).map(|wheels| (pex, wheels)))
+                        .map(|pex| {
+                            pex.resolve_wheels(&interpreter, collect_extra_metadata.clone())
+                                .map(|wheels| (pex, wheels))
+                        })
                         .collect::<anyhow::Result<Vec<_>>>()?;
                     return Ok(Resolve {
                         interpreter,
@@ -414,6 +478,7 @@ impl<'a> Pex<'a> {
             &identification_script,
             &interpreter_constraints,
             search_path,
+            collect_extra_metadata.clone(),
         )?;
         let errors: Arc<Mutex<Vec<(PathBuf, anyhow::Error)>>> = Arc::new(Mutex::new(errors));
         if let Some((interpreter, wheels)) =
@@ -437,7 +502,10 @@ impl<'a> Pex<'a> {
             })
         {
             let additional_wheels = additional_pexes
-                .map(|pex| pex.resolve_wheels(&interpreter).map(|wheels| (pex, wheels)))
+                .map(|pex| {
+                    pex.resolve_wheels(&interpreter, collect_extra_metadata.clone())
+                        .map(|wheels| (pex, wheels))
+                })
                 .collect::<anyhow::Result<Vec<_>>>()?;
             return Ok(Resolve {
                 interpreter,
@@ -750,7 +818,7 @@ mod tests {
         let pex = Pex::load(&requests_pex).unwrap();
         let interpreter =
             Interpreter::load(python_exe, &interpreter_identification_script).unwrap();
-        let wheels = pex.resolve_wheels(&interpreter).unwrap();
+        let wheels = pex.resolve_wheels(&interpreter, None).unwrap();
         assert_wheels(wheels, EXPECTED_REQUESTS_PEX_WHEELS);
     }
 
@@ -761,7 +829,7 @@ mod tests {
         let additional_pexes = pex_path.load_pexes().unwrap();
         let search_path = SearchPath::known(indexset![python_exe.to_path_buf()]);
         let resolve = pex
-            .resolve(Some(python_exe), additional_pexes.iter(), search_path)
+            .resolve(Some(python_exe), additional_pexes.iter(), search_path, None)
             .unwrap();
 
         assert_wheels(resolve.wheels, EXPECTED_REQUESTS_PEX_WHEELS);
