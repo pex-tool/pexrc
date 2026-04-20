@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use clap::Args;
 use indexmap::indexset;
 use interpreter::{
     Interpreter,
@@ -20,19 +21,36 @@ use serde_json::json;
 
 use crate::output::Output;
 
-pub(crate) fn display(
-    python: &Path,
-    pex: Pex,
+#[derive(Args)]
+pub(crate) struct InterpreterArgs {
+    /// Print all compatible interpreters, preferred first.
+    #[arg(short = 'a', long, default_value_t = false)]
     all: bool,
-    verbosity: u8,
+
+    /// Provide more information about the interpreter in JSON format.
+    #[arg(short = 'v', long, action = clap::ArgAction::Count, long_help = "\
+Provide more information about the interpreter in JSON format.
+Once: include the interpreter requirement and platform in addition to its path.
+Twice: include the interpreter's supported tags.
+Thrice: include the interpreter's environment markers and its venv affiliation, if any."
+    )]
+    verbose: u8,
+
+    /// Pretty-print verbose output JSON with the given indent.
+    #[arg(short = 'i', long)]
     indent: Option<u8>,
-    output: Option<&Path>,
-) -> anyhow::Result<()> {
-    let mut out = Output::new(output)?;
-    for interpreter in compatible_interpreters(python, &pex, all)? {
-        match verbosity {
+
+    /// A file to output the Python interpreter path to; STDOUT by default.
+    #[arg(short = 'o', long)]
+    output: Option<PathBuf>,
+}
+
+pub(crate) fn display(python: &Path, pex: Pex, args: InterpreterArgs) -> anyhow::Result<()> {
+    let mut out = Output::new(args.output.as_deref())?;
+    for interpreter in compatible_interpreters(python, &pex, args.all)? {
+        match args.verbose {
             0 => {
-                if let Some(indent) = indent {
+                if let Some(indent) = args.indent {
                     warn!("Ignoring --indent={indent} since --verbose mode is not enabled.")
                 }
                 writeln!(&mut out, "{path}", path = interpreter.path.display())?
@@ -44,7 +62,7 @@ pub(crate) fn display(
                     "requirement": InterpreterConstraint::exact_version(&interpreter).to_string(),
                     "platform": Platform::of(&interpreter)?.to_string()
                 }),
-                indent,
+                args.indent,
             )?,
             2 => crate::json::serialize(
                 &mut out,
@@ -54,7 +72,7 @@ pub(crate) fn display(
                     "platform": Platform::of(&interpreter)?.to_string(),
                     "supported_tags": interpreter.supported_tags
                 }),
-                indent,
+                args.indent,
             )?,
             _ => {
                 if interpreter.is_venv() {
@@ -72,7 +90,7 @@ pub(crate) fn display(
                             "venv": true,
                             "base_interpreter": base_interpreter.path
                         }),
-                        indent,
+                        args.indent,
                     )?
                 } else {
                     crate::json::serialize(
@@ -85,7 +103,7 @@ pub(crate) fn display(
                             "env_markers": interpreter.marker_env,
                             "venv": false
                         }),
-                        indent,
+                        args.indent,
                     )?
                 }
             }

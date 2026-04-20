@@ -4,7 +4,7 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use clap::Subcommand;
+use clap::Args;
 use pex::{Pex, PexPath};
 use serde_json::json;
 
@@ -12,40 +12,29 @@ use crate::json;
 use crate::output::Output;
 use crate::resolve::resolve;
 
-#[derive(Subcommand)]
-pub(crate) enum Repository {
-    /// Print information about the distributions in a PEX file.
-    Info {
-        /// Print the distributions requirements in addition to its name version and path.
-        #[arg(short = 'v', long, default_value_t = false)]
-        verbose: bool,
+#[derive(Args)]
+pub(crate) struct InfoArgs {
+    /// Print the distributions requirements in addition to its name version and path.
+    #[arg(short = 'v', long, default_value_t = false)]
+    verbose: bool,
 
-        /// Pretty-print verbose output json with the given indent.
-        #[arg(short = 'i', long)]
-        indent: Option<u8>,
+    /// Pretty-print verbose output json with the given indent.
+    #[arg(short = 'i', long)]
+    indent: Option<u8>,
 
-        /// A file to output the distribution information to; STDOUT by default.
-        #[arg(short = 'o', long)]
-        output: Option<PathBuf>,
-    },
-    /// Extract all distributions from a PEX file.
-    Extract,
+    /// A file to output the distribution information to; STDOUT by default.
+    #[arg(short = 'o', long)]
+    output: Option<PathBuf>,
 }
 
-pub(crate) fn info(
-    python: &Path,
-    pex: Pex,
-    verbose: bool,
-    indent: Option<u8>,
-    output: Option<&Path>,
-) -> anyhow::Result<()> {
+pub(crate) fn display(python: &Path, pex: Pex, args: InfoArgs) -> anyhow::Result<()> {
     let pex_path = PexPath::from_pex_info(&pex.info, true);
     let additional_pexes = pex_path.load_pexes()?;
     let (_, wheels) = resolve(python, &pex, &additional_pexes)?;
 
-    let mut output = Output::new(output)?;
+    let mut output = Output::new(args.output.as_deref())?;
     for (project_name, wheel_info) in wheels {
-        if verbose {
+        if args.verbose {
             json::serialize(
                 &mut output,
                 &json!({
@@ -55,7 +44,7 @@ pub(crate) fn info(
                     "requires_dists": wheel_info.requires_dists,
                     "location": pex.path.join(wheel_info.file_name)
                 }),
-                indent,
+                args.indent,
             )?;
         } else {
             writeln!(
@@ -68,8 +57,4 @@ pub(crate) fn info(
     }
 
     Ok(())
-}
-
-pub(crate) fn extract() -> anyhow::Result<()> {
-    todo!("`PEX_TOOLS=1 repository extract` is under development.")
 }

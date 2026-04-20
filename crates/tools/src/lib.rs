@@ -17,9 +17,11 @@ use logging_timer::time;
 use pex::Pex;
 
 use crate::commands::graph::GraphArgs;
+use crate::commands::info::InfoArgs;
+use crate::commands::interpreter::InterpreterArgs;
 use crate::commands::repository::Repository;
 use crate::commands::venv::VenvArgs;
-use crate::commands::{extract, graph, info, interpreter, repository, venv};
+use crate::commands::{extract, graph, info, interpreter, venv};
 
 /// Pex Tools.
 #[derive(Parser)]
@@ -44,39 +46,9 @@ enum Commands {
         dest_dir: PathBuf,
     },
     /// Dumps the PEX-INFO JSON contained in a PEX.
-    Info {
-        /// Pretty-print PEX-INFO JSON with the given indent.
-        #[arg(short = 'i', long)]
-        indent: Option<u8>,
-
-        /// A file to output the PEX-INFO JSON to; STDOUT by default.
-        #[arg(short = 'o', long)]
-        output: Option<PathBuf>,
-    },
+    Info(InfoArgs),
     /// Prints the path of the preferred interpreter to run the given PEX with, if any.
-    Interpreter {
-        /// Print all compatible interpreters, preferred first.
-        #[arg(short = 'a', long, default_value_t = false)]
-        all: bool,
-
-        /// Provide more information about the interpreter in JSON format.
-        #[arg(short = 'v', long, action = clap::ArgAction::Count, long_help = "\
-Provide more information about the interpreter in JSON format.
-Once: include the interpreter requirement and platform in addition to its path.
-Twice: include the interpreter's supported tags.
-Thrice: include the interpreter's environment markers and its venv affiliation, if any.
-"
-        )]
-        verbose: u8,
-
-        /// Pretty-print verbose output JSON with the given indent.
-        #[arg(short = 'i', long)]
-        indent: Option<u8>,
-
-        /// A file to output the Python interpreter path to; STDOUT by default.
-        #[arg(short = 'o', long)]
-        output: Option<PathBuf>,
-    },
+    Interpreter(InterpreterArgs),
     /// Generates a dot graph of the dependencies contained in a PEX.
     Graph(GraphArgs),
     /// Interact with the Python distribution repository contained in a PEX.
@@ -84,19 +56,6 @@ Thrice: include the interpreter's environment markers and its venv affiliation, 
     Repository(Repository),
     /// Creates a venv from the PEX.
     Venv(VenvArgs),
-}
-
-impl AsRef<str> for Commands {
-    fn as_ref(&self) -> &str {
-        match self {
-            Commands::Extract { .. } => "extract",
-            Commands::Graph { .. } => "graph",
-            Commands::Info { .. } => "info",
-            Commands::Interpreter { .. } => "interpreter",
-            Commands::Repository { .. } => "repository",
-            Commands::Venv { .. } => "venv",
-        }
-    }
 }
 
 #[time("debug", "{}")]
@@ -116,31 +75,10 @@ pub fn main(python: &Path, pex: &Path, argv: Vec<String>) -> anyhow::Result<()> 
     let cli = parse_cli(pex, argv)?;
     match cli.command {
         Commands::Extract { dest_dir } => extract::unzip(pex, &dest_dir),
-        Commands::Graph(graph_args) => graph::create(python, Pex::load(pex)?, graph_args),
-        Commands::Info { indent, output } => {
-            info::display(Pex::load(pex)?, indent, output.as_deref())
-        }
-        Commands::Interpreter {
-            all,
-            verbose,
-            indent,
-            output,
-        } => interpreter::display(
-            python,
-            Pex::load(pex)?,
-            all,
-            verbose,
-            indent,
-            output.as_deref(),
-        ),
-        Commands::Repository(repository) => match repository {
-            Repository::Info {
-                verbose,
-                indent,
-                output,
-            } => repository::info(python, Pex::load(pex)?, verbose, indent, output.as_deref()),
-            Repository::Extract => repository::extract(),
-        },
-        Commands::Venv(venv_args) => venv::create(python, Pex::load(pex)?, venv_args),
+        Commands::Graph(args) => graph::create(python, Pex::load(pex)?, args),
+        Commands::Info(args) => info::display(Pex::load(pex)?, args),
+        Commands::Interpreter(args) => interpreter::display(python, Pex::load(pex)?, args),
+        Commands::Repository(repository) => repository.execute_command(python, Pex::load(pex)?),
+        Commands::Venv(args) => venv::create(python, Pex::load(pex)?, args),
     }
 }
