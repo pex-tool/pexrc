@@ -111,9 +111,7 @@ impl<'a> ResolvedWheel<'a> {
 }
 
 #[derive(Clone)]
-pub struct CollectWheelMetadata<'a> {
-    metadata: Arc<DashMap<&'a str, WheelMetadata<'a>>>,
-}
+pub struct CollectWheelMetadata<'a>(Arc<DashMap<&'a str, WheelMetadata<'a>>>);
 
 impl<'a> Default for CollectWheelMetadata<'a> {
     fn default() -> Self {
@@ -123,20 +121,18 @@ impl<'a> Default for CollectWheelMetadata<'a> {
 
 impl<'a> CollectWheelMetadata<'a> {
     pub fn new() -> Self {
-        Self {
-            metadata: Arc::new(DashMap::new()),
-        }
+        Self(Arc::new(DashMap::new()))
     }
 
     pub fn into_collected(self) -> anyhow::Result<Vec<WheelMetadata<'a>>> {
-        let metadata = Arc::try_unwrap(self.metadata)
+        let metadata = Arc::try_unwrap(self.0)
             .ok()
             .ok_or_else(|| anyhow!("Metadata is still being collected."))?;
         Ok(metadata.into_iter().map(|(_, metadata)| metadata).collect())
     }
 
     fn collect(&self, file_name: &'a str, metadata_func: impl FnOnce() -> WheelMetadata<'a>) {
-        self.metadata.entry(file_name).or_insert_with(metadata_func);
+        self.0.entry(file_name).or_insert_with(metadata_func);
     }
 }
 
