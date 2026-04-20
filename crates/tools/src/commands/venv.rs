@@ -107,8 +107,7 @@ The scope of code contained in the Pex that is installed in the venv.
 By default, all code is installed and this is generally what you want. However, in some situations
 it's beneficial to split the venv installation into deps and srcs steps. This is particularly useful
 when installing a PEX in a container image. See
-https://docs.pex-tool.org/recipes.html#pex-app-in-a-container for more information.
-"
+https://docs.pex-tool.org/recipes.html#pex-app-in-a-container for more information."
     )]
     scope: InstallScope,
 
