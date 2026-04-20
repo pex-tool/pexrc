@@ -24,13 +24,11 @@ use dot_structures::{
 use fs_err::File;
 use graphviz_rust::printer::{DotPrinter, PrinterContext};
 use graphviz_rust::{cmd, exec};
-use indexmap::IndexMap;
-use interpreter::{InterpreterConstraint, SearchPath};
-use pep508_rs::{PackageName, Requirement};
-use pex::{CollectExtraMetadata, Pex, PexPath};
-use url::Url;
+use interpreter::InterpreterConstraint;
+use pex::{Pex, PexPath};
 
 use crate::output::Output;
+use crate::resolve::resolve;
 
 #[derive(Clone)]
 struct Format(cmd::Format);
@@ -192,44 +190,10 @@ pub(crate) struct GraphArgs {
     open: bool,
 }
 
-struct WheelInfo<'a> {
-    raw_project_name: &'a str,
-    raw_version: &'a str,
-    requires_dists: Vec<Requirement<Url>>,
-}
-
 pub(crate) fn create(python: &Path, pex: Pex, args: GraphArgs) -> anyhow::Result<()> {
-    let search_path = SearchPath::from_env()?;
     let pex_path = PexPath::from_pex_info(&pex.info, true);
     let additional_pexes = pex_path.load_pexes()?;
-    let extra_metadata = CollectExtraMetadata::new();
-    let resolve = pex.resolve(
-        Some(python),
-        additional_pexes.iter(),
-        search_path,
-        Some(extra_metadata.clone()),
-    )?;
-    let metadata_lookups = extra_metadata.into_lookups()?;
-
-    let mut wheels: IndexMap<PackageName, WheelInfo> = IndexMap::new();
-    for wheel in resolve.wheels.values().chain(
-        resolve
-            .additional_wheels
-            .iter()
-            .flat_map(|(_, additional_wheels)| additional_wheels.values()),
-    ) {
-        let wheel_metadata = metadata_lookups
-            .for_whl(wheel)
-            .expect("Each resolved wheel should be paired with metadata");
-        wheels.insert(
-            wheel_metadata.project_name.clone(),
-            WheelInfo {
-                raw_project_name: wheel_metadata.raw_project_name,
-                raw_version: wheel_metadata.raw_version,
-                requires_dists: wheel_metadata.requires_dists.clone(),
-            },
-        );
-    }
+    let (interpreter, wheels) = resolve(python, &pex, &additional_pexes)?;
 
     let mut graph = Graph::DiGraph {
         id: id!(esc pex.path.display()),
@@ -240,7 +204,7 @@ pub(crate) fn create(python: &Path, pex: Pex, args: GraphArgs) -> anyhow::Result
         "Dependency graph of {pex} for interpreter {python_binary} ({python_id})",
         pex = pex.path.display(),
         python_binary = python.display(),
-        python_id = InterpreterConstraint::exact_version(&resolve.interpreter)
+        python_id = InterpreterConstraint::exact_version(&interpreter)
     );
     graph.add_stmt(Stmt::GAttribute(GraphAttributes::Graph(vec![
         attr!("fontsize", 14),
@@ -267,9 +231,7 @@ pub(crate) fn create(python: &Path, pex: Pex, args: GraphArgs) -> anyhow::Result
         )));
         for requirement in &wheel_info.requires_dists {
             if !wheels.contains_key(&requirement.name)
-                && !requirement
-                    .marker
-                    .evaluate(&resolve.interpreter.marker_env, &[])
+                && !requirement.marker.evaluate(&interpreter.marker_env, &[])
             {
                 let url = format!("https://pypi.org/project/{name}", name = requirement.name);
                 graph.add_stmt(Stmt::Node(node!(
