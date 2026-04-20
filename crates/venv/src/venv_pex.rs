@@ -3,10 +3,10 @@
 
 use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
-use std::io;
 use std::io::{BufReader, ErrorKind, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::{env, io};
 
 use anyhow::{anyhow, bail};
 use cache::{Fingerprint, default_digest, fingerprint_file};
@@ -128,7 +128,9 @@ fn install_scripts(
     {
         let script_dir = virtualenv.prefix().join(virtualenv.bin_dir_relpath);
         for (name, entry_point) in console_scripts {
-            let script_path = script_dir.join(name);
+            let script_path = script_dir
+                .join(name)
+                .with_extension(env::consts::EXE_EXTENSION);
             let script_contents =
                 create_script_contents(shebang_interpreter, shebang_arg, entry_point)?;
             let script_file = match File::create_new(&script_path) {
