@@ -156,6 +156,10 @@ impl Interpreter {
         )
     }
 
+    pub fn prefix_rel_paths(&self) -> Vec<Cow<'_, Path>> {
+        Self::candidate_rel_paths(&self.version, self.pypy_version.as_ref())
+    }
+
     #[cfg(unix)]
     fn candidate_rel_paths<'a>(
         version: &PythonVersion,

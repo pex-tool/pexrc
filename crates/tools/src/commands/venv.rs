@@ -247,8 +247,7 @@ pub(crate) fn create(python: &Path, pex: Pex, args: VenvArgs) -> anyhow::Result<
             args.pip,
             args.prompt.as_deref(),
         )?;
-        #[cfg(unix)]
-        venv.create_additional_python_links()?;
+        venv.create_additional_pythons()?;
         venv
     };
 
@@ -295,14 +294,8 @@ pub(crate) fn create(python: &Path, pex: Pex, args: VenvArgs) -> anyhow::Result<
 
     let shebang_arg = if args.non_hermetic_scripts {
         None
-    } else if (
-        venv.interpreter.version.major,
-        venv.interpreter.version.minor,
-    ) >= (3, 4)
-    {
-        Some("-I")
     } else {
-        Some("-sE")
+        Some(venv.interpreter.hermetic_args())
     };
 
     let scope = args.scope.into_inner();
