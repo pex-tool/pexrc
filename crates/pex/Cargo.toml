@@ -8,6 +8,7 @@ publish = false
 
 [dependencies]
 anyhow = { workspace = true }
+dashmap = { workspace = true }
 fs-err = { workspace = true }
 indexmap = { workspace = true }
 interpreter = { path = "../interpreter" }

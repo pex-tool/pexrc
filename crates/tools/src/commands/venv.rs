@@ -227,7 +227,7 @@ pub(crate) fn create(python: &Path, pex: Pex, args: VenvArgs) -> anyhow::Result<
     let search_path = SearchPath::from_env()?;
     let pex_path = PexPath::from_pex_info(&pex.info, true);
     let additional_pexes = pex_path.load_pexes()?;
-    let resolve = pex.resolve(Some(python), additional_pexes.iter(), search_path)?;
+    let resolve = pex.resolve(Some(python), additional_pexes.iter(), search_path, None)?;
     let mut scripts = pex.scripts()?;
 
     if args.force && args.venv_dir.exists() {

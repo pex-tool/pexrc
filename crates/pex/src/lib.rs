@@ -8,6 +8,16 @@ mod pex_info;
 mod pex_path;
 mod wheel;
 
-pub use pex::{Layout, Pex, Resolve, ResolveError, ResolvedWheel, ResolvedWheels};
+pub use pex::{
+    CollectExtraMetadata,
+    Layout,
+    MetadataLookups,
+    Pex,
+    Resolve,
+    ResolveError,
+    ResolvedWheel,
+    ResolvedWheels,
+};
 pub use pex_info::{BinPath, InheritPath, InterpreterSelectionStrategy, PexInfo};
 pub use pex_path::PexPath;
+pub use wheel::WheelMetadata;

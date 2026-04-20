@@ -15,8 +15,9 @@ use clap::{Parser, Subcommand};
 use logging_timer::time;
 use pex::Pex;
 
+use crate::commands::graph::GraphArgs;
 use crate::commands::venv::VenvArgs;
-use crate::commands::{extract, info, venv};
+use crate::commands::{extract, graph, info, venv};
 
 /// Pex Tools.
 #[derive(Parser)]
@@ -75,7 +76,7 @@ Thrice: include the interpreter's environment markers and its venv affiliation, 
         output: Option<PathBuf>,
     },
     /// Generates a dot graph of the dependencies contained in a PEX.
-    Graph,
+    Graph(GraphArgs),
     /// Interact with the Python distribution repository contained in a PEX.
     Repository,
     /// Creates a venv from the PEX.
@@ -86,7 +87,7 @@ impl AsRef<str> for Commands {
     fn as_ref(&self) -> &str {
         match self {
             Commands::Extract { .. } => "extract",
-            Commands::Graph => "graph",
+            Commands::Graph { .. } => "graph",
             Commands::Info { .. } => "info",
             Commands::Interpreter { .. } => "interpreter",
             Commands::Repository => "repository",
@@ -112,6 +113,7 @@ pub fn main(python: &Path, pex: &Path, argv: Vec<String>) -> anyhow::Result<()> 
     let cli = parse_cli(pex, argv)?;
     match cli.command {
         Commands::Extract { dest_dir } => extract::unzip(pex, &dest_dir),
+        Commands::Graph(graph_args) => graph::create(python, Pex::load(pex)?, graph_args),
         Commands::Info { indent, output } => {
             info::display(Pex::load(pex)?, indent, output.as_deref())
         }
