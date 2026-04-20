@@ -3,10 +3,10 @@
 
 use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
-use std::io;
 use std::io::{BufReader, ErrorKind, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::{env, io};
 
 use anyhow::{anyhow, bail};
 use cache::{Fingerprint, default_digest, fingerprint_file};
@@ -128,16 +128,30 @@ fn install_scripts(
     {
         let script_dir = virtualenv.prefix().join(virtualenv.bin_dir_relpath);
         for (name, entry_point) in console_scripts {
-            create_script(
-                pex,
-                shebang_interpreter,
-                shebang_arg,
-                name,
-                entry_point,
-                &script_dir,
-                false,
-                provenance.clone(),
-            )?;
+            let script_path = script_dir
+                .join(name)
+                .with_extension(env::consts::EXE_EXTENSION);
+            let script_contents =
+                create_script_contents(shebang_interpreter, shebang_arg, entry_point)?;
+            let script_file = match File::create_new(&script_path) {
+                Ok(script_file) => {
+                    provenance.record(entry_point, script_path);
+                    script_file
+                }
+                Err(err) if err.kind() == ErrorKind::AlreadyExists => {
+                    let fingerprint =
+                        Fingerprint::try_from(BufReader::new(script_contents.as_bytes()))?;
+                    provenance.record_collision(
+                        entry_point,
+                        fingerprint,
+                        script_contents.len(),
+                        script_path,
+                    );
+                    return Ok(());
+                }
+                Err(err) => bail!("{err}"),
+            };
+            write_script(pex, shebang_interpreter, script_file, script_contents)?;
         }
     }
     if let Some(gui_scripts) = entry_points.section(Some("gui_scripts"))
@@ -167,74 +181,24 @@ fn install_scripts(
 
 #[allow(clippy::too_many_arguments)]
 #[cfg(unix)]
-fn create_script(
+fn write_script(
     _pex: &Pex,
-    shebang_interpreter: &Path,
-    shebang_arg: Option<&str>,
-    name: &str,
-    entry_point: &str,
-    dest_dir: &Path,
-    gui: bool,
-    provenance: Arc<Provenance>,
+    _shebang_interpreter: &Path,
+    mut script_file: File,
+    script_contents: String,
 ) -> anyhow::Result<()> {
-    assert!(!gui, "There is no support for gui scripts yet.");
-
-    let script_path = dest_dir.join(name);
-    let script_contents = create_script_contents(shebang_interpreter, shebang_arg, entry_point)?;
-    let mut script_file = match File::create_new(&script_path) {
-        Ok(script_file) => {
-            provenance.record(entry_point, script_path);
-            script_file
-        }
-        Err(err) if err.kind() == ErrorKind::AlreadyExists => {
-            let fingerprint = Fingerprint::try_from(BufReader::new(script_contents.as_bytes()))?;
-            provenance.record_collision(
-                entry_point,
-                fingerprint,
-                script_contents.len(),
-                script_path,
-            );
-            return Ok(());
-        }
-        Err(err) => bail!("{err}"),
-    };
     script_file.write_all(script_contents.as_bytes())?;
     mark_executable(script_file.file_mut())?;
     Ok(())
 }
 
 #[cfg(windows)]
-fn create_script(
+fn write_script(
     pex: &Pex,
     shebang_interpreter: &Path,
-    shebang_arg: Option<&str>,
-    name: &str,
-    entry_point: &str,
-    dest_dir: &Path,
-    gui: bool,
-    provenance: Arc<Provenance>,
+    script_file: File,
+    script_contents: String,
 ) -> anyhow::Result<()> {
-    assert!(!gui, "There is no support for gui scripts yet.");
-
-    let script_path = dest_dir.join(name).with_extension("exe");
-    let script_contents = create_script_contents(shebang_interpreter, shebang_arg, entry_point)?;
-    let script_file = match File::create_new(&script_path) {
-        Ok(script_file) => {
-            provenance.record(entry_point, script_path);
-            script_file
-        }
-        Err(err) if err.kind() == ErrorKind::AlreadyExists => {
-            let fingerprint = Fingerprint::try_from(BufReader::new(script_contents.as_bytes()))?;
-            provenance.record_collision(
-                entry_point,
-                fingerprint,
-                script_contents.len(),
-                script_path,
-            );
-            return Ok(());
-        }
-        Err(err) => bail!("{err}"),
-    };
     python_proxy::create(
         python_proxy::ProxySource::Pex(pex),
         shebang_interpreter,
