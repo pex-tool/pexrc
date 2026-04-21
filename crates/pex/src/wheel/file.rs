@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::fmt::{Display, Formatter, Write};
+use std::path::PathBuf;
 use std::str::FromStr;
 
 use anyhow::{anyhow, bail};
@@ -86,6 +87,27 @@ impl<'a> WheelFile<'a> {
             build_tag,
             tags,
         })
+    }
+
+    pub fn data_dir(&self) -> PathBuf {
+        self.pnav_dir("data")
+    }
+
+    pub fn dist_info_dir(&self) -> PathBuf {
+        self.pnav_dir("dist-info")
+    }
+
+    pub fn pex_info_info_dir(&self) -> PathBuf {
+        self.pnav_dir("pex-info")
+    }
+
+    fn pnav_dir(&self, name: &str) -> PathBuf {
+        format!(
+            "{project_name}-{version}.{name}",
+            project_name = self.raw_project_name,
+            version = self.raw_version
+        )
+        .into()
     }
 
     fn write_tag_component(

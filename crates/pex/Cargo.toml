@@ -8,6 +8,7 @@ publish = false
 
 [dependencies]
 anyhow = { workspace = true }
+csv = { workspace = true }
 dashmap = { workspace = true }
 fs-err = { workspace = true }
 indexmap = { workspace = true }
@@ -15,16 +16,20 @@ interpreter = { path = "../interpreter" }
 itertools = { workspace = true }
 log = { workspace = true }
 logging_timer = { workspace = true }
+ouroboros = { workspace = true }
 pep440_rs = { workspace = true }
 pep508_rs = { workspace = true }
 python-pkginfo = { workspace = true }
 rayon = { workspace = true }
+rust-ini = { workspace = true }
 scripts = { path = "../scripts" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 strum = { workspace = true }
 strum_macros = { workspace = true }
+tempfile = { workspace = true }
 url = { workspace = true }
+walkdir = { workspace = true }
 zip = { workspace = true }
 
 [dev-dependencies]
