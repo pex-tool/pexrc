@@ -154,6 +154,7 @@ fn extract_index(
     let dest_path = dest_dir.join(rel_path);
     #[cfg(windows)]
     let dest_path = {
+        use std::borrow::Cow;
         let mut dest_path = Cow::Borrowed(dest_dir);
         for component in rel_path.split("/") {
             dest_path = Cow::Owned(dest_path.join(component))
