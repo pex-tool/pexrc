@@ -5,11 +5,10 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::io;
 use std::io::{Read, Seek};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use csv::{Terminator, Trim};
 use fs_err as fs;
 use fs_err::File;
 use logging_timer::time;
@@ -21,6 +20,7 @@ use zip::write::{FileOptions, SimpleFileOptions};
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 use crate::wheel::WheelFile;
+use crate::wheel::record::Record;
 use crate::{EntryPoints, Layout, Pex};
 
 #[time("debug", "{}")]
@@ -240,42 +240,18 @@ impl WheelLayout {
     }
 }
 
-#[derive(Deserialize)]
-struct RecordEntry {
-    path: String,
-    _hash: String,
-    _size: usize,
-}
-
-fn has_legacy_bin_dir(wheel_dir: &Path, wheel_file: &WheelFile) -> anyhow::Result<Option<PathBuf>> {
+fn has_legacy_bin_dir(wheel_dir: &Path, record: &Record) -> Option<PathBuf> {
     let bin_dir = wheel_dir.join("bin");
     if bin_dir.is_dir() {
-        for record in csv::ReaderBuilder::new()
-            .quote(b'"')
-            .delimiter(b',')
-            .terminator(Terminator::CRLF)
-            .trim(Trim::All)
-            .from_path(wheel_dir.join(wheel_file.dist_info_dir()).join("RECORD"))?
-            .into_deserialize()
-        {
-            let entry: RecordEntry = record?;
-            // N.B.: The spec here is very poor:
-            // https://packaging.python.org/en/latest/specifications/recording-installed-packages/#the-record-file
-            // There is no such thing as "on Windows" since a non-platform-specific wheel could be
-            // created on Windows or Unix and uploaded to a registry. That said, the occurrence of
-            // a dir name like bin/suffix\\ on Windows or vice versa seems unlikely due to all the
-            // problems it would cause the wheel author when people went to use it.
-            if &entry.path == "bin"
-                || entry.path.starts_with("bin/")
-                || entry.path.starts_with("bin\\")
-            {
-                return Ok(None);
+        for entry in record.entries() {
+            if matches!(
+                entry.path.components().next(), Some(Component::Normal(name)) if name == "bin"
+            ) {
+                return Some(bin_dir);
             }
         }
-        Ok(Some(bin_dir))
-    } else {
-        Ok(None)
     }
+    None
 }
 
 #[derive(Copy, Clone, Debug, Deserialize)]
@@ -377,6 +353,7 @@ fn compress_whl(
         .compression_method(compression_method)
         .compression_level(compression_level);
 
+    let record = Record::parse(wheel_dir, wheel_file)?;
     let mut excludes: HashSet<PathBuf> = HashSet::new();
 
     let pex_info_dir = wheel_dir.join(wheel_file.pex_info_info_dir());
@@ -443,7 +420,7 @@ fn compress_whl(
             }
         }
         excludes.insert(stash_dir);
-    } else if let Some(bin_dir) = has_legacy_bin_dir(wheel_dir, wheel_file)? {
+    } else if let Some(bin_dir) = has_legacy_bin_dir(wheel_dir, &record) {
         let entry_points = load_entry_points(wheel_dir, wheel_file)?;
         let dst_dir = wheel_file.data_dir().join("scripts");
         for entry in walkdir::WalkDir::new(&bin_dir).min_depth(1) {
