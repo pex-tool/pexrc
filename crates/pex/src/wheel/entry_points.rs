@@ -62,21 +62,15 @@ pub struct EntryPoints {
 
 impl EntryPoints {
     pub fn empty() -> Self {
-        EntryPointsBuilder {
-            contents: Ini::new(),
-            console_scripts_builder: |_| HashMap::new(),
-            gui_scripts_builder: |_| HashMap::new(),
-        }
-        .build()
+        EntryPoints::new(Ini::new(), |_| HashMap::new(), |_| HashMap::new())
     }
 
     pub fn load(mut contents: impl Read) -> anyhow::Result<Self> {
-        Ok(EntryPointsBuilder {
-            contents: Ini::read_from(&mut contents)?,
-            console_scripts_builder: |contents| parse_entry_points(contents, "console_scripts"),
-            gui_scripts_builder: |contents| parse_entry_points(contents, "gui_scripts"),
-        }
-        .build())
+        Ok(EntryPoints::new(
+            Ini::read_from(&mut contents)?,
+            |contents| parse_entry_points(contents, "console_scripts"),
+            |contents| parse_entry_points(contents, "gui_scripts"),
+        ))
     }
 
     pub fn is_empty(&self) -> bool {
