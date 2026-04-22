@@ -23,18 +23,20 @@ use crate::embeds::{CLIBS_DIR, PROXIES_DIR};
 
 pub fn inject_all(
     pexes: Vec<PathBuf>,
+    compression_method: CompressionMethod,
     compression_level: Option<i64>,
     clibs: Option<&HashSet<&Path>>,
     proxies: Option<&HashSet<&Path>>,
 ) -> anyhow::Result<()> {
     for pex in pexes {
-        inject(&pex, compression_level, clibs, proxies)?
+        inject(&pex, compression_method, compression_level, clibs, proxies)?
     }
     Ok(())
 }
 
 fn inject(
     pex: &Path,
+    compression_method: CompressionMethod,
     compression_level: Option<i64>,
     clibs: Option<&HashSet<&Path>>,
     proxies: Option<&HashSet<&Path>>,
@@ -42,7 +44,13 @@ fn inject(
     let pex = Pex::load(pex)?;
     match pex.layout {
         Layout::Loose | Layout::Packed => inject_pex_dir(pex.path, clibs, proxies),
-        Layout::ZipApp => inject_pex_zip(pex.path, compression_level, clibs, proxies),
+        Layout::ZipApp => inject_pex_zip(
+            pex.path,
+            compression_method,
+            compression_level,
+            clibs,
+            proxies,
+        ),
     }
 }
 
@@ -162,6 +170,7 @@ fn embed_in_dir(
 
 fn inject_pex_zip(
     pex: &Path,
+    compression_method: CompressionMethod,
     compression_level: Option<i64>,
     clibs: Option<&HashSet<&Path>>,
     proxies: Option<&HashSet<&Path>>,
@@ -200,7 +209,7 @@ fn inject_pex_zip(
     let mut dst_zip = ZipWriter::new(&dst_zip_fp);
 
     let zstd_file_options = SimpleFileOptions::default()
-        .compression_method(CompressionMethod::Zstd)
+        .compression_method(compression_method)
         .compression_level(compression_level);
     let stored_file_options =
         SimpleFileOptions::default().compression_method(CompressionMethod::Stored);

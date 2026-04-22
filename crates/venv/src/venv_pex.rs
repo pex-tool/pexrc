@@ -13,10 +13,9 @@ use cache::{Fingerprint, default_digest, fingerprint_file};
 use fs_err as fs;
 use fs_err::File;
 use indexmap::IndexMap;
-use ini::{Ini, Properties};
 use log::warn;
 use logging_timer::time;
-use pex::{BinPath, Layout, Pex, PexInfo, ResolvedWheel};
+use pex::{BinPath, EntryPoint, EntryPoints, Layout, Pex, PexInfo, ResolvedWheel};
 use platform::{mark_executable, path_as_bytes, path_as_str, symlink_or_link_or_copy};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use scripts::{Scripts, VenvPex, VenvPexRepl};
@@ -122,45 +121,48 @@ fn install_scripts(
     shebang_arg: Option<&str>,
     provenance: Arc<Provenance>,
 ) -> anyhow::Result<()> {
-    let entry_points = Ini::load_from_file(entry_points_txt)?;
-    if let Some(console_scripts) = entry_points.section(Some("console_scripts"))
-        && !console_scripts.is_empty()
-    {
-        let script_dir = virtualenv.prefix().join(virtualenv.bin_dir_relpath);
-        for (name, entry_point) in console_scripts {
-            let script_path = script_dir
-                .join(name)
-                .with_extension(env::consts::EXE_EXTENSION);
-            let script_contents =
-                create_script_contents(shebang_interpreter, shebang_arg, entry_point)?;
-            let script_file = match File::create_new(&script_path) {
-                Ok(script_file) => {
-                    provenance.record(entry_point, script_path);
-                    script_file
-                }
-                Err(err) if err.kind() == ErrorKind::AlreadyExists => {
-                    let fingerprint =
-                        Fingerprint::try_from(BufReader::new(script_contents.as_bytes()))?;
-                    provenance.record_collision(
-                        entry_point,
-                        fingerprint,
-                        script_contents.len(),
-                        script_path,
-                    );
-                    return Ok(());
-                }
-                Err(err) => bail!("{err}"),
-            };
-            write_script(pex, shebang_interpreter, script_file, script_contents)?;
-        }
+    let entry_points = EntryPoints::load(File::open(entry_points_txt)?)?;
+    if entry_points.is_empty() {
+        return Ok(());
     }
-    if let Some(gui_scripts) = entry_points.section(Some("gui_scripts"))
-        && !gui_scripts.is_empty()
-    {
-        struct GuiScriptsList<'a>(&'a Properties);
+
+    let script_dir = virtualenv.prefix().join(virtualenv.bin_dir_relpath);
+    for (name, entry_point) in entry_points.console_scripts() {
+        let script_path = script_dir
+            .join(name)
+            .with_extension(env::consts::EXE_EXTENSION);
+        let script_contents =
+            create_script_contents(shebang_interpreter, shebang_arg, entry_point)?;
+        let script_file = match File::create_new(&script_path) {
+            Ok(script_file) => {
+                provenance.record(entry_point, script_path);
+                script_file
+            }
+            Err(err) if err.kind() == ErrorKind::AlreadyExists => {
+                let fingerprint =
+                    Fingerprint::try_from(BufReader::new(script_contents.as_bytes()))?;
+                provenance.record_collision(
+                    entry_point,
+                    fingerprint,
+                    script_contents.len(),
+                    script_path,
+                );
+                return Ok(());
+            }
+            Err(err) => bail!("{err}"),
+        };
+        write_script(pex, shebang_interpreter, script_file, script_contents)?;
+    }
+
+    let gui_scripts = entry_points
+        .gui_scripts()
+        .map(|(name, _)| name)
+        .collect::<Vec<_>>();
+    if !gui_scripts.is_empty() {
+        struct GuiScriptsList<'a>(Vec<&'a str>);
         impl<'a> Display for GuiScriptsList<'a> {
             fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-                for (name, _) in self.0 {
+                for name in &self.0 {
                     writeln!(f, "{name}")?;
                 }
                 Ok(())
@@ -210,7 +212,7 @@ fn write_script(
 fn create_script_contents(
     shebang_interpreter: &Path,
     shebang_arg: Option<&str>,
-    entry_point: &str,
+    entry_point: &EntryPoint,
 ) -> anyhow::Result<String> {
     struct RenderShebang<'a>(&'a str, Option<&'a str>);
     impl<'a> Display for RenderShebang<'a> {
@@ -224,27 +226,25 @@ fn create_script_contents(
     }
     let shebang = RenderShebang(path_as_str(shebang_interpreter)?, shebang_arg);
 
-    let mut components = entry_point.splitn(2, ":");
-    let modname = components
-        .next()
-        .expect("A split always yield at least one item.");
-    if let Some(attrs) = components.next()
-        && !attrs.is_empty()
-    {
-        struct RenderAttrsTuple<'a>(Vec<&'a str>);
-        impl<'a> Display for RenderAttrsTuple<'a> {
-            fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-                write!(f, "(")?;
-                for attr in &self.0 {
-                    write!(f, "\"{attr}\",")?;
+    match entry_point {
+        EntryPoint::Callable {
+            module: modname,
+            attribute_chain: attrs,
+        } => {
+            struct RenderAttrsTuple<'a>(Vec<&'a str>);
+            impl<'a> Display for RenderAttrsTuple<'a> {
+                fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+                    write!(f, "(")?;
+                    for attr in &self.0 {
+                        write!(f, "\"{attr}\",")?;
+                    }
+                    write!(f, ")")?;
+                    Ok(())
                 }
-                write!(f, ")")?;
-                Ok(())
             }
-        }
 
-        Ok(format!(
-            r##"{shebang}
+            Ok(format!(
+                r##"{shebang}
 # -*- coding: utf-8 -*-
 import importlib
 import sys
@@ -256,10 +256,10 @@ for attr in {attrs_tuple}:
 if __name__ == "__main__":
     sys.exit(entry_point())
 "##,
-            attrs_tuple = RenderAttrsTuple(attrs.split(".").collect())
-        ))
-    } else {
-        Ok(format!(
+                attrs_tuple = RenderAttrsTuple(attrs.split(".").collect())
+            ))
+        }
+        EntryPoint::Module(modname) => Ok(format!(
             r##"{shebang}
 # -*- coding: utf-8 -*-
 import runpy
@@ -269,7 +269,7 @@ if __name__ == "__main__":
     runpy.run_module("{modname}", run_name="__main__", alter_sys=True)
     sys.exit(0)
 "##,
-        ))
+        )),
     }
 }
 

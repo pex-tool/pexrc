@@ -19,4 +19,4 @@ pub use pex::{
 };
 pub use pex_info::{BinPath, InheritPath, InterpreterSelectionStrategy, PexInfo};
 pub use pex_path::PexPath;
-pub use wheel::WheelMetadata;
+pub use wheel::{EntryPoint, EntryPoints, WheelMetadata, repackage_wheels};

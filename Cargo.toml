@@ -107,6 +107,7 @@ clap = {  version = "4.6", features = ["color", "derive", "string"] }
 clap-verbosity-flag = "3.0"
 colorchoice-clap = "1.0"
 const_format = { version = "0.2", features = ["rust_1_64"] }
+csv = "1.4"
 ctor = "0.10"
 dashmap = "6.1"
 digest = "0.11"
@@ -129,6 +130,7 @@ log = "0.4"
 logging_timer = "1.1"
 nix = {  version = "0.31", features = ["fs"] }
 open = "5.3"
+ouroboros = "0.18"
 owo-colors = "4.3"
 pathdiff = "0.2"
 pep440_rs = "0.7"

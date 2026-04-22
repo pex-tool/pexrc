@@ -30,7 +30,7 @@ use zip::ZipArchive;
 use crate::PexInfo;
 use crate::wheel::{MetadataReader, WheelFile, WheelMetadata};
 
-#[derive(AsRefStr, EnumString)]
+#[derive(AsRefStr, EnumString, Eq, PartialEq)]
 pub enum Layout {
     #[strum(serialize = "loose")]
     Loose,
