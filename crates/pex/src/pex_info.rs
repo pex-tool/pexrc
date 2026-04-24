@@ -3,7 +3,7 @@
 
 use std::borrow::Cow;
 use std::io;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::PathBuf;
 
 use anyhow::anyhow;
@@ -112,5 +112,9 @@ impl PexInfo {
             .keys()
             .map(String::as_str)
             .map(WheelFile::parse_file_name)
+    }
+
+    pub fn write(&self, writer: impl Write) -> anyhow::Result<()> {
+        Ok(serde_json::to_writer(writer, &self)?)
     }
 }
