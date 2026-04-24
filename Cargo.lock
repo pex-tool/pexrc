@@ -1957,6 +1957,7 @@ dependencies = [
  "pexrs",
  "platform",
  "python-proxy",
+ "rayon",
  "scripts",
  "sha2 0.11.0",
  "strum",

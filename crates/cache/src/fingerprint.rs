@@ -53,6 +53,29 @@ impl<R: Read> TryFrom<BufReader<R>> for Fingerprint {
     }
 }
 
+pub struct DigestingReader<D: Digest, R: Read> {
+    digest: D,
+    reader: R,
+}
+
+impl<D: Digest, R: Read> DigestingReader<D, R> {
+    pub fn new(digest: D, reader: R) -> Self {
+        Self { digest, reader }
+    }
+
+    pub fn into_fingerprint(self) -> Fingerprint {
+        Fingerprint::new(self.digest)
+    }
+}
+
+impl<D: Digest, R: Read> Read for DigestingReader<D, R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let amount = self.reader.read(buf)?;
+        self.digest.update(&buf[0..amount]);
+        Ok(amount)
+    }
+}
+
 #[derive(Default)]
 pub struct HashOptions {
     path: bool,
