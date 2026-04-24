@@ -3,7 +3,9 @@
 
 mod entry_points;
 mod file;
+mod layout;
 mod metadata;
+mod original_wheel_info;
 mod package;
 mod record;
 

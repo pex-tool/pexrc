@@ -1,20 +1,22 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::path::{Path, PathBuf};
+use std::borrow::Cow;
+use std::io::{BufRead, BufReader, Read, Seek};
+use std::path::{Component, Path, PathBuf};
 
 use anyhow::anyhow;
-use csv::{StringRecord, Terminator, Trim};
+use csv::{StringRecord, Terminator};
 use fs_err::File;
 use ouroboros::self_referencing;
 
 use crate::wheel::WheelFile;
 
 pub(crate) struct Entry<'a> {
-    pub(crate) path: PathBuf,
-    pub(crate) _raw_path: &'a str,
-    pub(crate) _hash: Option<&'a str>,
-    pub(crate) _size: Option<usize>,
+    pub(crate) path: Cow<'a, Path>,
+    pub(crate) raw_path: &'a str,
+    pub(crate) hash: &'a str,
+    pub(crate) size: &'a str,
 }
 
 fn parse_entry_record<'a>(
@@ -28,22 +30,7 @@ fn parse_entry_record<'a>(
             }
             let fields = record.into_iter().collect::<Vec<_>>();
             match fields.as_slice() {
-                &[_raw_path, hash, size] => {
-                    let _hash = if hash.is_empty() { None } else { Some(hash) };
-                    let _size = if size.is_empty() {
-                        None
-                    } else {
-                        match size.parse::<usize>() {
-                            Ok(size) => Some(size),
-                            Err(err) => {
-                                return Some(Err(anyhow!(
-                                    "Row {row} has an invalid size entry ({record}): {err}",
-                                    record = record.as_slice()
-                                )));
-                            }
-                        }
-                    };
-
+                &[raw_path, hash, size] => {
                     // N.B.: The spec here is very poor:
                     // https://packaging.python.org/en/latest/specifications/recording-installed-packages/#the-record-file
                     // There is no such thing as "on Windows" since a non-platform-specific wheel
@@ -51,13 +38,16 @@ fn parse_entry_record<'a>(
                     // the occurrence of a dir name like bin/suffix\\ on Windows or vice versa seems
                     // unlikely due to all the problems it would cause the wheel author when people
                     // went to use it.
-                    let path = _raw_path.split("/").collect();
+                    #[cfg(unix)]
+                    let path = Cow::Borrowed(Path::new(raw_path));
+                    #[cfg(windows)]
+                    let path = Cow::Owned(raw_path.split("/").collect());
 
                     Some(Ok(Entry {
                         path,
-                        _raw_path,
-                        _hash,
-                        _size,
+                        raw_path,
+                        hash,
+                        size,
                     }))
                 }
                 _ => Some(Err(anyhow!(
@@ -73,6 +63,7 @@ fn parse_entry_record<'a>(
 #[self_referencing]
 pub(crate) struct Record {
     records: Vec<csv::Result<StringRecord>>,
+    terminator: Terminator,
 
     #[borrows(records)]
     #[covariant]
@@ -80,18 +71,34 @@ pub(crate) struct Record {
 }
 
 impl Record {
-    pub(crate) fn parse(wheel_dir: &Path, wheel_file: &WheelFile) -> anyhow::Result<Self> {
+    pub(crate) fn parse(
+        wheel_dir: &Path,
+        wheel_file: &WheelFile,
+    ) -> anyhow::Result<(Self, PathBuf)> {
+        let record_rel_path = wheel_file.dist_info_dir().join("RECORD");
+        let record = Self::read(File::open(wheel_dir.join(&record_rel_path))?)?;
+        Ok((record, record_rel_path))
+    }
+
+    pub(crate) fn read(source: impl Read + Seek) -> anyhow::Result<Self> {
+        let mut first_line = String::new();
+        let mut buffered_source = BufReader::new(source);
+        buffered_source.read_line(&mut first_line)?;
+        buffered_source.rewind()?;
+        let terminator = if first_line.ends_with("\r\n") {
+            Terminator::CRLF
+        } else {
+            Terminator::Any(b'\n')
+        };
         let records = csv::ReaderBuilder::new()
+            .has_headers(false)
             .quote(b'"')
             .delimiter(b',')
             .terminator(Terminator::CRLF)
-            .trim(Trim::All)
-            .from_reader(File::open(
-                wheel_dir.join(wheel_file.dist_info_dir()).join("RECORD"),
-            )?)
+            .from_reader(buffered_source)
             .into_records()
             .collect::<Vec<_>>();
-        Record::try_new(records, |records| {
+        Record::try_new(records, terminator, |records| {
             records
                 .iter()
                 .enumerate()
@@ -102,5 +109,49 @@ impl Record {
 
     pub(crate) fn entries(&self) -> &[Entry<'_>] {
         self.borrow_entries().as_slice()
+    }
+
+    pub(crate) fn wheel_has_bin_dir(&self) -> bool {
+        self.entries().iter().any(|entry| {
+            matches!(entry.path.components().next(), Some(Component::Normal(name)) if name == "bin")
+        })
+    }
+
+    pub(crate) fn filtered(
+        &self,
+        wheel_file: &WheelFile,
+        stash_dir: Option<&Path>,
+        legacy_bin_dir: Option<&Path>,
+    ) -> anyhow::Result<Vec<u8>> {
+        let mut data = Vec::new();
+        let mut writer = csv::WriterBuilder::new()
+            .has_headers(false)
+            .quote(b'"')
+            .delimiter(b',')
+            .terminator(*self.borrow_terminator())
+            .from_writer(&mut data);
+        let pex_info_dir = wheel_file.pex_info_dir().display().to_string();
+        for entry in self.borrow_entries() {
+            if entry.raw_path.starts_with(&pex_info_dir) {
+                continue;
+            }
+            if let Some(stash_dir) = stash_dir
+                && entry.path.starts_with(stash_dir)
+            {
+                continue;
+            }
+            if let Some(legacy_bin_dir) = legacy_bin_dir
+                && entry.path.starts_with(legacy_bin_dir)
+            {
+                continue;
+            }
+            writer.write_field(entry.raw_path)?;
+            writer.write_field(entry.hash)?;
+            writer.write_field(entry.size)?;
+            writer.write_record(None::<&[u8]>)?;
+        }
+        writer.flush()?;
+        drop(writer);
+        Ok(data)
     }
 }

@@ -97,7 +97,7 @@ impl<'a> WheelFile<'a> {
         self.pnav_dir("dist-info")
     }
 
-    pub fn pex_info_info_dir(&self) -> PathBuf {
+    pub fn pex_info_dir(&self) -> PathBuf {
         self.pnav_dir("pex-info")
     }
 
