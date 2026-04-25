@@ -160,6 +160,7 @@ itertools = "0.14"
 log = "0.4"
 logging_timer = "1.1"
 nix = {  version = "0.31", features = ["fs"] }
+oneshot = {  version = "0.2", features = ["std"] }
 open = "5.3"
 ouroboros = "0.18"
 owo-colors = "4.3"

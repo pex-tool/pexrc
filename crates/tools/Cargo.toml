@@ -23,12 +23,14 @@ interpreter = { path = "../interpreter" }
 log = { workspace = true }
 logging = { path = "../logging" }
 logging_timer = { workspace = true }
+oneshot = { workspace = true }
 open = { workspace = true }
 owo-colors = { workspace = true }
 pep440_rs = { workspace = true }
 pep508_rs = { workspace = true }
 pex = { path = "../pex" }
 rayon = { workspace = true }
+regex = { workspace = true }
 scripts = { path = "../scripts" }
 shell-quote = { workspace = true }
 serde = { workspace = true }
