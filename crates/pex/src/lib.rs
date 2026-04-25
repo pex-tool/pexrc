@@ -16,6 +16,9 @@ pub use pex::{
     ResolveError,
     ResolvedWheel,
     ResolvedWheels,
+    collect_loose_user_source,
+    collect_zipped_user_source_indexes,
+    filter_zipped_user_source,
 };
 pub use pex_info::{BinPath, InheritPath, InterpreterSelectionStrategy, PexInfo};
 pub use pex_path::PexPath;

@@ -10,12 +10,14 @@ publish = false
 [dependencies]
 anyhow = { workspace = true }
 cache = { path = "../cache" }
+chrono = { workspace = true }
 clap = { workspace = true }
 clap-verbosity-flag = { workspace = true }
 cli = { path = "../cli" }
 colorchoice-clap = { workspace = true }
 dot-generator = { workspace = true }
 dot-structures = { workspace = true }
+flate2 = { workspace = true }
 fs-err = { workspace = true }
 graphviz-rust = { workspace = true }
 indexmap = { workspace = true }
@@ -35,8 +37,10 @@ scripts = { path = "../scripts" }
 shell-quote = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+tar = { workspace = true }
 tempfile = { workspace = true }
 textwrap = { workspace = true }
 venv = { path = "../venv" }
+walkdir = { workspace = true }
 zip = { workspace = true }
 url = { workspace = true }

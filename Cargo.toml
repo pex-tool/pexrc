@@ -134,6 +134,7 @@ anstream = "1.0"
 anyhow = "1.0"
 base64 = "0.22"
 bstr = "1.12"
+chrono = "0.4"
 clap = {  version = "4.6", features = ["color", "derive", "string"] }
 clap-verbosity-flag = "3.0"
 colorchoice-clap = "1.0"
@@ -190,7 +191,7 @@ url = "2.5"
 walkdir = "2.5"
 which = "8.0"
 xz2 = "0.1"
-zip = { version = "8.5", default-features = false, features = ["deflate", "zstd"] }
+zip = { version = "8.5", default-features = false, features = ["chrono", "deflate", "zstd"] }
 zstd = "0.13"
 
 [build-dependencies]
@@ -226,11 +227,13 @@ pexrs = { path = "crates/pexrs" }
 platform = { path = "crates/platform" }
 python-proxy = { path = "crates/python-proxy" }
 rayon = { workspace = true }
+reqwest = { workspace = true }
 scripts = { path = "crates/scripts", features = ["embedded"] }
 sha2 = { workspace = true }
 strum = { workspace = true }
 target = { path = "crates/target" }
 tempfile = { workspace = true }
+url = { workspace = true }
 walkdir = { workspace = true }
 zip = { workspace = true }
 zstd = { workspace = true }

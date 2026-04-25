@@ -11,6 +11,7 @@ use indexmap::IndexMap;
 use interpreter::SelectionStrategy;
 use logging_timer::time;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::wheel::WheelFile;
 
@@ -63,8 +64,9 @@ impl From<InterpreterSelectionStrategy> for SelectionStrategy {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct PexInfo {
-    pub bind_resource_paths: IndexMap<String, String>,
-    pub build_properties: IndexMap<String, String>,
+    pub bind_resource_paths: Option<IndexMap<String, String>>,
+    pub build_properties: IndexMap<String, Value>,
+    pub code_hash: String,
     pub deps_are_wheel_files: bool,
     pub distributions: IndexMap<String, String>,
     pub emit_warnings: bool,
@@ -72,10 +74,10 @@ pub struct PexInfo {
     pub excluded: Vec<String>,
     pub inherit_path: Option<InheritPath>,
     pub inject_args: Vec<String>,
-    pub inject_env: IndexMap<String, String>,
+    pub inject_env: Option<IndexMap<String, String>>,
     pub inject_python_args: Vec<String>,
     pub interpreter_constraints: Vec<String>,
-    pub interpreter_selection_strategy: InterpreterSelectionStrategy,
+    pub interpreter_selection_strategy: Option<InterpreterSelectionStrategy>,
     pub overridden: Vec<String>,
     pub pex_hash: String,
     pub pex_path: Option<String>,

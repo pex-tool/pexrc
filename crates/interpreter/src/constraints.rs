@@ -195,6 +195,10 @@ impl InterpreterConstraint {
         }
         true
     }
+
+    pub fn version_specifiers(&self) -> Option<&VersionSpecifiers> {
+        self.version_specifiers.as_ref()
+    }
 }
 
 impl Display for InterpreterConstraint {
@@ -282,6 +286,10 @@ impl InterpreterConstraints {
                 .map(|constraint| InterpreterConstraint::parse(constraint.as_ref()))
                 .collect::<anyhow::Result<Vec<_>>>()?,
         ))
+    }
+
+    pub fn into_constraints(self) -> Vec<InterpreterConstraint> {
+        self.0
     }
 
     pub fn contains(&self, interpreter: &Interpreter) -> bool {

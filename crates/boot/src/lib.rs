@@ -46,7 +46,11 @@ pub fn sh_boot_shebang(pex: &Path, escaped: bool) -> anyhow::Result<Option<Strin
 
     let interpreter_constraints =
         InterpreterConstraints::try_from(&pex.info.interpreter_constraints)?;
-    let selection_strategy: SelectionStrategy = pex.info.interpreter_selection_strategy.into();
+    let selection_strategy: SelectionStrategy = pex
+        .info
+        .interpreter_selection_strategy
+        .unwrap_or(pex::InterpreterSelectionStrategy::Oldest)
+        .into();
     let pythons = interpreter_constraints
         .calculate_compatible_binary_names(selection_strategy)
         .into_iter()

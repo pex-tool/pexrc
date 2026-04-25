@@ -10,6 +10,7 @@ use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use pex::Pex;
 use pexrc::commands::{extract, info, inject, script};
 use pexrc::embeds::{CLIB_BY_TARGET, PROXY_BY_TARGET};
+use pexrc::source;
 use target::Target;
 
 /// Pex Runtime Control.
@@ -55,9 +56,9 @@ enum Commands {
         #[arg(short = 'd', long)]
         dest_dir: PathBuf,
 
-        /// The Pex to extract dependency wheels from.
-        #[arg(value_name = "FILE")]
-        pex: PathBuf,
+        /// The Pex to extract dependency wheels from. Can be a path or URL.
+        #[arg(value_name = "PEX")]
+        pex: String,
     },
     /// Inject a traditional PEX with the pexrc runtime.
     Inject {
@@ -72,8 +73,8 @@ enum Commands {
         #[arg(value_parser=clap::builder::PossibleValuesParser::new(CLIB_BY_TARGET.keys()))]
         targets: Vec<String>,
 
-        #[arg(value_name = "FILE", required = true)]
-        pexes: Vec<PathBuf>,
+        #[arg(value_name = "PEX", required = true)]
+        pexes: Vec<String>,
     },
     /// Provide information about the supported target runtimes.
     Info,
@@ -105,12 +106,15 @@ fn main() -> anyhow::Result<()> {
             compression_level,
             dest_dir,
             pex,
-        } => extract::to_dir(
-            &dest_dir,
-            Pex::load(&pex)?,
-            compression_method.into(),
-            compression_level,
-        ),
+        } => {
+            let pex = source::to_path(pex, Some(&dest_dir))?;
+            extract::to_dir(
+                &dest_dir,
+                Pex::load(&pex)?,
+                compression_method.into(),
+                compression_level,
+            )
+        }
         Commands::Inject {
             compression_method,
             compression_level,
@@ -145,6 +149,10 @@ fn main() -> anyhow::Result<()> {
             } else {
                 (None, None)
             };
+            let pexes = pexes
+                .into_iter()
+                .map(|source| source::to_path(source, None))
+                .collect::<anyhow::Result<Vec<_>>>()?;
             inject::inject_all(
                 pexes,
                 compression_method.into(),
