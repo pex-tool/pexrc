@@ -224,7 +224,7 @@ fn recompress_zipped_whl_chroot(
 
     let record_name = format!(
         "{prefix}{dist_info_dir}/RECORD",
-        dist_info_dir = wheel_file.dist_info_dir().display()
+        dist_info_dir = wheel_file.dist_info_dir()
     );
     let record = Record::read(Cursor::new(io::read_to_string(
         zipped_wheel_chroot.by_name(&record_name)?,
@@ -261,10 +261,9 @@ fn recompress_zipped_whl_chroot(
         (None, has_legacy_bin_dir)
     };
 
-    let data_dir = wheel_file.data_dir();
     let original_wheel_info = format!(
         "{prefix}{pex_info_dir}/{file_name}",
-        pex_info_dir = wheel_file.pex_info_dir().display(),
+        pex_info_dir = wheel_file.pex_info_dir(),
         file_name = OriginalWheelInfo::file_name()
     );
 
@@ -275,6 +274,7 @@ fn recompress_zipped_whl_chroot(
         None
     };
 
+    let data_dir = wheel_file.data_dir().as_path();
     let (dest_wheel, compressed_whl) = if let Some(wheel_info) = wheel_info {
         let dest_wheel = dest_dir.join(wheel_info.filename());
         let mut compressed_whl = ZipWriter::new(File::create(&dest_wheel)?);
@@ -406,8 +406,8 @@ fn compress_whl_chroot(
         (None, None)
     };
 
-    let data_dir = wheel_file.data_dir();
-    let pex_info_dir = wheel_dir.join(wheel_file.pex_info_dir());
+    let data_dir = wheel_file.data_dir().as_path();
+    let pex_info_dir = wheel_dir.join(wheel_file.pex_info_dir().to_string());
     let (dest_wheel, compressed_whl) = if let Some(wheel_info) =
         OriginalWheelInfo::load_from_dir(pex_info_dir)?
     {

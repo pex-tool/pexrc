@@ -75,7 +75,7 @@ impl Record {
         wheel_dir: &Path,
         wheel_file: &WheelFile,
     ) -> anyhow::Result<(Self, PathBuf)> {
-        let record_rel_path = wheel_file.dist_info_dir().join("RECORD");
+        let record_rel_path = wheel_file.dist_info_dir().as_path().join("RECORD");
         let record = Self::read(File::open(wheel_dir.join(&record_rel_path))?)?;
         Ok((record, record_rel_path))
     }
@@ -130,9 +130,9 @@ impl Record {
             .delimiter(b',')
             .terminator(*self.borrow_terminator())
             .from_writer(&mut data);
-        let pex_info_dir = wheel_file.pex_info_dir().display().to_string();
+        let pex_info_dir = wheel_file.pex_info_dir();
         for entry in self.borrow_entries() {
-            if entry.raw_path.starts_with(&pex_info_dir) {
+            if pex_info_dir.contains(entry.path.as_ref()) {
                 continue;
             }
             if let Some(stash_dir) = stash_dir
