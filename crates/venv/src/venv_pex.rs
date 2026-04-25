@@ -445,14 +445,14 @@ fn populate_from_zip_app_with_whl_deps<'a>(
                 let zip_fp = File::open(zip_app_pex.path)?;
                 let mut zip =
                     unsafe { ZipArchive::unsafe_new_with_metadata(zip_fp, metadata.clone()) };
-                let whl_file = zip.by_name_seek(&[".deps", wheel_file_name].join("/"))?;
+                let whl_name = [".deps", wheel_file_name].join("/");
+                let whl_file = zip.by_name_seek(&whl_name)?;
                 let whl_zip = ZipArchive::new(whl_file)?;
                 let whl_zip_metadata = whl_zip.metadata();
                 (0..whl_zip.len()).into_par_iter().try_for_each(|index| {
                     let zip_fp = File::open(zip_app_pex.path)?;
                     let mut zip =
                         unsafe { ZipArchive::unsafe_new_with_metadata(zip_fp, metadata.clone()) };
-                    let whl_name = [".deps", wheel_file_name].join("/");
                     let whl_file = zip.by_name_seek(&whl_name)?;
                     let mut whl_zip = unsafe {
                         ZipArchive::unsafe_new_with_metadata(whl_file, whl_zip_metadata.clone())

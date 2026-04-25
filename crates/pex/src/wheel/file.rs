@@ -1,15 +1,58 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::fmt::{Display, Formatter, Write};
-use std::path::PathBuf;
+use std::fmt::{Display, Formatter};
+use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
 
 use anyhow::{anyhow, bail};
-use indexmap::IndexSet;
 use interpreter::Tag;
 use pep440_rs::Version;
 use pep508_rs::PackageName;
+
+pub(crate) struct WheelDir<'a> {
+    project_name: &'a str,
+    version: &'a str,
+    suffix: &'a str,
+}
+
+impl<'a> WheelDir<'a> {
+    pub(crate) fn contains(&self, path: &Path) -> bool {
+        if let Some(Component::Normal(start)) = path.components().next() {
+            let start = start.as_encoded_bytes();
+            if start.starts_with(self.project_name.as_bytes()) {
+                let start = &start[self.project_name.len()..];
+                if start.starts_with(b"-") {
+                    let start = &start[1..];
+                    if start.starts_with(self.version.as_bytes()) {
+                        let start = &start[self.version.len()..];
+                        if start.starts_with(b".") {
+                            let start = &start[1..];
+                            return start == self.suffix.as_bytes();
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    pub(crate) fn as_path(&self) -> PathBuf {
+        self.to_string().into()
+    }
+}
+
+impl<'a> Display for WheelDir<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{project_name}-{version}.{suffix}",
+            project_name = self.project_name,
+            version = self.version,
+            suffix = self.suffix
+        )
+    }
+}
 
 pub struct WheelFile<'a> {
     pub(crate) file_name: &'a str,
@@ -17,7 +60,7 @@ pub struct WheelFile<'a> {
     pub(crate) project_name: PackageName,
     pub(crate) raw_version: &'a str,
     pub(crate) version: Version,
-    pub(crate) build_tag: Option<&'a str>,
+    _build_tag: Option<&'a str>,
     pub(crate) tags: Vec<Tag<'a>>,
 }
 
@@ -84,70 +127,35 @@ impl<'a> WheelFile<'a> {
             project_name,
             raw_version,
             version,
-            build_tag,
+            _build_tag: build_tag,
             tags,
         })
     }
 
-    pub fn data_dir(&self) -> PathBuf {
-        self.pnav_dir("data")
+    pub fn data_dir(&self) -> WheelDir<'a> {
+        self.wheel_dir("data")
     }
 
-    pub fn dist_info_dir(&self) -> PathBuf {
-        self.pnav_dir("dist-info")
+    pub fn dist_info_dir(&self) -> WheelDir<'a> {
+        self.wheel_dir("dist-info")
     }
 
-    pub fn pex_info_dir(&self) -> PathBuf {
-        self.pnav_dir("pex-info")
+    pub fn pex_info_dir(&self) -> WheelDir<'a> {
+        self.wheel_dir("pex-info")
     }
 
-    fn pnav_dir(&self, name: &str) -> PathBuf {
-        format!(
-            "{project_name}-{version}.{name}",
-            project_name = self.raw_project_name,
-            version = self.raw_version
-        )
-        .into()
-    }
-
-    fn write_tag_component(
-        &self,
-        f: &mut Formatter<'_>,
-        extract_tag_component: impl Fn(&Tag<'a>) -> &'a str,
-    ) -> std::fmt::Result {
-        f.write_char('-')?;
-        for (idx, python) in self
-            .tags
-            .iter()
-            .map(extract_tag_component)
-            .collect::<IndexSet<_>>()
-            .into_iter()
-            .enumerate()
-        {
-            if idx > 0 {
-                f.write_char('.')?;
-            }
-            f.write_str(python)?;
+    fn wheel_dir(&self, suffix: &'a str) -> WheelDir<'a> {
+        WheelDir {
+            project_name: self.raw_project_name,
+            version: self.raw_version,
+            suffix,
         }
-        Ok(())
     }
 }
 
 impl<'a> Display for WheelFile<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{project_name}-{version}",
-            project_name = self.raw_project_name,
-            version = self.raw_version
-        )?;
-        if let Some(build_tag) = self.build_tag {
-            write!(f, "-{build_tag}")?;
-        }
-        self.write_tag_component(f, |tag| tag.python)?;
-        self.write_tag_component(f, |tag| tag.abi)?;
-        self.write_tag_component(f, |tag| tag.platform)?;
-        Ok(())
+        f.write_str(self.file_name)
     }
 }
 
@@ -225,7 +233,7 @@ mod tests {
             wheel_file.project_name
         );
         assert_eq!("1.14.3", wheel_file.raw_version);
-        assert_eq!(Some("2"), wheel_file.build_tag);
+        assert_eq!(Some("2"), wheel_file._build_tag);
         assert_eq!(Version::from_str("1.14.3").unwrap(), wheel_file.version);
         assert_eq!(
             vec![Tag {
