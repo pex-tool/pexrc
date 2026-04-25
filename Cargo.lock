@@ -1711,6 +1711,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
+name = "oneshot"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfe21416a02c693fb9f980befcb230ecc70b0b3d1cc4abf88b9675c4c1457f0c"
+
+[[package]]
 name = "open"
 version = "5.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3141,12 +3147,14 @@ dependencies = [
  "log",
  "logging",
  "logging_timer",
+ "oneshot",
  "open",
  "owo-colors",
  "pep440_rs",
  "pep508_rs",
  "pex",
  "rayon",
+ "regex",
  "scripts",
  "serde",
  "serde_json",
