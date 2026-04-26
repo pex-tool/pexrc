@@ -17,7 +17,7 @@ fs-err = { workspace = true }
 hex = { workspace = true }
 itertools = { workspace = true }
 platform = { path = "../platform" }
-reqwest = { path = "../reqwest" }
+request = { path = "../request" }
 serde = { workspace = true }
 sha2 = { workspace = true }
 strum = { workspace = true }

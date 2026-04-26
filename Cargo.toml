@@ -22,7 +22,7 @@ members = [
     "crates/pexrs",
     "crates/platform",
     "crates/python-proxy",
-    "crates/reqwest",
+    "crates/request",
     "crates/scripts",
     "crates/target",
     "crates/testing",
@@ -227,7 +227,7 @@ pexrs = { path = "crates/pexrs" }
 platform = { path = "crates/platform" }
 python-proxy = { path = "crates/python-proxy" }
 rayon = { workspace = true }
-reqwest = { path = "crates/reqwest" }
+request = { path = "crates/request" }
 scripts = { path = "crates/scripts", features = ["embedded"] }
 sha2 = { workspace = true }
 strum = { workspace = true }

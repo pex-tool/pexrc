@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 [package]
-name = "reqwest"
+name = "request"
 edition = "2024"
 publish = false
 

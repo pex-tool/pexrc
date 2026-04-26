@@ -114,7 +114,7 @@ pub(crate) fn ensure_download(download: &Download, download_dir: &Path) -> anyho
 
     let url = Url::parse(download.url.as_ref())?;
 
-    let response = reqwest::get(url.as_ref())?;
+    let response = request::get(url.as_ref())?;
     if let Some(actual_size) = response.content_length()
         && actual_size != download.size
     {

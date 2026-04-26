@@ -213,7 +213,7 @@ dependencies = [
  "hex",
  "itertools 0.14.0",
  "platform",
- "reqwest 0.0.0",
+ "request",
  "serde",
  "sha2 0.11.0",
  "strum",
@@ -2020,7 +2020,7 @@ dependencies = [
  "platform",
  "python-proxy",
  "rayon",
- "reqwest 0.0.0",
+ "request",
  "scripts",
  "sha2 0.11.0",
  "strum",
@@ -2410,11 +2410,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba39f3699c378cd8970968dcbff9c43159ea4cfbd88d43c00b22f2ef10a435d2"
 
 [[package]]
-name = "reqwest"
+name = "request"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "reqwest 0.13.2",
+ "reqwest",
  "rustls",
  "url",
 ]
