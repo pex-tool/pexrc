@@ -30,7 +30,7 @@ members = [
 ]
 
 [package.metadata.build]
-zig_version = "0.15.2"
+zig_version = "0.16.0"
 
 [package.metadata.build.cargo_binstall]
 version = "1.17.4"
@@ -171,7 +171,7 @@ pep508_rs = "0.9"
 python-pkginfo = "0.6"
 rayon = "1.12"
 regex = "1.12"
-reqwest = { version = "0.13", features = ["blocking"] }
+reqwest = { version = "0.13", default-features = false }
 rstest = "0.26"
 rust-ini = "0.21"
 same-file = "1.0"
@@ -191,7 +191,7 @@ url = "2.5"
 walkdir = "2.5"
 which = "8.0"
 xz2 = "0.1"
-zip = { version = "8.5", default-features = false, features = ["chrono", "deflate", "zstd"] }
+zip = { version = "8.6", default-features = false, features = ["chrono", "deflate", "zstd"] }
 zstd = "0.13"
 
 [build-dependencies]
@@ -227,7 +227,6 @@ pexrs = { path = "crates/pexrs" }
 platform = { path = "crates/platform" }
 python-proxy = { path = "crates/python-proxy" }
 rayon = { workspace = true }
-reqwest = { workspace = true }
 scripts = { path = "crates/scripts", features = ["embedded"] }
 sha2 = { workspace = true }
 strum = { workspace = true }
@@ -237,3 +236,15 @@ url = { workspace = true }
 walkdir = { workspace = true }
 zip = { workspace = true }
 zstd = { workspace = true }
+
+# N.B.: We re-iterate "charset", "http2", "system-proxy" from the defaults we disabled in the
+# workspace dependency. We only really need:
+# 1. blocking
+# 2. rustls-no-provider instead of rustls (this drops aws-lc-sys which does not cross-compile
+# on macos currently)
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+reqwest = { workspace = true, features = ["blocking", "charset", "http2", "system-proxy", "default-tls"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+reqwest = { workspace = true, features = ["blocking", "charset", "http2", "system-proxy", "rustls-no-provider"] }
