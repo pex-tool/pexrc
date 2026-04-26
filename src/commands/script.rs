@@ -1,9 +1,9 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::fs;
 use std::path::Path;
 
+use fs_err as fs;
 use python_proxy::ProxySource;
 
 use crate::embeds::read_proxy_content;
@@ -20,7 +20,7 @@ pub fn create(
     python_proxy::create(
         ProxySource::Read(proxy_bytes),
         python,
-        target_script,
+        target_script.into_file(),
         Some(script),
     )
 }
