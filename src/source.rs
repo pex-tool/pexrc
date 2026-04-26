@@ -31,7 +31,7 @@ pub fn to_path(source: String, fetch_dest_dir: Option<&Path>) -> anyhow::Result<
                 let dest_file = dest_dir.join(file_name);
 
                 let mut contents = tempfile::NamedTempFile::new_in(&dest_dir)?;
-                let mut response = reqwest::blocking::get(url)?;
+                let mut response = reqwest::get(url)?;
                 io::copy(&mut response, &mut contents)?;
                 contents.persist(&dest_file)?;
                 Ok(dest_file)

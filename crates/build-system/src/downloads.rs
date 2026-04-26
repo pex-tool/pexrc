@@ -10,6 +10,7 @@ use fs_err as fs;
 use fs_err::File;
 use sha2::{Digest, Sha256};
 use url::Url;
+
 use crate::metadata::{Download, FileType};
 
 struct DigestReader<'a, D: Digest, R: Read> {
@@ -113,7 +114,7 @@ pub(crate) fn ensure_download(download: &Download, download_dir: &Path) -> anyho
 
     let url = Url::parse(download.url.as_ref())?;
 
-    let response = reqwest::blocking::get(url.as_ref())?;
+    let response = reqwest::get(url.as_ref())?;
     if let Some(actual_size) = response.content_length()
         && actual_size != download.size
     {

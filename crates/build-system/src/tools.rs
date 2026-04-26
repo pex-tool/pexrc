@@ -135,6 +135,12 @@ fn get_zig_version(zig: &Path) -> Option<String> {
         })
 }
 
+fn check_zig_version(version: &str, zig: &Path) -> bool {
+    get_zig_version(zig)
+        .map(|zig_version| zig_version == version)
+        .unwrap_or_default()
+}
+
 pub struct InstallDirs {
     bin_dir: PathBuf,
     pub(crate) data_dir: PathBuf,
@@ -295,6 +301,7 @@ fn install_tools<'a>(
             if platform::is_executable(&python_zig)
                 .ok()
                 .unwrap_or_default()
+                && check_zig_version(version, &python_zig)
             {
                 return Ok(Cow::Owned(FoundTool {
                     env_var: ZIG_TOOL_ENV_VAR,
@@ -306,6 +313,7 @@ fn install_tools<'a>(
                 if platform::is_executable(&python_zig_exe)
                     .ok()
                     .unwrap_or_default()
+                    && check_zig_version(version, &python_zig_exe)
                 {
                     return Ok(Cow::Owned(FoundTool {
                         env_var: ZIG_TOOL_ENV_VAR,

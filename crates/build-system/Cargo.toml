@@ -17,6 +17,7 @@ fs-err = { workspace = true }
 hex = { workspace = true }
 itertools = { workspace = true }
 platform = { path = "../platform" }
+reqwest = { path = "../reqwest" }
 serde = { workspace = true }
 sha2 = { workspace = true }
 strum = { workspace = true }
@@ -30,15 +31,3 @@ url = { workspace = true }
 xz2 = { workspace = true }
 zip = { workspace = true }
 which = { workspace = true }
-
-# N.B.: We re-iterate "charset", "http2", "system-proxy" from the defaults we disabled in the
-# workspace dependency. We only really need:
-# 1. blocking
-# 2. rustls-no-provider instead of rustls (this drops aws-lc-sys which does not cross-compile
-# on macos currently)
-
-[target.'cfg(not(target_os = "macos"))'.dependencies]
-reqwest = { workspace = true, features = ["blocking", "charset", "http2", "system-proxy", "default-tls"] }
-
-[target.'cfg(target_os = "macos")'.dependencies]
-reqwest = { workspace = true, features = ["blocking", "charset", "http2", "system-proxy", "rustls-no-provider"] }
