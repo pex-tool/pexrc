@@ -22,4 +22,12 @@ pub use pex::{
 };
 pub use pex_info::{BinPath, InheritPath, InterpreterSelectionStrategy, PexInfo};
 pub use pex_path::PexPath;
-pub use wheel::{EntryPoint, EntryPoints, WheelMetadata, WheelOptions, repackage_wheels};
+pub use wheel::{
+    EntryPoint,
+    EntryPoints,
+    WheelFile,
+    WheelMetadata,
+    WheelOptions,
+    recompress_zipped_whl,
+    repackage_wheels,
+};

@@ -65,7 +65,7 @@ pub struct WheelFile<'a> {
 }
 
 impl<'a> WheelFile<'a> {
-    pub(crate) fn parse_file_name(file_name: &'a str) -> anyhow::Result<Self> {
+    pub fn parse_file_name(file_name: &'a str) -> anyhow::Result<Self> {
         // See: https://packaging.python.org/en/latest/specifications/binary-distribution-format/#file-name-convention
         // {distribution}-{version}(-{build tag})?-{python tag}-{abi tag}-{platform tag}.whl
         if !file_name.ends_with(".whl") {
@@ -132,15 +132,15 @@ impl<'a> WheelFile<'a> {
         })
     }
 
-    pub fn data_dir(&self) -> WheelDir<'a> {
+    pub(crate) fn data_dir(&self) -> WheelDir<'a> {
         self.wheel_dir("data")
     }
 
-    pub fn dist_info_dir(&self) -> WheelDir<'a> {
+    pub(crate) fn dist_info_dir(&self) -> WheelDir<'a> {
         self.wheel_dir("dist-info")
     }
 
-    pub fn pex_info_dir(&self) -> WheelDir<'a> {
+    pub(crate) fn pex_info_dir(&self) -> WheelDir<'a> {
         self.wheel_dir("pex-info")
     }
 

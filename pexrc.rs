@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use pex::{Pex, WheelOptions};
-use pexrc::commands::{extract, info, inject, script};
+use pexrc::commands::{extract, info, inject, repackage, script};
 use pexrc::embeds::{CLIB_BY_TARGET, PROXY_BY_TARGET};
 use pexrc::source;
 use target::Target;
@@ -78,6 +78,21 @@ enum Commands {
     },
     /// Provide information about the supported target runtimes.
     Info,
+    /// Re-package a traditional whl as a zstd compressed whl.
+    Repackage {
+        #[arg(short = 'Z', long, value_enum, default_value_t = CompressionMethod::Zstd)]
+        compression_method: CompressionMethod,
+
+        #[arg(long)]
+        compression_level: Option<i64>,
+
+        /// The directory to extract the wheels to.
+        #[arg(short = 'd', long)]
+        dest_dir: PathBuf,
+
+        #[arg(value_name = "WHEEL", required = true)]
+        wheels: Vec<String>,
+    },
     /// Create a Windows-style Python venv console script executable.
     Script {
         #[arg(long)]
@@ -160,6 +175,22 @@ fn main() -> anyhow::Result<()> {
             )
         }
         Commands::Info => info::display(),
+        Commands::Repackage {
+            compression_method,
+            compression_level,
+            dest_dir,
+            wheels,
+        } => {
+            let wheels = wheels
+                .into_iter()
+                .map(|source| source::to_path(source, None))
+                .collect::<anyhow::Result<Vec<_>>>()?;
+            repackage::repackage_all(
+                wheels,
+                &WheelOptions::new(compression_method.into(), compression_level, None),
+                &dest_dir,
+            )
+        }
         Commands::Script {
             target,
             python,
