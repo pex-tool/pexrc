@@ -66,7 +66,7 @@ jobs:
         run: |
           chmod +x target/release/package
           export CARGO="$(command -v cargo)"
-          target/release/package \
+          PEXRC_CLIB_FEATURES=tools target/release/package \
             --color always --profile release -o dist --target ${{ matrix.target }}
       - name: Upload pexrc artifacts
         uses: actions/upload-artifact@v7

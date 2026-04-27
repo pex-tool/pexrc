@@ -12,7 +12,7 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use chrono::NaiveDateTime;
+use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use clap::Args;
 use flate2::Compression;
 use flate2::write::GzEncoder;
@@ -25,10 +25,12 @@ use pex::{
     Pex,
     PexInfo,
     PexPath,
+    WheelOptions,
     collect_loose_user_source,
     collect_zipped_user_source_indexes,
 };
 use scripts::IdentifyInterpreter;
+use tar::Header;
 use zip::{CompressionMethod, ZipArchive};
 
 #[derive(Args)]
@@ -68,18 +70,20 @@ runs."
 }
 
 pub(crate) fn extract(python: &Path, pex: Pex, args: ExtractArgs) -> anyhow::Result<()> {
-    // TODO: XXX: Plumb this or warn and ignore?
-    // args.use_system_time
-
-    pex::repackage_wheels(&pex, CompressionMethod::Deflated, None, &args.dest_dir)?;
+    let timestamp = if args.use_system_time {
+        None
+    } else {
+        Some(
+            Utc.with_ymd_and_hms(1980, 1, 1, 0, 0, 0)
+                .single()
+                .expect("This is an unambiguous date."),
+        )
+    };
+    let options = WheelOptions::new(CompressionMethod::Deflated, None, timestamp);
+    pex::repackage_wheels(&pex, &options, &args.dest_dir)?;
     let pex_path = PexPath::from_pex_info(&pex.info, true);
     for additional_pex in pex_path.load_pexes()? {
-        pex::repackage_wheels(
-            &additional_pex,
-            CompressionMethod::Deflated,
-            None,
-            &args.dest_dir,
-        )?;
+        pex::repackage_wheels(&additional_pex, &options, &args.dest_dir)?;
     }
 
     if args.sources || args.serve {
@@ -88,7 +92,7 @@ pub(crate) fn extract(python: &Path, pex: Pex, args: ExtractArgs) -> anyhow::Res
         let interpreter = Interpreter::load(python, &identify_interpreter)?;
         let pex_path = pex.path;
         if args.sources {
-            extract_sdist(pex_path, pex.layout, pex.info, &interpreter, &args.dest_dir)?;
+            extract_sdist(pex_path, pex.layout, pex.info, &args.dest_dir, timestamp)?;
         }
         if args.serve {
             serve(
@@ -107,8 +111,8 @@ fn extract_sdist(
     pex_path: &Path,
     layout: Layout,
     pex_info: PexInfo,
-    _interpreter: &Interpreter,
     dest_dir: &Path,
+    timestamp: Option<DateTime<Utc>>,
 ) -> anyhow::Result<()> {
     let project_name = pex_path.file_stem().expect("A PEX always has a file name");
     let version = format!("0.0.0+{code_hash}", code_hash = pex_info.code_hash);
@@ -123,10 +127,15 @@ fn extract_sdist(
     let top_dir = PathBuf::from(pnav);
     let src_dir = top_dir.join("src");
     let sources = match layout {
-        Layout::Packed | Layout::Loose => add_loose_source(&mut tar, &src_dir, pex_path)?,
-        Layout::ZipApp => {
-            add_zipped_source(&mut tar, &src_dir, ZipArchive::new(File::open(pex_path)?)?)?
+        Layout::Packed | Layout::Loose => {
+            add_loose_source(&mut tar, &src_dir, pex_path, timestamp)?
         }
+        Layout::ZipApp => add_zipped_source(
+            &mut tar,
+            &src_dir,
+            ZipArchive::new(File::open(pex_path)?)?,
+            timestamp,
+        )?,
     };
     add_sdist_files(
         &mut tar,
@@ -136,6 +145,7 @@ fn extract_sdist(
         pex_path,
         pex_info,
         sources,
+        timestamp,
     )?;
     tar.finish()?;
 
@@ -143,6 +153,7 @@ fn extract_sdist(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn add_sdist_files(
     tar: &mut tar::Builder<GzEncoder<File>>,
     top_dir: &Path,
@@ -151,11 +162,13 @@ fn add_sdist_files(
     pex_path: &Path,
     pex_info: PexInfo,
     sources: Sources,
+    timestamp: Option<DateTime<Utc>>,
 ) -> anyhow::Result<()> {
     add_file(
         tar,
         top_dir,
         "pyproject.toml",
+        timestamp,
         Cow::Borrowed(
             r#"
 [build-system]
@@ -207,7 +220,7 @@ backend = "setuptools.build_meta"
     for requirement in &pex_info.requirements {
         writeln!(&mut pkg_info, "Requires-Dist: {requirement}")?;
     }
-    add_file(tar, top_dir, "PKG-INFO", Cow::Owned(pkg_info))?;
+    add_file(tar, top_dir, "PKG-INFO", timestamp, Cow::Owned(pkg_info))?;
 
     struct IniList(&'static str, Vec<String>);
     impl Display for IniList {
@@ -245,6 +258,7 @@ backend = "setuptools.build_meta"
         tar,
         top_dir,
         "setup.cfg",
+        timestamp,
         Cow::Owned(format!(
             r#"
 [metadata]
@@ -273,12 +287,14 @@ include_package_data = True
         tar,
         top_dir,
         "setup.py",
+        timestamp,
         Cow::Borrowed("import setuptools; setuptools.setup()"),
     )?;
     add_file(
         tar,
         top_dir,
         "MANIFEST.in",
+        timestamp,
         Cow::Borrowed("recursive-include src *"),
     )?;
     Ok(())
@@ -288,15 +304,29 @@ fn add_file(
     tar: &mut tar::Builder<GzEncoder<File>>,
     top_dir: &Path,
     path: impl AsRef<Path>,
+    timestamp: Option<DateTime<Utc>>,
     content: Cow<'_, str>,
 ) -> anyhow::Result<()> {
-    let mut header = tar::Header::new_ustar();
-    header.set_path(top_dir.join(path))?;
-    header.set_size(u64::try_from(content.as_ref().len())?);
-    header.set_mode(0o644);
-    header.set_cksum();
+    let size = u64::try_from(content.as_ref().len())?;
+    let header = create_header(top_dir.join(path), size, timestamp)?;
     tar.append(&header, Cursor::new(content.as_ref()))?;
     Ok(())
+}
+
+fn create_header(
+    path: impl AsRef<Path>,
+    size: u64,
+    timestamp: Option<DateTime<Utc>>,
+) -> anyhow::Result<Header> {
+    let mut header = tar::Header::new_ustar();
+    header.set_path(path.as_ref())?;
+    header.set_size(size);
+    header.set_mode(0o644);
+    if let Some(timestamp) = timestamp {
+        header.set_mtime(u64::try_from(timestamp.timestamp())?)
+    }
+    header.set_cksum();
+    Ok(header)
 }
 
 struct Sources {
@@ -317,6 +347,7 @@ fn add_zipped_source(
     tar: &mut tar::Builder<impl Write>,
     src_dir: &Path,
     mut pex: ZipArchive<File>,
+    timestamp: Option<DateTime<Utc>>,
 ) -> anyhow::Result<Sources> {
     let mut sources = Sources::new();
     for index in collect_zipped_user_source_indexes(&pex) {
@@ -351,7 +382,9 @@ fn add_zipped_source(
         if let Some(unix_mode) = entry.unix_mode() {
             header.set_mode(unix_mode)
         }
-        if let Some(last_modified) = entry.last_modified()
+        if let Some(timestamp) = timestamp {
+            header.set_mtime(u64::try_from(timestamp.timestamp())?);
+        } else if let Some(last_modified) = entry.last_modified()
             && let Ok(last_modified) = NaiveDateTime::try_from(last_modified)
             && let Ok(mtime) = u64::try_from(last_modified.and_utc().timestamp())
         {
@@ -367,6 +400,7 @@ fn add_loose_source(
     tar: &mut tar::Builder<impl Write>,
     src_dir: &Path,
     pex: &Path,
+    timestamp: Option<DateTime<Utc>>,
 ) -> anyhow::Result<Sources> {
     let mut sources = Sources::new();
     for entry in collect_loose_user_source(pex)? {
@@ -407,15 +441,19 @@ fn add_loose_source(
             }
             sources.packages.insert(package);
         }
-        tar.append_path_with_name(
-            entry.path(),
-            src_dir.join(
-                entry
-                    .path()
-                    .strip_prefix(pex)
-                    .expect("Walker paths of a PEX directory are always sub-paths"),
-            ),
-        )?
+        let dst = src_dir.join(
+            entry
+                .path()
+                .strip_prefix(pex)
+                .expect("Walker paths of a PEX directory are always sub-paths"),
+        );
+        if timestamp.is_some() {
+            let size = entry.metadata()?.len();
+            let header = create_header(dst, size, timestamp)?;
+            tar.append(&header, File::open(entry.path())?)?
+        } else {
+            tar.append_path_with_name(entry.path(), dst)?
+        }
     }
     Ok(sources)
 }
