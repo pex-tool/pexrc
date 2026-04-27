@@ -237,9 +237,22 @@ fn prepare_venv<'a>(
         #[cfg(unix)]
         if let Some(sh_boot_seed_dir) = sh_boot_seed_dir {
             fs_err::create_dir_all(&sh_boot_seed_dir)?;
+            let python = venv_interpreter.most_specific_exe_name();
+            // N.B.: This symlink is probed by the --sh-boot script to confirm the venv is still
+            // linked to an existing base Python (no uninstalls or upgrades).
+            platform::unix::symlink(
+                venv_interpreter
+                    .clone()
+                    .resolve_base_interpreter(&mut pex.scripts()?)?
+                    .path,
+                sh_boot_seed_dir.join(format!("base-{python}")),
+                false,
+            )?;
+            // N.B.: This is what the --sh-boot script executes after the probe for venv viability
+            // succeeds.
             platform::unix::symlink(
                 venv_dir.join("pex"),
-                sh_boot_seed_dir.join(venv_interpreter.most_specific_exe_name()),
+                sh_boot_seed_dir.join(format!("pex-{python}")),
                 true,
             )?;
         }

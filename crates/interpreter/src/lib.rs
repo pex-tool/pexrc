@@ -13,7 +13,12 @@ mod platform;
 mod search_path;
 mod tag;
 
-pub use constraints::{InterpreterConstraint, InterpreterConstraints, SelectionStrategy};
+pub use constraints::{
+    InterpreterConstraint,
+    InterpreterConstraints,
+    SelectionStrategy,
+    VersionSpec,
+};
 pub use interpreter::Interpreter;
 pub use platform::Platform;
 pub use search_path::SearchPath;

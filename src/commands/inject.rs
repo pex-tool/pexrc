@@ -57,7 +57,9 @@ fn inject_pex_dir(
 ) -> anyhow::Result<()> {
     // Make sure we have a shebang early. This partially validates the pex to inject is a valid one
     // before expending too much effort copying files below.
-    let shebang = if let Some(sh_boot_shebang) = sh_boot_shebang(pex.path, true)? {
+    let shebang = if let Some(sh_boot_shebang) =
+        sh_boot_shebang(pex.path, pex.info.venv_hermetic_scripts, true)?
+    {
         sh_boot_shebang
     } else {
         let original_main = pex.path.join("__main__.py");
@@ -192,7 +194,9 @@ fn inject_pex_zip(
 ) -> anyhow::Result<()> {
     let zip_read_fp = File::open(pex.path)?;
     let mut src_zip = ZipArchive::new(&zip_read_fp)?;
-    let prefix = if let Some(sh_boot_shebang) = sh_boot_shebang(pex.path, false)? {
+    let prefix = if let Some(sh_boot_shebang) =
+        sh_boot_shebang(pex.path, pex.info.venv_hermetic_scripts, false)?
+    {
         Some(sh_boot_shebang.into_bytes())
     } else {
         let first_entry = src_zip.by_index(0)?;

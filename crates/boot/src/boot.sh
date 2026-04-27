@@ -13,6 +13,7 @@ set -eu
 RAW_DEFAULT_PEXRC_ROOT="{pexrc_root}"
 VENV_RELPATH="{venv_relpath}"
 PYTHONS="{pythons}"
+PYTHON_ARGS="{python_args}"
 # --- split --- #
 
 # N.B.: The SC2116 warning suppressions below are in place to ensure tilde-expansion of the
@@ -38,21 +39,18 @@ on_fast_path() {
     [ -z "${PEX_IGNORE_RCFILES:-}" ] \
       && [ -z "${PEX_PYTHON:-}" ] \
       && [ -z "${PEX_PYTHON_PATH:-}" ] \
-      && [ -z "${PEX_PATH:-}" ]
+      && [ -z "${PEX_PATH:-}" ] \
+      && [ -z "${PEX_TOOLS:-}" ]
 }
 
 if on_fast_path; then
   for python in ${PYTHONS} ; do
-      if [ -x "${VENV}/sh-boot/${python}" ]; then
+      if [ -x "${VENV}/sh-boot/base-${python}" ] && [ -x "${VENV}/sh-boot/pex-${python}" ]; then
           # The fast path: We're installed under the PEXRC_ROOT and the venv interpreter to use is
           # embedded in the shebang of our venv pex script; so just execute that script directly.
           export PEX="$0"
 
-          # TODO: XXX: Instead of linking the venv pex script to the sh-boot python, link the
-          # venv python. This will ensure when a base interpreter gets uninstalled, the venv will
-          # automatically invalidate. As it stands the venv pex script we link to can exist but have
-          # a shebang whose python is gone.
-          exec "${VENV}/sh-boot/${python}" "$@"
+          exec "${VENV}/sh-boot/pex-${python}" "$@"
       fi
   done
 fi
@@ -71,11 +69,14 @@ python_exe="$(find_python)"
 if [ -n "${python_exe}" ]; then
     if [ -n "${PEX_VERBOSE:-}" ]; then
         echo >&2 "$0 used /bin/sh boot to select python: ${python_exe} for re-exec..."
-        echo >&2 "Running pex to lay itself out under PEXRC_ROOT."
+        if [ -n "${PEX_VERBOSE:-}" ]; then
+          echo >&2 "Running pex to invoke PEX_TOOLS."
+        else
+          echo >&2 "Running pex to lay itself out under PEXRC_ROOT."
+        fi
     fi
     export _PEXRC_SH_BOOT_SEED_DIR="${VENV}/sh-boot"
-    # TODO: XXX: Inject -sE or -I if hermetic?
-    exec "${python_exe}" "$0" "$@"
+    exec "${python_exe}" "${PYTHON_ARGS}" "$0" "$@"
 fi
 
 echo >&2 "Failed to find any of these python binaries on the PATH:"
