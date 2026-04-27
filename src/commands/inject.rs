@@ -14,7 +14,7 @@ use fs_err::File;
 use indexmap::IndexMap;
 use log::info;
 use owo_colors::OwoColorize;
-use pex::{Layout, Pex};
+use pex::{Layout, Pex, WheelOptions};
 use platform::mark_executable;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use scripts::Scripts;
@@ -26,39 +26,32 @@ use crate::embeds::{CLIBS_DIR, PROXIES_DIR};
 
 pub fn inject_all(
     pexes: Vec<PathBuf>,
-    compression_method: CompressionMethod,
-    compression_level: Option<i64>,
+    options: &WheelOptions,
     clibs: Option<&HashSet<&Path>>,
     proxies: Option<&HashSet<&Path>>,
 ) -> anyhow::Result<()> {
     for pex in pexes {
-        inject(&pex, compression_method, compression_level, clibs, proxies)?
+        inject(&pex, options, clibs, proxies)?
     }
     Ok(())
 }
 
 fn inject(
     pex: &Path,
-    compression_method: CompressionMethod,
-    compression_level: Option<i64>,
+    options: &WheelOptions,
     clibs: Option<&HashSet<&Path>>,
     proxies: Option<&HashSet<&Path>>,
 ) -> anyhow::Result<()> {
     let pex = Pex::load(pex)?;
     match pex.layout {
-        Layout::Loose | Layout::Packed => {
-            inject_pex_dir(pex, compression_method, compression_level, clibs, proxies)
-        }
-        Layout::ZipApp => {
-            inject_pex_zip(pex, compression_method, compression_level, clibs, proxies)
-        }
+        Layout::Loose | Layout::Packed => inject_pex_dir(pex, options, clibs, proxies),
+        Layout::ZipApp => inject_pex_zip(pex, options, clibs, proxies),
     }
 }
 
 fn inject_pex_dir(
     mut pex: Pex,
-    compression_method: CompressionMethod,
-    compression_level: Option<i64>,
+    options: &WheelOptions,
     clibs: Option<&HashSet<&Path>>,
     proxies: Option<&HashSet<&Path>>,
 ) -> anyhow::Result<()> {
@@ -107,7 +100,7 @@ fn inject_pex_dir(
         }
     }
     let deps_dir = dest_pex.path().join(".deps");
-    pex::repackage_wheels(&pex, compression_method, compression_level, &deps_dir)?;
+    pex::repackage_wheels(&pex, options, &deps_dir)?;
     pex.info.deps_are_wheel_files = true;
     let wheel_file_names = pex.info.distributions.into_keys().collect::<Vec<_>>();
     pex.info.distributions = wheel_file_names
@@ -193,8 +186,7 @@ fn embed_in_dir(
 
 fn inject_pex_zip(
     mut pex: Pex,
-    compression_method: CompressionMethod,
-    compression_level: Option<i64>,
+    options: &WheelOptions,
     clibs: Option<&HashSet<&Path>>,
     proxies: Option<&HashSet<&Path>>,
 ) -> anyhow::Result<()> {
@@ -231,10 +223,8 @@ fn inject_pex_zip(
     }
     let mut dst_zip = ZipWriter::new(&dst_zip_fp);
 
-    let zstd_file_options = SimpleFileOptions::default()
-        .compression_method(compression_method)
-        .compression_level(compression_level);
-    let other_file_options =
+    let file_options = options.file_options()?;
+    let deflated_file_options =
         SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
     let directory_options = SimpleFileOptions::default();
     for index in 0..src_zip.len() {
@@ -251,9 +241,9 @@ fn inject_pex_zip(
             dst_zip.add_directory(entry_name, directory_options)?
         } else {
             let options = if entry_name == "PEX-INFO" {
-                other_file_options
+                deflated_file_options
             } else {
-                zstd_file_options
+                file_options
             };
             dst_zip.start_file(entry_name, options)?;
             io::copy(&mut src_file, &mut dst_zip)?;
@@ -263,7 +253,7 @@ fn inject_pex_zip(
     let deps_dir = tempfile::tempdir_in(pex.path.parent().unwrap_or_else(|| Path::new(".")))?;
     let stored_file_options =
         SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
-    pex::repackage_wheels(&pex, compression_method, compression_level, deps_dir.path())?;
+    pex::repackage_wheels(&pex, options, deps_dir.path())?;
     pex.info.deps_are_wheel_files = true;
     let mut distributions = IndexMap::with_capacity(pex.info.distributions.len());
     for wheel_file_name in pex.info.distributions.into_keys() {
@@ -281,7 +271,7 @@ fn inject_pex_zip(
     pex.info.distributions = distributions;
 
     dst_zip.add_directory("__pex__", directory_options)?;
-    Scripts::Embedded.inject(&mut dst_zip, zstd_file_options)?;
+    Scripts::Embedded.inject(&mut dst_zip, file_options)?;
 
     let deflate_options =
         SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
@@ -316,11 +306,11 @@ fn inject_pex_zip(
             file.contents(),
             &mut dst_zip,
             "__pex__/.proxies",
-            zstd_file_options,
+            file_options,
         )?;
     }
 
-    dst_zip.start_file("PEX-INFO", other_file_options)?;
+    dst_zip.start_file("PEX-INFO", deflated_file_options)?;
     pex.info.write(&mut dst_zip)?;
 
     inject_boot(&mut dst_zip, deflate_options)?;

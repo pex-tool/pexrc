@@ -192,7 +192,6 @@ fn install_scripts(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 #[cfg(unix)]
 fn write_script(
     _pex: &Pex,

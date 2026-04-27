@@ -1,5 +1,14 @@
 # Release Notes
 
+## 0.7.0
+
+This release adds support for PEX_TOOLS when `pexrc` is built with the `tools` feature; e.g.:
+```console
+PEXRC_CLIB_FEATURES=tools cargo build ...
+```
+
+Releases now ship with this feature enabled.
+
 ## 0.6.0
 
 This release adds support for installing venv console scripts.

@@ -93,7 +93,7 @@ jobs:
         run: |
           chmod +x target/release/package
           export CARGO="$(command -v cargo)"
-          target/release/package \
+          PEXRC_CLIB_FEATURES=tools target/release/package \
             --color always --profile release -o dist ${{ matrix.targets }}
       - name: Generate Release Hashes Manifest.
         run: uv run dev-cmd --color always generate-release-hashes -- -i dist

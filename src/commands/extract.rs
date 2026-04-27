@@ -7,16 +7,10 @@ use std::path::Path;
 
 use cache::Fingerprint;
 use owo_colors::OwoColorize;
-use pex::Pex;
-use zip::CompressionMethod;
+use pex::{Pex, WheelOptions};
 
-pub fn to_dir(
-    dest_dir: &Path,
-    pex: Pex,
-    compression_method: CompressionMethod,
-    compression_level: Option<i64>,
-) -> anyhow::Result<()> {
-    let wheels = pex::repackage_wheels(&pex, compression_method, compression_level, dest_dir)?;
+pub fn to_dir(dest_dir: &Path, pex: Pex, options: &WheelOptions) -> anyhow::Result<()> {
+    let wheels = pex::repackage_wheels(&pex, options, dest_dir)?;
     let count = wheels.len();
 
     let mut wheel_info = Vec::with_capacity(count);

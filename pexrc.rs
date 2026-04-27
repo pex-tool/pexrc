@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
-use pex::Pex;
+use pex::{Pex, WheelOptions};
 use pexrc::commands::{extract, info, inject, script};
 use pexrc::embeds::{CLIB_BY_TARGET, PROXY_BY_TARGET};
 use pexrc::source;
@@ -111,8 +111,7 @@ fn main() -> anyhow::Result<()> {
             extract::to_dir(
                 &dest_dir,
                 Pex::load(&pex)?,
-                compression_method.into(),
-                compression_level,
+                &WheelOptions::new(compression_method.into(), compression_level, None),
             )
         }
         Commands::Inject {
@@ -155,8 +154,7 @@ fn main() -> anyhow::Result<()> {
                 .collect::<anyhow::Result<Vec<_>>>()?;
             inject::inject_all(
                 pexes,
-                compression_method.into(),
-                compression_level,
+                &WheelOptions::new(compression_method.into(), compression_level, None),
                 clibs.as_ref(),
                 proxies.as_ref(),
             )
