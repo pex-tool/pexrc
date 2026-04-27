@@ -1,9 +1,11 @@
 # Copyright 2026 Pex project contributors.
 # SPDX-License-Identifier: Apache-2.0
 
+cargo-features = ["profile-rustflags"]
+
 [package]
 name = "pexrc"
-version = "0.7.0"
+version = "0.7.1"
 edition = "2024"
 publish = false
 
@@ -111,6 +113,11 @@ size = 106996
 fingerprint = {
     algorithm = "sha256", hash = "26497108bbd3a71cada865d712878bc3957fcaebf2bc431357f560f0524e6273"
 }
+
+[profile.dev]
+# N.B.: This is needed to get a debug build for the Windows clib dll. It turns out COFF only
+# supports 2^16 symbols and we have edged over that.
+rustflags = ["-Zshare-generics=off"]
 
 [profile.release]
 codegen-units = 1

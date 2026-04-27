@@ -9,7 +9,7 @@ use std::str::FromStr;
 use std::sync::LazyLock;
 
 use anyhow::bail;
-use indexmap::{IndexSet, indexset};
+use indexmap::{IndexMap, IndexSet};
 use log::{debug, warn};
 use pep440_rs::{Operator, Version, VersionSpecifier, VersionSpecifiers};
 use pep508_rs::{ExtraName, MarkerTree, PackageName, Requirement, VersionOrUrl};
@@ -276,6 +276,11 @@ struct PythonBinarySpec {
     suffix: Option<&'static str>,
 }
 
+pub enum VersionSpec {
+    MajorMinor(u8, u8),
+    Major(u8),
+}
+
 pub struct InterpreterConstraints(Vec<InterpreterConstraint>);
 
 impl InterpreterConstraints {
@@ -384,9 +389,9 @@ impl InterpreterConstraints {
     pub fn calculate_compatible_binary_names(
         &self,
         selection_strategy: SelectionStrategy,
-    ) -> IndexSet<OsString> {
+    ) -> IndexMap<OsString, Option<VersionSpec>> {
         let binary_specs = self.calculate_compatible_binary_specs(selection_strategy);
-        let mut binary_names: IndexSet<OsString> = IndexSet::new();
+        let mut binary_names: IndexMap<OsString, Option<VersionSpec>> = IndexMap::new();
         for binary_spec in &binary_specs {
             binary_names.insert(
                 format!(
@@ -397,6 +402,10 @@ impl InterpreterConstraints {
                     suffix = binary_spec.suffix.unwrap_or("")
                 )
                 .into(),
+                Some(VersionSpec::MajorMinor(
+                    binary_spec.major,
+                    binary_spec.minor,
+                )),
             );
         }
         for binary_spec in &binary_specs {
@@ -407,10 +416,11 @@ impl InterpreterConstraints {
                     major = binary_spec.major
                 )
                 .into(),
+                Some(VersionSpec::Major(binary_spec.major)),
             );
         }
         for binary_spec in &binary_specs {
-            binary_names.insert(binary_spec.name.into());
+            binary_names.insert(binary_spec.name.into(), None);
         }
         binary_names
     }
@@ -422,9 +432,11 @@ impl InterpreterConstraints {
     ) -> anyhow::Result<impl Iterator<Item = PathBuf>> {
         let (python, path, known_paths) = search_path.into_parts()?;
         let binary_names = if let Some(python) = python {
-            indexset! {python}
+            vec![python]
         } else {
             self.calculate_compatible_binary_names(selection_strategy)
+                .into_keys()
+                .collect()
         };
         Ok(PythonExeIter {
             known_paths,
@@ -522,6 +534,7 @@ mod tests {
     use std::ffi::OsStr;
     use std::str::FromStr;
 
+    use indexmap::IndexSet;
     use pep440_rs::VersionSpecifiers;
 
     use crate::constraints::{InterpreterConstraint, InterpreterImplementation};
@@ -602,7 +615,10 @@ mod tests {
     #[test]
     fn test_interpreter_constraints_binary_names_all_default_order() {
         let ics = InterpreterConstraints::try_from::<&str>(&[]).unwrap();
-        let binary_names = ics.calculate_compatible_binary_names(SelectionStrategy::Oldest);
+        let binary_names = ics
+            .calculate_compatible_binary_names(SelectionStrategy::Oldest)
+            .into_keys()
+            .collect::<IndexSet<_>>();
 
         assert_eq!(&["python2.7", "pypy2.7"], &binary_names[0..2]);
 
@@ -646,7 +662,10 @@ mod tests {
     #[test]
     fn test_interpreter_constraints_binary_names_all_newest_first() {
         let ics = InterpreterConstraints::try_from::<&str>(&[]).unwrap();
-        let binary_names = ics.calculate_compatible_binary_names(SelectionStrategy::Newest);
+        let binary_names = ics
+            .calculate_compatible_binary_names(SelectionStrategy::Newest)
+            .into_keys()
+            .collect::<IndexSet<_>>();
 
         assert!(
             binary_names.get_index_of(os_str("python3.15"))
@@ -705,6 +724,8 @@ mod tests {
                 "pypy",
             ],
             ics.calculate_compatible_binary_names(SelectionStrategy::Newest)
+                .into_keys()
+                .collect::<Vec<_>>()
                 .as_slice()
         );
         assert_eq!(
@@ -722,6 +743,8 @@ mod tests {
                 "python",
             ],
             ics.calculate_compatible_binary_names(SelectionStrategy::Oldest)
+                .into_keys()
+                .collect::<Vec<_>>()
                 .as_slice()
         );
     }

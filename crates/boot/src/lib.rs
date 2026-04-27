@@ -11,7 +11,8 @@ use cache::CacheDir;
 use const_format::str_split;
 use fs_err as fs;
 use fs_err::File;
-use interpreter::{InterpreterConstraints, SearchPath, SelectionStrategy};
+use interpreter::{InterpreterConstraints, SearchPath, SelectionStrategy, VersionSpec};
+use itertools::Itertools;
 use pex::{Pex, PexPath};
 use pexrs::venv_dir;
 use platform::path_as_str;
@@ -21,7 +22,11 @@ use zip::write::{FileOptionExtension, FileOptions};
 const SH_BOOT_SHEBANG: &[u8] = b"#!/bin/sh\n";
 const SH_BOOT_PARTS: [&str; 4] = str_split!(include_str!("boot.sh"), "# --- split --- #\n");
 
-pub fn sh_boot_shebang(pex: &Path, escaped: bool) -> anyhow::Result<Option<String>> {
+pub fn sh_boot_shebang(
+    pex: &Path,
+    hermetic: bool,
+    escaped: bool,
+) -> anyhow::Result<Option<String>> {
     let pex = Pex::load(pex)?;
 
     let mut sh_boot_shebang_buffer: [_; SH_BOOT_SHEBANG.len()] = [0; SH_BOOT_SHEBANG.len()];
@@ -54,13 +59,28 @@ pub fn sh_boot_shebang(pex: &Path, escaped: bool) -> anyhow::Result<Option<Strin
     let pythons = interpreter_constraints
         .calculate_compatible_binary_names(selection_strategy)
         .into_iter()
-        .map(|binary_name| {
+        .map(|(binary_name, version_spec)| {
             binary_name
                 .into_string()
+                .map(|binary_name| (binary_name, version_spec))
                 .map_err(|err| anyhow!("{err}", err = err.display()))
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
-
+    let python_args = if hermetic {
+        if pythons.iter().any(|(_, version_spec)| {
+            matches!(version_spec, None | Some(VersionSpec::Major(_)))
+                || matches!(
+                    version_spec,
+                    Some(VersionSpec::MajorMinor(major, minor)) if (*major, *minor) < (3, 4)
+                )
+        }) {
+            "-sE"
+        } else {
+            "-I"
+        }
+    } else {
+        ""
+    };
     Ok(Some(format!(
         "{shebang}{start_escape}{header}{vars}{body}{end_escape}\n",
         shebang = SH_BOOT_PARTS[0], // N.B.: SH_BOOT_SHEBANG
@@ -72,7 +92,14 @@ pub fn sh_boot_shebang(pex: &Path, escaped: bool) -> anyhow::Result<Option<Strin
                 pex.info.pex_root.as_deref().unwrap_or_default(),
             )
             .replace("{venv_relpath}", path_as_str(venv_relpath)?)
-            .replace("{pythons}", &pythons.join("\n")),
+            .replace(
+                "{pythons}",
+                &pythons
+                    .iter()
+                    .map(|(binary_name, _)| binary_name)
+                    .join("\n")
+            )
+            .replace("{python_args}", python_args),
         body = SH_BOOT_PARTS[3].trim_end(),
         end_escape = if escaped { "\n'''\n" } else { "\n" },
     )))

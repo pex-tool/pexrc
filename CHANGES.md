@@ -1,5 +1,10 @@
 # Release Notes
 
+## 0.7.1
+
+This release fixes injected `--sh-boot` PEXes to honor `PEX_TOOLS=1` and be robust to underlying
+venv breaks due to system Python upgrades or uninstalls.
+
 ## 0.7.0
 
 This release adds support for PEX_TOOLS when `pexrc` is built with the `tools` feature; e.g.:
