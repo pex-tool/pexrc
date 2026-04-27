@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::borrow::Cow;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::OsStr;
 use std::io;
-use std::io::BufReader;
+use std::io::{BufReader, Read, Seek};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
@@ -25,10 +25,11 @@ use rayon::prelude::*;
 use scripts::{IdentifyInterpreter, Scripts};
 use strum_macros::{AsRefStr, EnumString};
 use url::Url;
+use walkdir::{DirEntry, WalkDir};
 use zip::ZipArchive;
 
-use crate::PexInfo;
 use crate::wheel::{MetadataReader, WheelFile, WheelMetadata};
+use crate::{InterpreterSelectionStrategy, PexInfo};
 
 #[derive(AsRefStr, EnumString)]
 pub enum Layout {
@@ -63,6 +64,46 @@ impl Layout {
         };
         Ok(layout)
     }
+}
+
+pub fn collect_loose_user_source(pex: &Path) -> anyhow::Result<Vec<DirEntry>> {
+    let excludes: HashSet<PathBuf> = [
+        ".deps",
+        "PEX-INFO",
+        "__main__.py",
+        "__pex__",
+        "__pycache__",
+        "pex",
+        "pex-repl",
+    ]
+    .into_iter()
+    .map(|rel_path| pex.join(rel_path))
+    .collect();
+    Ok(WalkDir::new(pex)
+        .min_depth(1)
+        .into_iter()
+        .filter_entry(|entry| !excludes.contains(entry.path()))
+        .collect::<Result<Vec<_>, _>>()?)
+}
+
+pub fn filter_zipped_user_source(file_name: &str) -> bool {
+    ![".deps/", "__pex__/"]
+        .iter()
+        .any(|dir_prefix| file_name.starts_with(dir_prefix))
+        && ![".deps/", "__pex__/", "PEX-INFO", "__main__.py"].contains(&file_name)
+}
+
+pub fn collect_zipped_user_source_indexes(pex: &ZipArchive<impl Read + Seek>) -> Vec<usize> {
+    pex.file_names()
+        .enumerate()
+        .filter_map(|(idx, name)| {
+            if filter_zipped_user_source(name) {
+                Some(idx)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>()
 }
 
 pub struct Pex<'a> {
@@ -387,7 +428,10 @@ impl<'a> Pex<'a> {
     {
         let interpreters_to_try = interpreter_constraints
             .iter_possibly_compatible_python_exes(
-                self.info.interpreter_selection_strategy.into(),
+                self.info
+                    .interpreter_selection_strategy
+                    .unwrap_or(InterpreterSelectionStrategy::Oldest)
+                    .into(),
                 search_path,
             )?
             .collect::<Vec<_>>();

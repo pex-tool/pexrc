@@ -1,0 +1,35 @@
+# Copyright 2026 Pex project contributors.
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "request"
+edition = "2024"
+publish = false
+
+[dependencies]
+anyhow = { workspace = true }
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+reqwest = { version = "0.13", features = ["blocking"]}
+
+[target.'cfg(target_os = "macos")'.dependencies]
+reqwest = {
+    version = "0.13",
+    default-features = false,
+    # N.B.: We re-iterate "charset", "http2", "system-proxy" from disabled defaults.
+    # We only really need:
+    # 1. blocking
+    # 2. rustls-no-provider instead of rustls (this drops aws-lc-sys which does not cross-compile
+    # on macos currently)
+    features = ["blocking", "charset", "http2", "rustls-no-provider", "system-proxy"]
+}
+rustls = {
+    version = "0.23",
+    default-features = false,
+    # N.B.: See reqwest comment - this is fallout from "rustls-no-provider" there.
+    # N.B: We re-iterate "logging", "std", "tls12" from disabled defaults.
+    # We only really need:
+    # 1. ring
+    features = ["logging", "ring", "std", "tls12"]
+}
+url = { workspace = true }

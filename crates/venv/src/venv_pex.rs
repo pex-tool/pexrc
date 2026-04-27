@@ -1,7 +1,6 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
 use std::io::{BufReader, ErrorKind, Read, Seek, Write};
 use std::path::{Path, PathBuf};
@@ -15,10 +14,22 @@ use fs_err::File;
 use indexmap::IndexMap;
 use log::warn;
 use logging_timer::time;
-use pex::{BinPath, EntryPoint, EntryPoints, Layout, Pex, PexInfo, ResolvedWheel};
+use pex::{
+    BinPath,
+    EntryPoint,
+    EntryPoints,
+    Layout,
+    Pex,
+    PexInfo,
+    ResolvedWheel,
+    collect_loose_user_source,
+    collect_zipped_user_source_indexes,
+    filter_zipped_user_source,
+};
 use platform::{mark_executable, path_as_bytes, path_as_str, symlink_or_link_or_copy};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use scripts::{Scripts, VenvPex, VenvPexRepl};
+use serde_json::Value;
 use zip::ZipArchive;
 
 use crate::Provenance;
@@ -369,23 +380,7 @@ fn populate_user_code_from_directory_pex<'a>(
     populate_pex_info: bool,
     provenance: Arc<Provenance>,
 ) -> anyhow::Result<()> {
-    let excludes: HashSet<PathBuf> = [
-        ".deps",
-        "PEX-INFO",
-        "__main__.py",
-        "__pex__",
-        "__pycache__",
-        "pex",
-        "pex-repl",
-    ]
-    .into_iter()
-    .map(|rel_path| directory_pex.path.join(rel_path))
-    .collect();
-    let user_code = walkdir::WalkDir::new(directory_pex.path)
-        .min_depth(1)
-        .into_iter()
-        .filter_entry(|entry| !excludes.contains(entry.path()))
-        .collect::<Result<Vec<_>, _>>()?;
+    let user_code = collect_loose_user_source(directory_pex.path)?;
     user_code.into_par_iter().try_for_each(|entry| {
         let dst_path =
             site_packages_path.join(entry.path().strip_prefix(directory_pex.path).expect(
@@ -468,21 +463,7 @@ fn populate_from_zip_app_with_whl_deps<'a>(
             })?;
     }
     if matches!(scope, InstallScope::All | InstallScope::Srcs) {
-        let extract_indexes = pex_zip
-            .file_names()
-            .enumerate()
-            .filter_map(|(idx, name)| {
-                if [".deps/", "__pex__/"]
-                    .iter()
-                    .any(|exclude_dir| name.starts_with(exclude_dir))
-                    || ["PEX-INFO", "__main__.py"].contains(&name)
-                {
-                    None
-                } else {
-                    Some(idx)
-                }
-            })
-            .collect::<Vec<_>>();
+        let extract_indexes = collect_zipped_user_source_indexes(&pex_zip);
         extract_indexes
             .into_par_iter()
             .try_for_each(|index| -> anyhow::Result<()> {
@@ -521,13 +502,6 @@ impl<'a> DepFilter<'a> {
     }
 }
 
-fn filter_srcs(file_name: &str) -> bool {
-    ![".deps/", "__pex__/"]
-        .iter()
-        .any(|dir_prefix| file_name.starts_with(dir_prefix))
-        && ![".deps/", "__pex__/", "PEX-INFO", "__main__.py"].contains(&file_name)
-}
-
 fn populate_from_zip_app<'a>(
     venv: &Virtualenv,
     zip_app_pex: &'a Pex<'a>,
@@ -545,9 +519,11 @@ fn populate_from_zip_app<'a>(
         .filter_map(|(idx, name)| {
             // TODO: XXX: Deal with .layout and .prefix/ in wheel chroots.
             if match scope {
-                InstallScope::All => dep_filter.filter_deps(name) || filter_srcs(name),
+                InstallScope::All => {
+                    dep_filter.filter_deps(name) || filter_zipped_user_source(name)
+                }
                 InstallScope::Deps => dep_filter.filter_deps(name),
-                InstallScope::Srcs => filter_srcs(name),
+                InstallScope::Srcs => filter_zipped_user_source(name),
             } {
                 Some(idx)
             } else {
@@ -789,15 +765,17 @@ impl<'a> Display for PythonListStr<'a> {
     }
 }
 
-struct PythonListTupleStrStr<'a>(&'a IndexMap<String, String>);
+struct PythonListTupleStrStr<'a>(Option<&'a IndexMap<String, String>>);
 
 impl<'a> Display for PythonListTupleStrStr<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "[")?;
-        for (idx, (item1, item2)) in self.0.iter().enumerate() {
-            write!(f, "(r\"{item1}\",r\"{item2}\")")?;
-            if idx < self.0.len() - 1 {
-                write!(f, ",")?;
+        if let Some(items) = self.0 {
+            for (idx, (item1, item2)) in items.iter().enumerate() {
+                write!(f, "(r\"{item1}\",r\"{item2}\")")?;
+                if idx < items.len() - 1 {
+                    write!(f, ",")?;
+                }
             }
         }
         write!(f, "]")
@@ -845,8 +823,8 @@ if __name__ == "__main__":
                 .unwrap_or_else(|| pex_info.venv_bin_path.as_ref().unwrap_or(&BinPath::False))
                 .as_str(),
             strip_pex_env = as_python_bool(pex_info.strip_pex_env.unwrap_or(true)),
-            bind_resource_paths = PythonListTupleStrStr(&pex_info.bind_resource_paths),
-            inject_env = PythonListTupleStrStr(&pex_info.inject_env),
+            bind_resource_paths = PythonListTupleStrStr(pex_info.bind_resource_paths.as_ref()),
+            inject_env = PythonListTupleStrStr(pex_info.inject_env.as_ref()),
             inject_args = PythonListStr(&pex_info.inject_args),
             entry_point = OptionalPythonStr(pex_info.entry_point.as_deref()),
             script = OptionalPythonStr(pex_info.script.as_deref()),
@@ -920,6 +898,12 @@ fn write_repl(
         }
     }
 
+    let pex_version =
+        if let Some(Value::String(version)) = pex_info.build_properties.get("pex_version") {
+            version
+        } else {
+            "(unknown version)"
+        };
     write!(
         pex_repl_py_fp,
         "{}",
@@ -952,11 +936,6 @@ if __name__ == "__main__":
 "#,
             ps1 = ">>>",
             ps2 = "...",
-            pex_version = pex_info
-                .build_properties
-                .get("pex_version")
-                .map(String::as_ref)
-                .unwrap_or("(unknown version)"),
             seed_pex = path_as_str(pex)?,
             activation_summary = activation_summary,
             activation_details = ActivationDetails {

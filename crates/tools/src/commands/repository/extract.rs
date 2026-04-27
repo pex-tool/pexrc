@@ -1,19 +1,35 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::io::{BufRead, BufReader};
-use std::path::{Path, PathBuf};
+use std::borrow::Cow;
+use std::ffi::OsStr;
+use std::fmt::{Display, Formatter, Write as _};
+use std::fs::File;
+use std::io::{BufRead, BufReader, Cursor, Write};
+use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use chrono::NaiveDateTime;
 use clap::Args;
+use flate2::Compression;
+use flate2::write::GzEncoder;
 use fs_err as fs;
-use interpreter::Interpreter;
-use pex::{Pex, PexPath};
+use indexmap::IndexSet;
+use interpreter::{Interpreter, InterpreterConstraints};
+use log::warn;
+use pex::{
+    Layout,
+    Pex,
+    PexInfo,
+    PexPath,
+    collect_loose_user_source,
+    collect_zipped_user_source_indexes,
+};
 use scripts::IdentifyInterpreter;
-use zip::CompressionMethod;
+use zip::{CompressionMethod, ZipArchive};
 
 #[derive(Args)]
 pub(crate) struct ExtractArgs {
@@ -66,26 +82,346 @@ pub(crate) fn extract(python: &Path, pex: Pex, args: ExtractArgs) -> anyhow::Res
         )?;
     }
 
-    if args.sources {
-        todo!("Creation of an sdist for PEX sources is not implemented yet.")
-    }
-    if args.serve {
+    if args.sources || args.serve {
         let mut scripts = pex.scripts()?;
         let identify_interpreter = IdentifyInterpreter::read(&mut scripts)?;
         let interpreter = Interpreter::load(python, &identify_interpreter)?;
-        serve(
-            &pex,
-            &interpreter,
-            &args.dest_dir,
-            args.port,
-            args.pid_file.as_deref(),
-        )?;
+        let pex_path = pex.path;
+        if args.sources {
+            extract_sdist(pex_path, pex.layout, pex.info, &interpreter, &args.dest_dir)?;
+        }
+        if args.serve {
+            serve(
+                pex_path,
+                &interpreter,
+                &args.dest_dir,
+                args.port,
+                args.pid_file.as_deref(),
+            )?;
+        }
     }
     Ok(())
 }
 
+fn extract_sdist(
+    pex_path: &Path,
+    layout: Layout,
+    pex_info: PexInfo,
+    _interpreter: &Interpreter,
+    dest_dir: &Path,
+) -> anyhow::Result<()> {
+    let project_name = pex_path.file_stem().expect("A PEX always has a file name");
+    let version = format!("0.0.0+{code_hash}", code_hash = pex_info.code_hash);
+    let pnav = format!(
+        "{project_name}-{version}",
+        project_name = project_name.display(),
+    );
+    let sdist_path = dest_dir.join(format!("{pnav}.tar.gz"));
+
+    let (tar_tmp_file, tar_tmp_path) = tempfile::NamedTempFile::new_in(dest_dir)?.into_parts();
+    let mut tar = tar::Builder::new(GzEncoder::new(tar_tmp_file, Compression::default()));
+    let top_dir = PathBuf::from(pnav);
+    let src_dir = top_dir.join("src");
+    let sources = match layout {
+        Layout::Packed | Layout::Loose => add_loose_source(&mut tar, &src_dir, pex_path)?,
+        Layout::ZipApp => {
+            add_zipped_source(&mut tar, &src_dir, ZipArchive::new(File::open(pex_path)?)?)?
+        }
+    };
+    add_sdist_files(
+        &mut tar,
+        &top_dir,
+        project_name,
+        &version,
+        pex_path,
+        pex_info,
+        sources,
+    )?;
+    tar.finish()?;
+
+    tar_tmp_path.persist(sdist_path)?;
+    Ok(())
+}
+
+fn add_sdist_files(
+    tar: &mut tar::Builder<GzEncoder<File>>,
+    top_dir: &Path,
+    project_name: &OsStr,
+    version: &str,
+    pex_path: &Path,
+    pex_info: PexInfo,
+    sources: Sources,
+) -> anyhow::Result<()> {
+    add_file(
+        tar,
+        top_dir,
+        "pyproject.toml",
+        Cow::Borrowed(
+            r#"
+[build-system]
+requires = ["setuptools"]
+backend = "setuptools.build_meta"
+"#,
+        ),
+    )?;
+
+    let interpreter_constraints =
+        InterpreterConstraints::try_from(pex_info.interpreter_constraints.as_slice())?
+            .into_constraints();
+    let mut python_requires = String::new();
+    if interpreter_constraints.len() == 1
+        && let Some(version_specifiers) = interpreter_constraints[0].version_specifiers()
+    {
+        write!(&mut python_requires, "{version_specifiers}")?;
+    } else if !pex_info.interpreter_constraints.is_empty() {
+        struct DisplayIcs(Vec<String>);
+        impl Display for DisplayIcs {
+            fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+                for (idx, ic) in self.0.iter().enumerate() {
+                    writeln!(f, "{index}. {ic}", index = idx + 1)?;
+                }
+                Ok(())
+            }
+        }
+
+        warn!(
+            "Omitting `python_requires` for {project_name} sdist since {pex} has multiple \
+            interpreter constraints:\n{interpreter_constraints}",
+            project_name = project_name.display(),
+            pex = pex_path.display(),
+            interpreter_constraints = DisplayIcs(pex_info.interpreter_constraints)
+        )
+    }
+
+    let mut pkg_info = String::new();
+    writeln!(&mut pkg_info, "Metadata-Version: 2.1")?;
+    writeln!(
+        &mut pkg_info,
+        "Name: {project_name}",
+        project_name = project_name.display()
+    )?;
+    writeln!(&mut pkg_info, "Version: {version}")?;
+    if !python_requires.is_empty() {
+        writeln!(&mut pkg_info, "Requires-Python: {python_requires}")?;
+    }
+    for requirement in &pex_info.requirements {
+        writeln!(&mut pkg_info, "Requires-Dist: {requirement}")?;
+    }
+    add_file(tar, top_dir, "PKG-INFO", Cow::Owned(pkg_info))?;
+
+    struct IniList(&'static str, Vec<String>);
+    impl Display for IniList {
+        fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+            if self.1.is_empty() {
+                return Ok(());
+            }
+            writeln!(f, "{name} =", name = self.0)?;
+            for item in self.1.iter() {
+                writeln!(f, "    {item}")?;
+            }
+            Ok(())
+        }
+    }
+    let py_modules = IniList("py_modules", sources.modules.into_iter().collect());
+    let packages = IniList("packages", sources.packages.into_iter().collect());
+    let install_requires = IniList("install_requires", pex_info.requirements);
+
+    let mut console_scripts = Vec::with_capacity(1);
+    if let Some(entry_point) = pex_info.entry_point
+        && entry_point.contains(":")
+    {
+        let mut entry_point = entry_point.splitn(2, ":");
+        let name = entry_point
+            .next()
+            .expect("We confirmed 2 components with : contains check above");
+        let entry_point = entry_point
+            .next()
+            .expect("We confirmed 2 components with : contains check above");
+        console_scripts.push(format!("{name} = {entry_point}"))
+    }
+    let entry_points = IniList("console_scripts", console_scripts);
+
+    add_file(
+        tar,
+        top_dir,
+        "setup.cfg",
+        Cow::Owned(format!(
+            r#"
+[metadata]
+name = {name}
+version = {version}
+
+[options]
+zip_safe = False
+{py_modules}
+{packages}
+package_dir =
+    =src
+include_package_data = True
+
+{python_requires}
+{install_requires}
+
+[options.entry_points]
+{entry_points}
+"#,
+            name = project_name.display()
+        )),
+    )?;
+
+    add_file(
+        tar,
+        top_dir,
+        "setup.py",
+        Cow::Borrowed("import setuptools; setuptools.setup()"),
+    )?;
+    add_file(
+        tar,
+        top_dir,
+        "MANIFEST.in",
+        Cow::Borrowed("recursive-include src *"),
+    )?;
+    Ok(())
+}
+
+fn add_file(
+    tar: &mut tar::Builder<GzEncoder<File>>,
+    top_dir: &Path,
+    path: impl AsRef<Path>,
+    content: Cow<'_, str>,
+) -> anyhow::Result<()> {
+    let mut header = tar::Header::new_ustar();
+    header.set_path(top_dir.join(path))?;
+    header.set_size(u64::try_from(content.as_ref().len())?);
+    header.set_mode(0o644);
+    header.set_cksum();
+    tar.append(&header, Cursor::new(content.as_ref()))?;
+    Ok(())
+}
+
+struct Sources {
+    modules: IndexSet<String>,
+    packages: IndexSet<String>,
+}
+
+impl Sources {
+    fn new() -> Self {
+        Self {
+            modules: IndexSet::new(),
+            packages: IndexSet::new(),
+        }
+    }
+}
+
+fn add_zipped_source(
+    tar: &mut tar::Builder<impl Write>,
+    src_dir: &Path,
+    mut pex: ZipArchive<File>,
+) -> anyhow::Result<Sources> {
+    let mut sources = Sources::new();
+    for index in collect_zipped_user_source_indexes(&pex) {
+        let entry = pex.by_index(index)?;
+        if entry.is_file() {
+            if !entry.name().contains("/") && entry.name().ends_with(".py") {
+                sources.modules.insert(
+                    entry
+                        .name()
+                        .strip_suffix(".py")
+                        .expect("We confirmed the file name ended with .py above")
+                        .to_string(),
+                );
+            } else {
+                let mut package = String::new();
+                let mut last_component_len = 0;
+                for component in entry.name().split("/") {
+                    last_component_len = component.len();
+                    if !package.is_empty() {
+                        last_component_len += 1;
+                        package.push('.')
+                    }
+                    package.push_str(component);
+                }
+                package.truncate(package.len() - last_component_len);
+                sources.packages.insert(package);
+            }
+        }
+        let mut header = tar::Header::new_ustar();
+        header.set_path(src_dir.join(entry.name()))?;
+        header.set_size(entry.size());
+        if let Some(unix_mode) = entry.unix_mode() {
+            header.set_mode(unix_mode)
+        }
+        if let Some(last_modified) = entry.last_modified()
+            && let Ok(last_modified) = NaiveDateTime::try_from(last_modified)
+            && let Ok(mtime) = u64::try_from(last_modified.and_utc().timestamp())
+        {
+            header.set_mtime(mtime);
+        }
+        header.set_cksum();
+        tar.append(&header, entry)?;
+    }
+    Ok(sources)
+}
+
+fn add_loose_source(
+    tar: &mut tar::Builder<impl Write>,
+    src_dir: &Path,
+    pex: &Path,
+) -> anyhow::Result<Sources> {
+    let mut sources = Sources::new();
+    for entry in collect_loose_user_source(pex)? {
+        if entry.path().is_file()
+            && !entry.path().as_os_str().as_encoded_bytes().contains(&b'/')
+            && let Some(file_name) = entry.path().file_name()
+            && file_name.as_encoded_bytes().ends_with(b".py")
+        {
+            sources.modules.insert(
+                entry
+                    .path()
+                    .as_os_str()
+                    .to_str()
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "Python file name is not UTF-8: {module}",
+                            module = entry.path().display()
+                        )
+                    })?
+                    .strip_suffix(".py")
+                    .expect("We confirmed the file name ended with .py above")
+                    .to_string(),
+            );
+        } else if entry.path().is_dir() {
+            let mut package = String::new();
+            for component in entry.path().components() {
+                if let Component::Normal(name) = component {
+                    if !package.is_empty() {
+                        package.push('.')
+                    }
+                    package.push_str(name.to_str().ok_or_else(|| {
+                        anyhow!(
+                            "Python package path is not UTF-8: {module}",
+                            module = entry.path().display()
+                        )
+                    })?);
+                }
+            }
+            sources.packages.insert(package);
+        }
+        tar.append_path_with_name(
+            entry.path(),
+            src_dir.join(
+                entry
+                    .path()
+                    .strip_prefix(pex)
+                    .expect("Walker paths of a PEX directory are always sub-paths"),
+            ),
+        )?
+    }
+    Ok(sources)
+}
+
 fn serve(
-    pex: &Pex,
+    pex_path: &Path,
     interpreter: &Interpreter,
     root_dir: &Path,
     port: Option<u16>,
@@ -141,7 +477,7 @@ fn serve(
     let port = recv.recv_timeout(Duration::from_secs(5))??;
     eprintln!(
         "Serving find-links repo of {pex} via {find_links} at http://localhost:{port}",
-        pex = pex.path.display(),
+        pex = pex_path.display(),
         find_links = root_dir.display(),
     );
 

@@ -9,6 +9,7 @@ use anyhow::{anyhow, bail};
 use fs_err as fs;
 use fs_err::File;
 use sha2::{Digest, Sha256};
+use url::Url;
 
 use crate::metadata::{Download, FileType};
 
@@ -111,9 +112,9 @@ pub(crate) fn ensure_download(download: &Download, download_dir: &Path) -> anyho
         algorithm => bail!("No support for {algorithm} hashes."),
     };
 
-    let url = reqwest::Url::parse(download.url.as_ref())?;
+    let url = Url::parse(download.url.as_ref())?;
 
-    let response = reqwest::blocking::get(url.as_ref())?;
+    let response = request::get(url.as_ref())?;
     if let Some(actual_size) = response.content_length()
         && actual_size != download.size
     {

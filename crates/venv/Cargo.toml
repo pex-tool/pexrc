@@ -21,6 +21,7 @@ platform = { path = "../platform" }
 rayon = { workspace = true }
 rust-ini = { workspace = true }
 scripts = { path = "../scripts" }
+serde_json = { workspace = true }
 target-lexicon = { workspace = true }
 tempfile = { workspace = true }
 walkdir = { workspace = true }
