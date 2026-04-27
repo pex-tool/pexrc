@@ -172,7 +172,7 @@ fn repackage_directory_pex_wheel(
     }
 }
 
-fn recompress_zipped_whl(
+pub fn recompress_zipped_whl(
     mut wheel: ZipArchive<impl Read + Seek>,
     wheel_file: &WheelFile,
     options: &WheelOptions,

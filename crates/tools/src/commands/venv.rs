@@ -259,7 +259,12 @@ pub(crate) fn create(python: &Path, pex: Pex, args: VenvArgs) -> anyhow::Result<
         .unwrap_or_else(|| {
             format!(
                 "({venv_name})",
-                venv_name = args.venv_dir.file_name().expect("XXX").display()
+                venv_name = args
+                    .venv_dir
+                    .file_name()
+                    .or_else(|| pex.path.file_name())
+                    .unwrap_or_else(|| OsStr::new("venv"))
+                    .display()
             )
         });
     let venv_dir = args
