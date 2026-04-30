@@ -12,7 +12,6 @@ use boot::{inject_boot, sh_boot_shebang, write_boot};
 use cache::{DigestingReader, Fingerprint, default_digest};
 use fs_err as fs;
 use fs_err::File;
-use indexmap::IndexMap;
 use log::info;
 use owo_colors::OwoColorize;
 use pex::{Layout, Pex, WheelOptions};
@@ -109,23 +108,21 @@ fn inject_pex_dir(
         .raw()
         .distributions
         .keys()
-        .map(|file_name| file_name.to_string())
+        .copied()
         .collect::<Vec<_>>();
-    let distributions = wheel_file_names
+    let fingerprints = wheel_file_names
         .into_par_iter()
         .map(|wheel_file_name| {
-            let fingerprint = Fingerprint::try_from(BufReader::new(File::open(
-                deps_dir.join(&wheel_file_name),
-            )?))?;
-            Ok((
-                Cow::Owned(wheel_file_name),
-                Cow::Owned(fingerprint.hex_digest()),
-            ))
+            let fingerprint =
+                Fingerprint::try_from(BufReader::new(File::open(deps_dir.join(wheel_file_name))?))?;
+            Ok(fingerprint.hex_digest())
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
     pex.info.with_raw_mut(|pex_info| {
         pex_info.deps_are_wheel_files = true;
-        pex_info.distributions = distributions.into_iter().collect();
+        for (original_fp, fingerprint) in pex_info.distributions.values_mut().zip(fingerprints) {
+            *original_fp = Cow::Owned(fingerprint)
+        }
     });
 
     let mut scripts = Scripts::Embedded;
@@ -270,22 +267,21 @@ fn inject_pex_zip(
     let stored_file_options =
         SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
     pex::repackage_wheels(&pex, options, deps_dir.path())?;
-    let mut distributions = IndexMap::with_capacity(pex_info.distributions.len());
-    for wheel_file_name in pex_info.distributions.keys() {
+    let mut fingerprints = Vec::with_capacity(pex_info.distributions.len());
+    for wheel_file_name in pex_info.distributions.keys().copied() {
         dst_zip.start_file(format!(".deps/{wheel_file_name}"), stored_file_options)?;
         let mut digesting_reader = DigestingReader::new(
             default_digest(),
-            File::open(deps_dir.path().join(wheel_file_name.as_ref()))?,
+            File::open(deps_dir.path().join(wheel_file_name))?,
         );
         io::copy(&mut digesting_reader, &mut dst_zip)?;
-        distributions.insert(
-            Cow::Owned(wheel_file_name.to_string()),
-            Cow::Owned(digesting_reader.into_fingerprint().hex_digest()),
-        );
+        fingerprints.push(digesting_reader.into_fingerprint().hex_digest());
     }
     pex.info.with_raw_mut(|pex_info| {
         pex_info.deps_are_wheel_files = true;
-        pex_info.distributions = distributions;
+        for (original_fp, fingerprint) in pex_info.distributions.values_mut().zip(fingerprints) {
+            *original_fp = Cow::Owned(fingerprint)
+        }
     });
 
     dst_zip.add_directory("__pex__", directory_options)?;

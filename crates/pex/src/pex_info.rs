@@ -68,7 +68,7 @@ pub struct RawPexInfo<'a> {
     pub build_properties: IndexMap<&'a str, Value>,
     pub code_hash: &'a str,
     pub deps_are_wheel_files: bool,
-    pub distributions: IndexMap<Cow<'a, str>, Cow<'a, str>>,
+    pub distributions: IndexMap<&'a str, Cow<'a, str>>,
     pub emit_warnings: bool,
     pub entry_point: Option<&'a str>,
     pub excluded: Vec<&'a str>,
@@ -125,7 +125,7 @@ impl PexInfo {
         self.borrow_info()
             .distributions
             .keys()
-            .map(Cow::as_ref)
+            .copied()
             .map(WheelFile::parse_file_name)
     }
 

@@ -290,7 +290,7 @@ pub fn venv_dir(
                 .raw()
                 .distributions
                 .iter()
-                .map(|(file_name, fingerprint)| (file_name.as_ref(), fingerprint.as_ref())),
+                .map(|(file_name, fingerprint)| (file_name, fingerprint.as_ref())),
         );
     }
 
