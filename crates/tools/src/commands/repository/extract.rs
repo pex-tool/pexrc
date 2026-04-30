@@ -23,8 +23,8 @@ use log::warn;
 use pex::{
     Layout,
     Pex,
-    PexInfo,
     PexPath,
+    RawPexInfo,
     WheelOptions,
     collect_loose_user_source,
     collect_zipped_user_source_indexes,
@@ -92,7 +92,13 @@ pub(crate) fn extract(python: &Path, pex: Pex, args: ExtractArgs) -> anyhow::Res
         let interpreter = Interpreter::load(python, &identify_interpreter)?;
         let pex_path = pex.path;
         if args.sources {
-            extract_sdist(pex_path, pex.layout, pex.info, &args.dest_dir, timestamp)?;
+            extract_sdist(
+                pex_path,
+                pex.layout,
+                pex.info.raw(),
+                &args.dest_dir,
+                timestamp,
+            )?;
         }
         if args.serve {
             serve(
@@ -110,7 +116,7 @@ pub(crate) fn extract(python: &Path, pex: Pex, args: ExtractArgs) -> anyhow::Res
 fn extract_sdist(
     pex_path: &Path,
     layout: Layout,
-    pex_info: PexInfo,
+    pex_info: &RawPexInfo,
     dest_dir: &Path,
     timestamp: Option<DateTime<Utc>>,
 ) -> anyhow::Result<()> {
@@ -160,7 +166,7 @@ fn add_sdist_files(
     project_name: &OsStr,
     version: &str,
     pex_path: &Path,
-    pex_info: PexInfo,
+    pex_info: &RawPexInfo,
     sources: Sources,
     timestamp: Option<DateTime<Utc>>,
 ) -> anyhow::Result<()> {
@@ -187,8 +193,8 @@ backend = "setuptools.build_meta"
     {
         write!(&mut python_requires, "{version_specifiers}")?;
     } else if !pex_info.interpreter_constraints.is_empty() {
-        struct DisplayIcs(Vec<String>);
-        impl Display for DisplayIcs {
+        struct DisplayIcs<'a>(&'a Vec<&'a str>);
+        impl<'a> Display for DisplayIcs<'a> {
             fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
                 for (idx, ic) in self.0.iter().enumerate() {
                     writeln!(f, "{index}. {ic}", index = idx + 1)?;
@@ -202,7 +208,7 @@ backend = "setuptools.build_meta"
             interpreter constraints:\n{interpreter_constraints}",
             project_name = project_name.display(),
             pex = pex_path.display(),
-            interpreter_constraints = DisplayIcs(pex_info.interpreter_constraints)
+            interpreter_constraints = DisplayIcs(&pex_info.interpreter_constraints)
         )
     }
 
@@ -222,8 +228,8 @@ backend = "setuptools.build_meta"
     }
     add_file(tar, top_dir, "PKG-INFO", timestamp, Cow::Owned(pkg_info))?;
 
-    struct IniList(&'static str, Vec<String>);
-    impl Display for IniList {
+    struct IniList<'a>(&'static str, Vec<Cow<'a, str>>);
+    impl<'a> Display for IniList<'a> {
         fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
             if self.1.is_empty() {
                 return Ok(());
@@ -235,9 +241,23 @@ backend = "setuptools.build_meta"
             Ok(())
         }
     }
-    let py_modules = IniList("py_modules", sources.modules.into_iter().collect());
-    let packages = IniList("packages", sources.packages.into_iter().collect());
-    let install_requires = IniList("install_requires", pex_info.requirements);
+    let py_modules = IniList(
+        "py_modules",
+        sources.modules.into_iter().map(Cow::Owned).collect(),
+    );
+    let packages = IniList(
+        "packages",
+        sources.packages.into_iter().map(Cow::Owned).collect(),
+    );
+    let install_requires = IniList(
+        "install_requires",
+        pex_info
+            .requirements
+            .iter()
+            .copied()
+            .map(Cow::Borrowed)
+            .collect(),
+    );
 
     let mut console_scripts = Vec::with_capacity(1);
     if let Some(entry_point) = pex_info.entry_point
@@ -250,7 +270,7 @@ backend = "setuptools.build_meta"
         let entry_point = entry_point
             .next()
             .expect("We confirmed 2 components with : contains check above");
-        console_scripts.push(format!("{name} = {entry_point}"))
+        console_scripts.push(Cow::Owned(format!("{name} = {entry_point}")))
     }
     let entry_points = IniList("console_scripts", console_scripts);
 

@@ -2,20 +2,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::borrow::Cow;
-use std::io;
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::Path;
 
 use anyhow::anyhow;
 use indexmap::IndexMap;
 use interpreter::SelectionStrategy;
 use logging_timer::time;
+use ouroboros::self_referencing;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::wheel::WheelFile;
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 pub enum BinPath {
     #[serde(rename = "false")]
     False,
@@ -45,7 +45,7 @@ pub enum InheritPath {
     Fallback,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 pub enum InterpreterSelectionStrategy {
     #[serde(rename = "oldest")]
     Oldest,
@@ -63,28 +63,28 @@ impl From<InterpreterSelectionStrategy> for SelectionStrategy {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct PexInfo {
-    pub bind_resource_paths: Option<IndexMap<String, String>>,
-    pub build_properties: IndexMap<String, Value>,
-    pub code_hash: String,
+pub struct RawPexInfo<'a> {
+    pub bind_resource_paths: Option<IndexMap<&'a str, &'a str>>,
+    pub build_properties: IndexMap<&'a str, Value>,
+    pub code_hash: &'a str,
     pub deps_are_wheel_files: bool,
-    pub distributions: IndexMap<String, String>,
+    pub distributions: IndexMap<Cow<'a, str>, Cow<'a, str>>,
     pub emit_warnings: bool,
-    pub entry_point: Option<String>,
-    pub excluded: Vec<String>,
+    pub entry_point: Option<&'a str>,
+    pub excluded: Vec<&'a str>,
     pub inherit_path: Option<InheritPath>,
-    pub inject_args: Vec<String>,
-    pub inject_env: Option<IndexMap<String, String>>,
-    pub inject_python_args: Vec<String>,
-    pub interpreter_constraints: Vec<String>,
+    pub inject_args: Vec<&'a str>,
+    pub inject_env: Option<IndexMap<&'a str, &'a str>>,
+    pub inject_python_args: Vec<&'a str>,
+    pub interpreter_constraints: Vec<&'a str>,
     pub interpreter_selection_strategy: Option<InterpreterSelectionStrategy>,
-    pub overridden: Vec<String>,
-    pub pex_hash: String,
-    pub pex_path: Option<String>,
-    pub pex_paths: Vec<PathBuf>,
-    pub pex_root: Option<String>,
-    pub requirements: Vec<String>,
-    pub script: Option<String>,
+    pub overridden: Vec<&'a str>,
+    pub pex_hash: &'a str,
+    pub pex_path: Option<&'a str>,
+    pub pex_paths: Vec<&'a Path>,
+    pub pex_root: Option<&'a str>,
+    pub requirements: Vec<&'a str>,
+    pub script: Option<&'a str>,
     pub strip_pex_env: Option<bool>,
     pub venv: bool,
     pub venv_bin_path: Option<BinPath>,
@@ -92,31 +92,52 @@ pub struct PexInfo {
     pub venv_system_site_packages: bool,
 }
 
+#[self_referencing]
+pub struct PexInfo {
+    data: Vec<u8>,
+    #[borrows(data)]
+    #[covariant]
+    info: RawPexInfo<'this>,
+}
+
 impl PexInfo {
     #[time("debug", "PexInfo.{}")]
     pub fn parse<'a>(
-        data: impl Read,
+        mut contents: impl Read,
+        size: u64,
         source: Option<impl FnOnce() -> Cow<'a, str>>,
     ) -> anyhow::Result<PexInfo> {
-        let contents = io::read_to_string(data)?;
-        serde_json::from_str(&contents).map_err(|err| {
-            anyhow!(
-                "Failed to parse PEX-INFO from {source}: {err}",
-                source = source.map(|f| f()).unwrap_or(Cow::Borrowed("<string>"))
-            )
+        let mut data = Vec::with_capacity(usize::try_from(size)?);
+        contents.read_to_end(&mut data)?;
+        PexInfo::try_new(data, |data| {
+            serde_json::from_slice(data).map_err(|err| {
+                anyhow!(
+                    "Failed to parse PEX-INFO from {source}: {err}",
+                    source = source.map(|f| f()).unwrap_or(Cow::Borrowed("<string>"))
+                )
+            })
         })
     }
 
     pub(crate) fn parse_distributions(
         &self,
     ) -> impl Iterator<Item = anyhow::Result<WheelFile<'_>>> {
-        self.distributions
+        self.borrow_info()
+            .distributions
             .keys()
-            .map(String::as_str)
+            .map(Cow::as_ref)
             .map(WheelFile::parse_file_name)
     }
 
     pub fn write(&self, writer: impl Write) -> anyhow::Result<()> {
-        Ok(serde_json::to_writer(writer, &self)?)
+        Ok(serde_json::to_writer(writer, self.borrow_info())?)
+    }
+
+    pub fn raw<'a>(&'a self) -> &'a RawPexInfo<'a> {
+        self.borrow_info()
+    }
+
+    pub fn with_raw_mut<R>(&mut self, func: impl FnOnce(&mut RawPexInfo) -> R) -> R {
+        self.with_info_mut(func)
     }
 }

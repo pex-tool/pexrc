@@ -1,6 +1,7 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::io;
 use std::io::{BufRead, BufReader, Read, Seek, Write};
@@ -58,7 +59,7 @@ fn inject_pex_dir(
     // Make sure we have a shebang early. This partially validates the pex to inject is a valid one
     // before expending too much effort copying files below.
     let shebang = if let Some(sh_boot_shebang) =
-        sh_boot_shebang(pex.path, pex.info.venv_hermetic_scripts, true)?
+        sh_boot_shebang(pex.path, pex.info.raw().venv_hermetic_scripts, true)?
     {
         sh_boot_shebang
     } else {
@@ -103,19 +104,29 @@ fn inject_pex_dir(
     }
     let deps_dir = dest_pex.path().join(".deps");
     pex::repackage_wheels(&pex, options, &deps_dir)?;
-    pex.info.deps_are_wheel_files = true;
-    let wheel_file_names = pex.info.distributions.into_keys().collect::<Vec<_>>();
-    pex.info.distributions = wheel_file_names
+    let wheel_file_names = pex
+        .info
+        .raw()
+        .distributions
+        .keys()
+        .map(|file_name| file_name.to_string())
+        .collect::<Vec<_>>();
+    let distributions = wheel_file_names
         .into_par_iter()
         .map(|wheel_file_name| {
             let fingerprint = Fingerprint::try_from(BufReader::new(File::open(
                 deps_dir.join(&wheel_file_name),
             )?))?;
-            Ok((wheel_file_name, fingerprint.hex_digest()))
+            Ok((
+                Cow::Owned(wheel_file_name),
+                Cow::Owned(fingerprint.hex_digest()),
+            ))
         })
-        .collect::<anyhow::Result<Vec<_>>>()?
-        .into_iter()
-        .collect();
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    pex.info.with_raw_mut(|pex_info| {
+        pex_info.deps_are_wheel_files = true;
+        pex_info.distributions = distributions.into_iter().collect();
+    });
 
     let mut scripts = Scripts::Embedded;
     let pex_dir = dest_pex.path().join("__pex__");
@@ -192,10 +203,11 @@ fn inject_pex_zip(
     clibs: Option<&HashSet<&Path>>,
     proxies: Option<&HashSet<&Path>>,
 ) -> anyhow::Result<()> {
+    let pex_info = pex.info.raw();
     let zip_read_fp = File::open(pex.path)?;
     let mut src_zip = ZipArchive::new(&zip_read_fp)?;
     let prefix = if let Some(sh_boot_shebang) =
-        sh_boot_shebang(pex.path, pex.info.venv_hermetic_scripts, false)?
+        sh_boot_shebang(pex.path, pex_info.venv_hermetic_scripts, false)?
     {
         Some(sh_boot_shebang.into_bytes())
     } else {
@@ -258,21 +270,23 @@ fn inject_pex_zip(
     let stored_file_options =
         SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
     pex::repackage_wheels(&pex, options, deps_dir.path())?;
-    pex.info.deps_are_wheel_files = true;
-    let mut distributions = IndexMap::with_capacity(pex.info.distributions.len());
-    for wheel_file_name in pex.info.distributions.into_keys() {
+    let mut distributions = IndexMap::with_capacity(pex_info.distributions.len());
+    for wheel_file_name in pex_info.distributions.keys() {
         dst_zip.start_file(format!(".deps/{wheel_file_name}"), stored_file_options)?;
         let mut digesting_reader = DigestingReader::new(
             default_digest(),
-            File::open(deps_dir.path().join(&wheel_file_name))?,
+            File::open(deps_dir.path().join(wheel_file_name.as_ref()))?,
         );
         io::copy(&mut digesting_reader, &mut dst_zip)?;
         distributions.insert(
-            wheel_file_name,
-            digesting_reader.into_fingerprint().hex_digest(),
+            Cow::Owned(wheel_file_name.to_string()),
+            Cow::Owned(digesting_reader.into_fingerprint().hex_digest()),
         );
     }
-    pex.info.distributions = distributions;
+    pex.info.with_raw_mut(|pex_info| {
+        pex_info.deps_are_wheel_files = true;
+        pex_info.distributions = distributions;
+    });
 
     dst_zip.add_directory("__pex__", directory_options)?;
     Scripts::Embedded.inject(&mut dst_zip, file_options)?;
