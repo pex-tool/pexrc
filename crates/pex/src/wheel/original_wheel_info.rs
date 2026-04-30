@@ -1,9 +1,13 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::borrow::Cow;
+use std::fmt::Display;
 use std::io::Read;
-use std::path::Path;
+use std::ops::Deref;
+use std::path::{Path, PathBuf};
 
+use anyhow::anyhow;
 use chrono::Utc;
 use fs_err::File;
 use ouroboros::self_referencing;
@@ -24,8 +28,45 @@ impl DateTime {
 }
 
 #[derive(Deserialize)]
+pub(crate) struct ZipFileName<'a>(Cow<'a, str>);
+
+impl<'a> ZipFileName<'a> {
+    pub(crate) fn from(path: PathBuf) -> anyhow::Result<Self> {
+        Ok(Self(Cow::Owned(
+            path.into_os_string()
+                .into_string()
+                .map_err(|err| anyhow!("Path is not UTF-8: {err}", err = err.display()))?,
+        )))
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn as_path(&self) -> Cow<'_, Path> {
+        Cow::Borrowed(Path::new(self.0.as_ref()))
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn as_path(&self) -> Cow<'_, Path> {
+        Cow::Owned(self.0.split("/").collect())
+    }
+}
+
+impl<'a> Deref for ZipFileName<'a> {
+    type Target = str;
+
+    fn deref(&self) -> &<Self as Deref>::Target {
+        self.0.as_ref()
+    }
+}
+
+impl<'a> Display for ZipFileName<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        f.write_str(self.0.as_ref())
+    }
+}
+
+#[derive(Deserialize)]
 struct RawOriginalWheelInfo<'a> {
-    entries: Vec<(&'a str, DateTime, u32)>,
+    entries: Vec<(ZipFileName<'a>, DateTime, u32)>,
     filename: &'a str,
 }
 
@@ -69,7 +110,7 @@ impl OriginalWheelInfo {
         &self,
         base_options: SimpleFileOptions,
         timestamp: Option<chrono::DateTime<Utc>>,
-    ) -> anyhow::Result<Vec<(&str, FileOptions<'static, ()>)>> {
+    ) -> anyhow::Result<Vec<(&ZipFileName<'_>, FileOptions<'static, ()>)>> {
         self.borrow_info()
             .entries
             .iter()
@@ -80,7 +121,7 @@ impl OriginalWheelInfo {
                     last_modified.as_zip_date_time()?
                 };
                 Ok((
-                    *name,
+                    name,
                     base_options
                         .last_modified_time(mtime)
                         .unix_permissions(external_attr >> 16),

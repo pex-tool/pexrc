@@ -112,6 +112,7 @@ def identify(supported_tags):
         "macos_framework_build": macos_framework_build,
         "has_ensurepip": has_ensurepip,
         "free_threaded": free_threaded,
+        "paths": sysconfig.get_paths(),
     }
 
 

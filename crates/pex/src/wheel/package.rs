@@ -5,7 +5,8 @@ use std::borrow::Cow;
 use std::ffi::OsStr;
 use std::io;
 use std::io::{Cursor, Read, Seek, Write};
-use std::path::{Component, Path};
+use std::ops::{Deref, DerefMut};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::bail;
@@ -14,6 +15,7 @@ use fs_err as fs;
 use fs_err::File;
 use logging_timer::time;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use walkdir::WalkDir;
 use zip::read::ZipArchiveMetadata;
 use zip::result::ZipError;
 use zip::write::SimpleFileOptions;
@@ -21,7 +23,7 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 use crate::wheel::WheelFile;
 use crate::wheel::layout::WheelLayout;
-use crate::wheel::original_wheel_info::OriginalWheelInfo;
+use crate::wheel::original_wheel_info::{OriginalWheelInfo, ZipFileName};
 use crate::wheel::record::Record;
 use crate::{Layout, Pex};
 
@@ -288,26 +290,45 @@ fn recompress_zipped_whl_chroot(
     };
 
     let data_dir = wheel_file.data_dir().as_path();
+    let mut zip_finder = ZipPathFinder {
+        zip: zipped_wheel_chroot,
+        prefix: if prefixed {
+            Some(prefix.to_string())
+        } else {
+            None
+        },
+    };
     let (dest_wheel, compressed_whl) = if let Some(wheel_info) = wheel_info {
         let dest_wheel = dest_dir.join(wheel_info.filename());
         let mut compressed_whl = ZipWriter::new(File::create(&dest_wheel)?);
-        for (dst_rel_path, options) in
+        for (zip_file_name, options) in
             wheel_info.iter_file_options(file_options, options.timestamp)?
         {
-            if dst_rel_path.ends_with(".pyc") {
+            if zip_file_name.ends_with(".pyc") {
                 continue;
             }
             let name = 'result: {
-                if let Ok(data_dir_rel_path) = Path::new(dst_rel_path).strip_prefix(&data_dir) {
+                if let Ok(data_dir_rel_path) = zip_file_name.as_path().strip_prefix(&data_dir) {
                     if let Some(stash_dir) = stash_dir.as_deref() {
                         break 'result format!(
                             "{prefix}{stash_dir}/{rel_path}",
                             stash_dir = stash_dir.display(),
-                            rel_path = normalized_data_dir_relpath(data_dir_rel_path).display()
+                            rel_path = normalized_data_dir_relpath(
+                                stash_dir,
+                                data_dir_rel_path,
+                                wheel_file,
+                                &zip_finder
+                            )?
+                            .display()
                         );
                     }
                     if legacy_bin_dir {
-                        let rel_path = normalized_data_dir_relpath(data_dir_rel_path);
+                        let rel_path = normalized_data_dir_relpath(
+                            Path::new("bin"),
+                            data_dir_rel_path,
+                            wheel_file,
+                            &zip_finder,
+                        )?;
                         assert!(starts_with(rel_path.as_ref(), "bin"));
                         break 'result format!(
                             "{prefix}{rel_path}",
@@ -315,25 +336,25 @@ fn recompress_zipped_whl_chroot(
                         );
                     }
                 }
-                format!("{prefix}{dst_rel_path}",)
+                format!("{prefix}{zip_file_name}")
             };
-            let mut src = match zipped_wheel_chroot.by_name(&name) {
+            let mut src = match zip_finder.by_name(&name) {
                 Ok(src) => src,
-                Err(_) if dst_rel_path.ends_with("/") => {
+                Err(_) if zip_file_name.ends_with("/") => {
                     // N.B.: Pex can omit original directory entries when those directories are
                     // empty.
-                    compressed_whl.add_directory(dst_rel_path, options)?;
+                    compressed_whl.add_directory(zip_file_name.to_string(), options)?;
                     continue;
                 }
                 Err(err) => bail!(
-                    "Mapped {dst_rel_path} in {file_name} to {name} which was not found: {err}",
+                    "Mapped {zip_file_name} in {file_name} to {name} which was not found: {err}",
                     file_name = wheel_file.file_name
                 ),
             };
             if src.is_dir() {
-                compressed_whl.add_directory_from_path(dst_rel_path, options)?;
+                compressed_whl.add_directory(zip_file_name.to_string(), options)?;
             } else {
-                compressed_whl.start_file_from_path(dst_rel_path, options)?;
+                compressed_whl.start_file(zip_file_name, options)?;
                 if src.name() == record_name {
                     compressed_whl.write_all(
                         record
@@ -359,30 +380,38 @@ fn recompress_zipped_whl_chroot(
         let mut compressed_whl = ZipWriter::new(File::create(&dest_wheel)?);
         for entry in record.entries() {
             let dst_rel_path = entry.path.as_ref();
-            let mut src = 'result: {
+            let name = 'result: {
                 if let Ok(data_dir_rel_path) = dst_rel_path.strip_prefix(&data_dir) {
                     if let Some(stash_dir) = stash_dir.as_deref() {
-                        break 'result zipped_wheel_chroot.by_name(&format!(
+                        break 'result format!(
                             "{prefix}{stash_dir}/{rel_path}",
                             stash_dir = stash_dir.display(),
-                            rel_path = normalized_data_dir_relpath(data_dir_rel_path).display()
-                        ))?;
+                            rel_path = normalized_data_dir_relpath(
+                                stash_dir,
+                                data_dir_rel_path,
+                                wheel_file,
+                                &zip_finder
+                            )?
+                            .display()
+                        );
                     }
                     if legacy_bin_dir {
-                        let rel_path = normalized_data_dir_relpath(data_dir_rel_path);
+                        let rel_path = normalized_data_dir_relpath(
+                            Path::new("bin"),
+                            data_dir_rel_path,
+                            wheel_file,
+                            &zip_finder,
+                        )?;
                         assert!(starts_with(rel_path.as_ref(), "bin"));
-                        break 'result zipped_wheel_chroot.by_name(&format!(
+                        break 'result format!(
                             "{prefix}{rel_path}",
                             rel_path = rel_path.as_ref().display()
-                        ))?;
+                        );
                     }
                 }
-                zipped_wheel_chroot.by_name(&format!(
-                    "{prefix}{rel_path}",
-                    rel_path = dst_rel_path.display()
-                ))?
+                format!("{prefix}{rel_path}", rel_path = dst_rel_path.display())
             };
-
+            let mut src = zip_finder.by_name(&name)?;
             compressed_whl.start_file_from_path(dst_rel_path, file_options)?;
             io::copy(&mut src, &mut compressed_whl)?;
         }
@@ -425,19 +454,30 @@ fn compress_whl_chroot(
     {
         let dest_wheel = dest_dir.join(wheel_info.filename());
         let mut compressed_whl = ZipWriter::new(File::create(&dest_wheel)?);
-        for (dst_rel_path, options) in
+        for (zip_file_name, options) in
             wheel_info.iter_file_options(file_options, options.timestamp)?
         {
-            if dst_rel_path.ends_with(".pyc") {
+            if zip_file_name.ends_with(".pyc") {
                 continue;
             }
-            let dst_rel_path = Path::new(dst_rel_path);
+            let dst_rel_path = zip_file_name.as_path();
+            let dst_rel_path = dst_rel_path.as_ref();
             let mut src = wheel_dir.join(dst_rel_path);
             if let Ok(data_dir_rel_path) = dst_rel_path.strip_prefix(&data_dir) {
                 if let Some(stash_dir) = stash_dir.as_deref() {
-                    src = stash_dir.join(normalized_data_dir_relpath(data_dir_rel_path))
+                    src = stash_dir.join(normalized_data_dir_relpath(
+                        stash_dir,
+                        data_dir_rel_path,
+                        wheel_file,
+                        &LoosePathFinder,
+                    )?)
                 } else if let Some(bin_dir) = legacy_bin_dir.as_deref() {
-                    let rel_path = normalized_data_dir_relpath(data_dir_rel_path);
+                    let rel_path = normalized_data_dir_relpath(
+                        bin_dir,
+                        data_dir_rel_path,
+                        wheel_file,
+                        &LoosePathFinder,
+                    )?;
                     assert!(starts_with(rel_path.as_ref(), "bin"));
                     src = bin_dir.join(rel_path)
                 }
@@ -477,9 +517,19 @@ fn compress_whl_chroot(
             let mut src = wheel_dir.join(dst_rel_path);
             if let Ok(data_dir_rel_path) = dst_rel_path.strip_prefix(&data_dir) {
                 if let Some(stash_dir) = stash_dir.as_deref() {
-                    src = stash_dir.join(normalized_data_dir_relpath(data_dir_rel_path))
+                    src = stash_dir.join(normalized_data_dir_relpath(
+                        stash_dir,
+                        data_dir_rel_path,
+                        wheel_file,
+                        &LoosePathFinder,
+                    )?)
                 } else if let Some(bin_dir) = legacy_bin_dir.as_deref() {
-                    let rel_path = normalized_data_dir_relpath(data_dir_rel_path);
+                    let rel_path = normalized_data_dir_relpath(
+                        bin_dir,
+                        data_dir_rel_path,
+                        wheel_file,
+                        &LoosePathFinder,
+                    )?;
                     assert!(starts_with(rel_path.as_ref(), "bin"));
                     src = bin_dir.join(rel_path)
                 }
@@ -498,18 +548,152 @@ fn starts_with(path: &Path, name: impl AsRef<OsStr>) -> bool {
     matches!(path.components().next(), Some(Component::Normal(named)) if named == name.as_ref())
 }
 
-fn normalized_data_dir_relpath(path: &Path) -> Cow<'_, Path> {
+trait ProjectPathFinder<'a> {
+    fn find(
+        &'a self,
+        strip_prefix: &Path,
+        prefix: PathBuf,
+        project: &WheelFile,
+        suffix: PathBuf,
+    ) -> anyhow::Result<Cow<'a, Path>>;
+}
+
+struct LoosePathFinder;
+
+impl<'a> ProjectPathFinder<'a> for LoosePathFinder {
+    fn find(
+        &'a self,
+        strip_prefix: &Path,
+        prefix: PathBuf,
+        project: &WheelFile,
+        suffix: PathBuf,
+    ) -> anyhow::Result<Cow<'a, Path>> {
+        for entry in WalkDir::new(strip_prefix.join(&prefix)).min_depth(1) {
+            let entry = entry?;
+            let prefix_rel_path = entry
+                .path()
+                .strip_prefix(strip_prefix)
+                .expect("We walked the prefix; so we can always safely strip it.");
+            if prefix_rel_path.ends_with(&suffix) {
+                for component in prefix_rel_path.components() {
+                    if let Some(name) = component.as_os_str().to_str()
+                        && (name == project.raw_project_name
+                            || name == project.project_name.as_ref())
+                    {
+                        return Ok(Cow::Owned(prefix_rel_path.to_owned()));
+                    }
+                }
+            }
+        }
+        bail!(
+            "Failed to find path in wheel {wheel} rooted at {root} with prefix {prefix} and \
+            suffix {suffix}",
+            wheel = project.file_name,
+            root = strip_prefix.display(),
+            prefix = prefix.display(),
+            suffix = suffix.display()
+        )
+    }
+}
+
+struct ZipPathFinder<R: Read + Seek> {
+    zip: ZipArchive<R>,
+    prefix: Option<String>,
+}
+
+impl<R: Read + Seek> Deref for ZipPathFinder<R> {
+    type Target = ZipArchive<R>;
+
+    fn deref(&self) -> &<Self as Deref>::Target {
+        &self.zip
+    }
+}
+
+impl<R: Read + Seek> DerefMut for ZipPathFinder<R> {
+    fn deref_mut(&mut self) -> &mut <Self as Deref>::Target {
+        &mut self.zip
+    }
+}
+
+impl<'a, R: Read + Seek> ProjectPathFinder<'a> for ZipPathFinder<R> {
+    fn find(
+        &'a self,
+        strip_prefix: &Path,
+        prefix: PathBuf,
+        project: &WheelFile,
+        suffix: PathBuf,
+    ) -> anyhow::Result<Cow<'a, Path>> {
+        let (strip_prefix, prefix) = if let Some(zip_prefix) = self.prefix.as_deref() {
+            let strip_prefix = Path::new(zip_prefix).join(strip_prefix);
+            let zip_file_name_path = strip_prefix.join(prefix);
+            (
+                Cow::Owned(strip_prefix),
+                ZipFileName::from(zip_file_name_path)?,
+            )
+        } else {
+            (
+                Cow::Borrowed(strip_prefix),
+                ZipFileName::from(strip_prefix.join(prefix))?,
+            )
+        };
+        let suffix = ZipFileName::from(suffix)?;
+        for file_name in self.zip.file_names() {
+            if let Some(rel_path) = file_name.strip_prefix(prefix.as_str())
+                && let Some(rel_path) = rel_path.strip_suffix(suffix.as_str())
+            {
+                for component in rel_path.split("/") {
+                    if component == project.raw_project_name
+                        || component == project.project_name.as_ref()
+                    {
+                        return Ok(Cow::Borrowed(
+                            Path::new(file_name).strip_prefix(strip_prefix)?,
+                        ));
+                    }
+                }
+            }
+        }
+        bail!(
+            "Failed to find path in wheel {wheel} zip with prefix {prefix} and suffix {suffix}",
+            wheel = project.file_name,
+        )
+    }
+}
+
+fn normalized_data_dir_relpath<'a>(
+    prefix: &Path,
+    path: &'a Path,
+    wheel_file: &WheelFile,
+    project_path_finder: &'a impl ProjectPathFinder<'a>,
+) -> anyhow::Result<Cow<'a, Path>> {
     let mut components = path.components();
-    if let Some(start) = components.next()
+    let start = components.next();
+    if let Some(start) = start
         && matches!(start, Component::Normal(name) if name == "scripts")
     {
-        Cow::Owned(
+        Ok(Cow::Owned(
             [Component::Normal(OsStr::new("bin"))]
                 .into_iter()
                 .chain(components)
                 .collect(),
-        )
+        ))
+    } else if let Some(start) = start
+        && matches!(start, Component::Normal(name) if name == "headers")
+    {
+        // N.B.: You'd think sysconfig_paths["include"] would be the right answer here but both
+        // `pip`, and by emulation, `uv pip`, map `*.data/headers` to
+        // `<venv>/include/site/pythonX.Y/<project name>`. Traditional PEXes honors this; so we
+        // need to as well.
+        //
+        // The "mess" is admitted and described at length here:
+        // + https://discuss.python.org/t/clarification-on-a-wheels-header-data/9305
+        // + https://discuss.python.org/t/deprecating-the-headers-wheel-data-key/23712
+        Ok(project_path_finder.find(
+            prefix,
+            Path::new("include").join("site"),
+            wheel_file,
+            components.collect(),
+        )?)
     } else {
-        Cow::Borrowed(path)
+        Ok(Cow::Borrowed(path))
     }
 }

@@ -17,10 +17,29 @@ use std::ffi::OsStr;
 use std::path::Path;
 use std::{fs, io};
 
+pub enum Perms {
+    Perms(fs::Permissions),
+    Mode(u32),
+}
+
 #[cfg(unix)]
-pub use unix::{exec, is_executable, mark_executable, path_as_bytes, symlink_or_link_or_copy};
+pub use unix::{
+    exec,
+    is_executable,
+    mark_executable,
+    path_as_bytes,
+    set_permissions,
+    symlink_or_link_or_copy,
+};
 #[cfg(windows)]
-pub use windows::{exec, is_executable, mark_executable, path_as_bytes, symlink_or_link_or_copy};
+pub use windows::{
+    exec,
+    is_executable,
+    mark_executable,
+    path_as_bytes,
+    set_permissions,
+    symlink_or_link_or_copy,
+};
 
 pub fn path_as_str(path: &Path) -> io::Result<&str> {
     path.to_str().ok_or_else(|| {

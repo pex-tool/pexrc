@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
 
+use anyhow::anyhow;
 use cache::{Fingerprint, default_digest, fingerprint_file};
 use dashmap::DashMap;
 
@@ -51,10 +52,12 @@ impl Provenance {
         }
         let mut collisions = Vec::with_capacity(self.collisions.len());
         for (dst, mut collision_details) in self.collisions {
-            let (_, source) = self
-                .origins
-                .remove(&dst)
-                .expect("A collision always has a corresponding origin.");
+            let (_, source) = self.origins.remove(&dst).ok_or_else(|| {
+                anyhow!(
+                    "A collision always has a corresponding origin but {dst} has none",
+                    dst = dst.display()
+                )
+            })?;
 
             let mut srcs: BTreeMap<(Fingerprint, usize), Vec<String>> = BTreeMap::new();
             let (size, fingerprint) = fingerprint_file(&dst, default_digest())?;

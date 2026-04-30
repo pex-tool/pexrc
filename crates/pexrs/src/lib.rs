@@ -152,7 +152,7 @@ pub fn mount(python: impl AsRef<Path>, pex: impl AsRef<Path>) -> anyhow::Result<
         #[cfg(unix)]
         None,
     )
-    .map(|venv| venv.site_packages_path())
+    .map(|venv| venv.prefix().join(&venv.site_packages_relpath))
 }
 
 #[time("debug", "{}")]

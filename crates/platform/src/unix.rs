@@ -17,6 +17,8 @@ use nix::fcntl::{FcntlArg, FdFlag, fcntl};
 use nix::unistd;
 use nix::unistd::AccessFlags;
 
+use crate::Perms;
+
 pub fn symlink_or_link_or_copy(
     src: impl AsRef<Path>,
     dst: impl AsRef<Path>,
@@ -73,10 +75,18 @@ pub fn is_executable(path: impl AsRef<Path>) -> io::Result<bool> {
 }
 
 pub fn mark_executable(file: &mut File) -> io::Result<()> {
-    let mut permissions = file.metadata()?.permissions();
-    permissions.set_mode(0o755);
-    file.set_permissions(permissions)?;
-    Ok(())
+    set_permissions(file, Perms::Mode(0o755))
+}
+
+pub fn set_permissions(file: &mut File, perms: Perms) -> io::Result<()> {
+    match perms {
+        Perms::Perms(permissions) => file.set_permissions(permissions),
+        Perms::Mode(mode) => {
+            let mut permissions = file.metadata()?.permissions();
+            permissions.set_mode(mode);
+            file.set_permissions(permissions)
+        }
+    }
 }
 
 pub fn path_as_bytes(path: &Path) -> io::Result<&[u8]> {

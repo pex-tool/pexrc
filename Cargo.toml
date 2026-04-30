@@ -5,7 +5,7 @@ cargo-features = ["profile-rustflags"]
 
 [package]
 name = "pexrc"
-version = "0.7.1"
+version = "0.8.0"
 edition = "2024"
 publish = false
 
@@ -168,6 +168,7 @@ is_executable = "1.0"
 itertools = "0.14"
 log = "0.4"
 logging_timer = "1.1"
+mailparse = "0.16"
 nix = {  version = "0.31", features = ["fs"] }
 oneshot = {  version = "0.2", features = ["std"] }
 open = "5.3"
@@ -179,6 +180,7 @@ pep508_rs = "0.9"
 python-pkginfo = "0.6"
 rayon = "1.12"
 regex = "1.12"
+rfc2047-decoder = "1.1"
 rstest = "0.26"
 rust-ini = "0.21"
 same-file = "1.0"

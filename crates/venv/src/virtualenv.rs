@@ -69,7 +69,7 @@ impl Linker for FileSystemLinker {
 pub struct Virtualenv<'a> {
     pub interpreter: Interpreter,
     pub bin_dir_relpath: &'a str,
-    site_packages_relpath: Cow<'a, Path>,
+    pub site_packages_relpath: Cow<'a, Path>,
 }
 
 impl<'a> Virtualenv<'a> {
@@ -107,6 +107,11 @@ impl<'a> Virtualenv<'a> {
         venv_interpreter.path = venv_dir.join(executable_relpath.as_ref());
         if HOST.operating_system == OperatingSystem::Windows {
             venv_interpreter.realpath = venv_interpreter.path.clone();
+        }
+        for path in venv_interpreter.paths.values_mut() {
+            if let Ok(prefix_rel_path) = path.strip_prefix(&interpreter.prefix) {
+                *path = venv_interpreter.prefix.join(prefix_rel_path);
+            }
         }
         Ok(venv_interpreter)
     }
@@ -158,8 +163,18 @@ impl<'a> Virtualenv<'a> {
         &self.interpreter.prefix
     }
 
-    pub fn site_packages_path(&self) -> PathBuf {
-        self.interpreter.prefix.join(&self.site_packages_relpath)
+    pub fn script_path(&self, rel_path: impl AsRef<Path>) -> PathBuf {
+        self.interpreter
+            .prefix
+            .join(self.bin_dir_relpath)
+            .join(rel_path)
+    }
+
+    pub fn site_packages_path(&self, rel_path: impl AsRef<Path>) -> PathBuf {
+        self.interpreter
+            .prefix
+            .join(self.site_packages_relpath.as_ref())
+            .join(rel_path)
     }
 
     pub fn create_additional_pythons(&self) -> anyhow::Result<()> {
@@ -340,8 +355,15 @@ fn create_pep_405_venv<'a>(
     let site_packages_relpath = site_packages_relpath(&base_interpreter);
     fs::create_dir_all(path.join(site_packages_relpath.as_ref()))?;
     if pip {
-        // The ensurepip module is optional, consider embedding or fetching:
-        // https://bootstrap.pypa.io/pip/
+        if !base_interpreter.has_ensurepip {
+            // TODO: Consider embedding or fetching: https://bootstrap.pypa.io/pip/
+            bail!(
+                "Cannot install Pip since the selected interpreter does not have the `ensurepip` \
+                module: {interpreter}",
+                interpreter = base_interpreter.path.display()
+            )
+        }
+
         Command::new(dest)
             .args(["-m", "ensurepip", "--default-pip"])
             .stdout(Stdio::null())
