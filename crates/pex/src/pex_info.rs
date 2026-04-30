@@ -81,7 +81,7 @@ pub struct RawPexInfo<'a> {
     pub overridden: Vec<&'a str>,
     pub pex_hash: &'a str,
     pub pex_path: Option<&'a str>,
-    pub pex_paths: Vec<&'a Path>,
+    pub pex_paths: Vec<Cow<'a, Path>>,
     pub pex_root: Option<&'a str>,
     pub requirements: Vec<&'a str>,
     pub script: Option<&'a str>,

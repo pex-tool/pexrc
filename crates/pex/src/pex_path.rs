@@ -15,7 +15,7 @@ impl<'a> PexPath<'a> {
         if allow_env_override && let Some(path) = env::var_os("PEX_PATH") {
             pex_path.extend(env::split_paths(&path).map(Cow::Owned))
         } else if !pex_info.raw().pex_paths.is_empty() {
-            pex_path.extend(pex_info.raw().pex_paths.iter().copied().map(Cow::Borrowed))
+            pex_path.extend(pex_info.raw().pex_paths.clone())
         } else if let Some(legacy_pex_path) = pex_info.raw().pex_path
             && !legacy_pex_path.is_empty()
         {
