@@ -20,7 +20,7 @@ use pex::{
     EntryPoints,
     Layout,
     Pex,
-    PexInfo,
+    RawPexInfo,
     ResolvedWheel,
     collect_loose_user_source,
     collect_zipped_user_source_indexes,
@@ -583,7 +583,7 @@ pub fn populate_user_code_and_wheels<'a>(
             provenance.clone(),
         )?,
         Layout::ZipApp => {
-            if pex.info.deps_are_wheel_files {
+            if pex.info.raw().deps_are_wheel_files {
                 populate_from_zip_app_with_whl_deps(
                     venv,
                     pex,
@@ -652,7 +652,7 @@ pub fn populate<'a>(
             venv,
             shebang_interpreter,
             shebang_arg,
-            &pex.info,
+            pex.info.raw(),
             scripts,
             bin_path_override,
         )?;
@@ -661,7 +661,7 @@ pub fn populate<'a>(
             shebang_interpreter,
             shebang_arg,
             pex.path,
-            &pex.info,
+            pex.info.raw(),
             selected_wheels,
             scripts,
         )?;
@@ -749,7 +749,7 @@ impl<'a> Display for OptionalPythonStr<'a> {
     }
 }
 
-struct PythonListStr<'a>(&'a Vec<String>);
+struct PythonListStr<'a>(&'a Vec<&'a str>);
 
 impl<'a> Display for PythonListStr<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -764,7 +764,7 @@ impl<'a> Display for PythonListStr<'a> {
     }
 }
 
-struct PythonListTupleStrStr<'a>(Option<&'a IndexMap<String, String>>);
+struct PythonListTupleStrStr<'a>(Option<&'a IndexMap<&'a str, &'a str>>);
 
 impl<'a> Display for PythonListTupleStrStr<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -785,7 +785,7 @@ fn write_main(
     venv: &Virtualenv,
     shebang_interpreter: &Path,
     shebang_arg: Option<&str>,
-    pex_info: &PexInfo,
+    pex_info: &RawPexInfo,
     scripts: &mut Scripts,
     bin_path_override: Option<BinPath>,
 ) -> anyhow::Result<()> {
@@ -825,8 +825,8 @@ if __name__ == "__main__":
             bind_resource_paths = PythonListTupleStrStr(pex_info.bind_resource_paths.as_ref()),
             inject_env = PythonListTupleStrStr(pex_info.inject_env.as_ref()),
             inject_args = PythonListStr(&pex_info.inject_args),
-            entry_point = OptionalPythonStr(pex_info.entry_point.as_deref()),
-            script = OptionalPythonStr(pex_info.script.as_deref()),
+            entry_point = OptionalPythonStr(pex_info.entry_point),
+            script = OptionalPythonStr(pex_info.script),
             hermetic_re_exec = OptionalPythonStr(if pex_info.venv_hermetic_scripts {
                 Some(venv.interpreter.hermetic_args())
             } else {
@@ -847,7 +847,7 @@ fn write_repl(
     shebang_interpreter: &Path,
     shebang_arg: Option<&str>,
     pex: &Path,
-    pex_info: &PexInfo,
+    pex_info: &RawPexInfo,
     selected_wheels: Vec<&str>,
     scripts: &mut Scripts,
 ) -> anyhow::Result<()> {
@@ -877,7 +877,7 @@ fn write_repl(
     };
 
     struct ActivationDetails<'a> {
-        requirements: &'a Vec<String>,
+        requirements: &'a Vec<&'a str>,
         selected_wheels: &'a Vec<&'a str>,
     }
 

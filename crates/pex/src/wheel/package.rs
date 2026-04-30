@@ -80,7 +80,7 @@ pub fn repackage_wheels(
         .collect::<Result<Vec<_>, _>>()?;
     match pex.layout {
         Layout::Loose | Layout::Packed => {
-            let dep_type = if pex.info.deps_are_wheel_files {
+            let dep_type = if pex.info.raw().deps_are_wheel_files {
                 DirPexDepType::OriginalWhl
             } else if matches!(pex.layout, Layout::Packed) {
                 DirPexDepType::ZippedChroot
@@ -110,7 +110,7 @@ pub fn repackage_wheels(
                         pex.path,
                         zip_metadata.clone(),
                         &wheel_file,
-                        pex.info.deps_are_wheel_files,
+                        pex.info.raw().deps_are_wheel_files,
                         options,
                         dest_dir,
                     )

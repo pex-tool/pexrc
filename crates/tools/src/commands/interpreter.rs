@@ -126,7 +126,7 @@ fn compatible_interpreters(
         let mut scripts = pex.scripts()?;
         let identification_script = IdentifyInterpreter::read(&mut scripts)?;
         let interpreter_constraints =
-            InterpreterConstraints::try_from(&pex.info.interpreter_constraints)?;
+            InterpreterConstraints::try_from(&pex.info.raw().interpreter_constraints)?;
         let resolved = pex.resolve_all(
             &identification_script,
             &interpreter_constraints,

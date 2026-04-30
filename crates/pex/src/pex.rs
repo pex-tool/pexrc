@@ -191,8 +191,9 @@ impl<'a> Pex<'a> {
             layout @ (Layout::Loose | Layout::Packed) => {
                 let pex_info_path = path.join("PEX-INFO");
                 let pex_info_fp = File::open(&pex_info_path)?;
+                let size = pex_info_fp.metadata()?.len();
                 let pex_info =
-                    PexInfo::parse(pex_info_fp, Some(|| pex_info_path.to_string_lossy()))?;
+                    PexInfo::parse(pex_info_fp, size, Some(|| pex_info_path.to_string_lossy()))?;
 
                 Ok(Self {
                     path,
@@ -206,8 +207,9 @@ impl<'a> Pex<'a> {
                     let _timer = timer!(Level::Debug; "Open PEX zip", "{}", path.display());
                     ZipArchive::new(BufReader::new(zip_fp))?
                 };
-                let pex_info =
-                    PexInfo::parse(zip.by_name("PEX-INFO")?, Some(|| Cow::Borrowed("PEX-INFO")))?;
+                let zip_file = zip.by_name("PEX-INFO")?;
+                let size = zip_file.size();
+                let pex_info = PexInfo::parse(zip_file, size, Some(|| Cow::Borrowed("PEX-INFO")))?;
                 Ok(Self {
                     path,
                     info: pex_info,
@@ -302,6 +304,7 @@ impl<'a> Pex<'a> {
         let mut indexed_extras: Vec<Vec<ExtraName>> = vec![Vec::new()];
         let mut to_resolve: VecDeque<(Requirement<Url>, usize)> = self
             .info
+            .raw()
             .requirements
             .iter()
             .map(|requirement| {
@@ -429,6 +432,7 @@ impl<'a> Pex<'a> {
         let interpreters_to_try = interpreter_constraints
             .iter_possibly_compatible_python_exes(
                 self.info
+                    .raw()
                     .interpreter_selection_strategy
                     .unwrap_or(InterpreterSelectionStrategy::Oldest)
                     .into(),
@@ -477,7 +481,7 @@ impl<'a> Pex<'a> {
         let identification_script = IdentifyInterpreter::read(&mut scripts)?;
 
         let interpreter_constraints =
-            InterpreterConstraints::try_from(&self.info.interpreter_constraints)?;
+            InterpreterConstraints::try_from(&self.info.raw().interpreter_constraints)?;
         let mut errors = Vec::new();
         if let Some(python_exe) = python_exe
             && let Ok(interpreter) = Interpreter::load(python_exe, &identification_script)
@@ -544,7 +548,7 @@ impl<'a> Pex<'a> {
             });
         }
 
-        let reqs = &self.info.requirements;
+        let reqs = &self.info.raw().requirements;
         let requirement_count = reqs.len();
         let requirements = if requirement_count == 1 {
             "requirement"
@@ -617,7 +621,7 @@ impl<'a> Pex<'a> {
             Layout::ZipApp => read_wheel_metadata(
                 python_version,
                 wheel_files,
-                &mut ZipAppPexMetadataReader::new(self.path, self.info.deps_are_wheel_files)?,
+                &mut ZipAppPexMetadataReader::new(self.path, self.info.raw().deps_are_wheel_files)?,
             ),
         }
     }

@@ -361,7 +361,7 @@ pub(crate) fn create(python: &Path, pex: Pex, args: VenvArgs) -> anyhow::Result<
             Layout::ZipApp => fs::remove_file(pex.path)?,
         }
         if scope == RemoveScope::All {
-            let pex_root = if let Some(root) = pex.info.pex_root.as_deref() {
+            let pex_root = if let Some(root) = pex.info.raw().pex_root.as_deref() {
                 Path::new(root)
             } else {
                 CacheDir::root()?

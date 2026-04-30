@@ -50,9 +50,10 @@ pub fn sh_boot_shebang(
     let venv_relpath = venv_dir.strip_prefix(CacheDir::root()?)?;
 
     let interpreter_constraints =
-        InterpreterConstraints::try_from(&pex.info.interpreter_constraints)?;
+        InterpreterConstraints::try_from(&pex.info.raw().interpreter_constraints)?;
     let selection_strategy: SelectionStrategy = pex
         .info
+        .raw()
         .interpreter_selection_strategy
         .unwrap_or(pex::InterpreterSelectionStrategy::Oldest)
         .into();
@@ -89,7 +90,7 @@ pub fn sh_boot_shebang(
         vars = SH_BOOT_PARTS[2]
             .replace(
                 "{pexrc_root}",
-                pex.info.pex_root.as_deref().unwrap_or_default(),
+                pex.info.raw().pex_root.as_deref().unwrap_or_default()
             )
             .replace("{venv_relpath}", path_as_str(venv_relpath)?)
             .replace(
