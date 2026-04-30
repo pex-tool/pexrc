@@ -16,7 +16,7 @@ impl<'a> PexPath<'a> {
             pex_path.extend(env::split_paths(&path).map(Cow::Owned))
         } else if !pex_info.raw().pex_paths.is_empty() {
             pex_path.extend(pex_info.raw().pex_paths.iter().cloned())
-        } else if let Some(legacy_pex_path) = pex_info.raw().pex_path
+        } else if let Some(legacy_pex_path) = pex_info.raw().pex_path.as_ref()
             && !legacy_pex_path.is_empty()
         {
             // Legacy PEX-INFO stored this in a single string as a colon-separated list.

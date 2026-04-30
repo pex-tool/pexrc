@@ -88,7 +88,10 @@ pub fn sh_boot_shebang(
         start_escape = if escaped { "'''': pshprs\n" } else { "" },
         header = SH_BOOT_PARTS[1],
         vars = SH_BOOT_PARTS[2]
-            .replace("{pexrc_root}", pex.info.raw().pex_root.unwrap_or_default())
+            .replace(
+                "{pexrc_root}",
+                pex.info.raw().pex_root.as_deref().unwrap_or_default()
+            )
             .replace("{venv_relpath}", path_as_str(venv_relpath)?)
             .replace(
                 "{pythons}",
