@@ -3,7 +3,7 @@
 
 [package]
 name = "scripts"
-edition = "2024"
+edition = { workspace = true }
 publish = false
 
 [features]

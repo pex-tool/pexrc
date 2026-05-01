@@ -6,7 +6,7 @@ cargo-features = ["profile-rustflags"]
 [package]
 name = "pexrc"
 version = "0.8.0"
-edition = "2024"
+edition = { workspace = true }
 publish = false
 
 [workspace]
@@ -136,6 +136,9 @@ path = "src/lib.rs"
 [[bin]]
 name = "pexrc"
 path = "pexrc.rs"
+
+[workspace.package]
+edition = "2024"
 
 [workspace.dependencies]
 anstream = "1.0"

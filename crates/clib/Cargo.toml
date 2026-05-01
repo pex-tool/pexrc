@@ -3,7 +3,7 @@
 
 [package]
 name = "clib"
-edition = "2024"
+edition = { workspace = true }
 publish = false
 
 [lib]

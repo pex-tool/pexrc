@@ -3,7 +3,7 @@
 
 [package]
 name = "boot"
-edition = "2024"
+edition = { workspace = true }
 publish = false
 
 [dependencies]
