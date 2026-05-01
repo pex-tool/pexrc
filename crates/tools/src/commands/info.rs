@@ -22,5 +22,9 @@ pub(crate) struct InfoArgs {
 
 #[time("debug", "{}")]
 pub(crate) fn display(pex: Pex, args: InfoArgs) -> anyhow::Result<()> {
-    crate::json::serialize(Output::new(args.output.as_deref())?, &pex.info, args.indent)
+    crate::json::serialize(
+        Output::new(args.output.as_deref())?,
+        &pex.info.raw(),
+        args.indent,
+    )
 }
