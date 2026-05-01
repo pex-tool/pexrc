@@ -16,6 +16,7 @@ elf = { workspace = true }
 fs-err = { workspace = true }
 log = { workspace = true }
 logging_timer = { workspace = true }
+ouroboros = { workspace = true }
 platform = { path = "../platform" }
 same-file = { workspace = true }
 scripts = { path = "../scripts" }

@@ -98,7 +98,7 @@ impl Record {
             .from_reader(buffered_source)
             .into_records()
             .collect::<Vec<_>>();
-        Record::try_new(records, terminator, |records| {
+        Self::try_new(records, terminator, |records| {
             records
                 .iter()
                 .enumerate()

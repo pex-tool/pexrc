@@ -8,17 +8,17 @@ use crate::{Interpreter, Tag};
 
 pub struct Platform<'a> {
     implementation: &'a str,
-    version: &'a PythonVersion,
+    version: &'a PythonVersion<'a>,
     abi: &'a str,
     platform: &'a str,
 }
 
 impl<'a> Platform<'a> {
     pub fn of(interpreter: &'a Interpreter) -> anyhow::Result<Self> {
-        let tag = Tag::parse(interpreter.supported_tags[0].as_str())?;
+        let tag = Tag::parse(interpreter.raw().supported_tags[0])?;
         Ok(Self {
             implementation: &tag.python[0..2],
-            version: &interpreter.version,
+            version: &interpreter.raw().version,
             abi: tag.abi,
             platform: tag.platform,
         })

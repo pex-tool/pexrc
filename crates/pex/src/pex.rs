@@ -241,6 +241,7 @@ impl<'a> Pex<'a> {
         collect_extra_metadata: Option<CollectWheelMetadata<'a>>,
     ) -> anyhow::Result<IndexMap<&'a str, ResolvedWheel<'a>>> {
         let supported_tags: HashMap<Tag, usize> = interpreter
+            .raw()
             .supported_tags
             .iter()
             .enumerate()
@@ -317,7 +318,7 @@ impl<'a> Pex<'a> {
             }
             if !requirement
                 .marker
-                .evaluate(&interpreter.marker_env, &indexed_extras[extras_index])
+                .evaluate(&interpreter.raw().marker_env, &indexed_extras[extras_index])
             {
                 continue;
             }
@@ -355,7 +356,7 @@ impl<'a> Pex<'a> {
                         for the interpreter at {python_exe}.\n\
                         {reason}",
                         path = self.path.display(),
-                        python_exe = interpreter.path.display(),
+                        python_exe = interpreter.raw().path.display(),
                         reason = reason,
                     )
                 })?;
@@ -462,7 +463,7 @@ impl<'a> Pex<'a> {
                         wheels: selected_wheels,
                     }),
                     Err(err) => Err(ResolveError {
-                        python_exe: interpreter.path,
+                        python_exe: interpreter.raw().path.as_ref().to_owned(),
                         err,
                     }),
                 }
@@ -503,7 +504,7 @@ impl<'a> Pex<'a> {
                         additional_wheels,
                     });
                 }
-                Err(err) => errors.push((interpreter.path, err)),
+                Err(err) => errors.push((interpreter.raw().path.as_ref().to_owned(), err)),
             }
         }
 
@@ -598,9 +599,9 @@ impl<'a> Pex<'a> {
         wheel_files: Vec<RankedWheelFile<'a>>,
     ) -> anyhow::Result<Vec<RankedWheel<'a>>> {
         let python_version = Version::new([
-            u64::from(interpreter.version.major),
-            u64::from(interpreter.version.minor),
-            u64::from(interpreter.version.micro),
+            u64::from(interpreter.raw().version.major),
+            u64::from(interpreter.raw().version.minor),
+            u64::from(interpreter.raw().version.micro),
         ]);
         match self.layout {
             // N.B.: When deps_are_wheel_files for a `--layout loose` PEX, our layout detection

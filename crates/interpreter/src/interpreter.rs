@@ -3,7 +3,8 @@
 
 use std::borrow::Cow;
 use std::fmt::{Display, Formatter};
-use std::io::{BufReader, BufWriter, Write};
+use std::hash::{Hash, Hasher};
+use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -11,20 +12,21 @@ use anyhow::{anyhow, bail};
 use cache::{CacheDir, HashOptions, atomic_file, hash_file};
 use fs_err as fs;
 use logging_timer::time;
+use ouroboros::self_referencing;
 use pep508_rs::MarkerEnvironment;
 use scripts::{IdentifyInterpreter, Scripts};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Deserialize, Serialize)]
-pub struct PythonVersion {
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Deserialize, Serialize)]
+pub struct PythonVersion<'a> {
     pub major: u8,
     pub minor: u8,
     pub micro: u8,
-    pub releaselevel: String,
+    pub releaselevel: &'a str,
     pub serial: u8,
 }
 
-impl Display for PythonVersion {
+impl<'a> Display for PythonVersion<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!(
             "{major}.{minor}.{micro}",
@@ -36,7 +38,7 @@ impl Display for PythonVersion {
         // N.B.: Using this for possible strings reference:
         // https://peps.python.org/pep-0739/#implementation-version-releaselevel
 
-        if let Some(level_abbrev) = match self.releaselevel.as_str() {
+        if let Some(level_abbrev) = match self.releaselevel {
             "alpha" => Some("a"),
             "beta" => Some("b"),
             "candidate" => Some("rc"),
@@ -48,7 +50,7 @@ impl Display for PythonVersion {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Deserialize, Serialize)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Deserialize, Serialize)]
 pub struct PyPyVersion(u8, u8, u8);
 
 impl Display for PyPyVersion {
@@ -62,22 +64,55 @@ impl Display for PyPyVersion {
     }
 }
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Deserialize, Serialize)]
-pub struct Interpreter {
-    pub path: PathBuf,
-    pub realpath: PathBuf,
-    pub prefix: PathBuf,
-    pub base_prefix: Option<PathBuf>,
-    pub version: PythonVersion,
+pub struct RawInterpreter<'a> {
+    pub path: Cow<'a, Path>,
+    pub realpath: Cow<'a, Path>,
+    pub prefix: Cow<'a, Path>,
+    pub base_prefix: Option<Cow<'a, Path>>,
+    #[serde(borrow)]
+    pub version: PythonVersion<'a>,
     pub pypy_version: Option<PyPyVersion>,
     pub marker_env: MarkerEnvironment,
-    pub macos_framework_build: bool,
-    pub supported_tags: Vec<String>,
+    pub supported_tags: Vec<&'a str>,
     pub has_ensurepip: bool,
     pub free_threaded: Option<bool>,
 }
 
 #[cfg(target_os = "linux")]
 static LINUX_INFO: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+#[self_referencing]
+pub struct Interpreter {
+    data: Vec<u8>,
+    #[borrows(data)]
+    #[covariant]
+    interpreter: RawInterpreter<'this>,
+}
+
+impl Eq for Interpreter {}
+
+impl PartialEq for Interpreter {
+    fn eq(&self, other: &Self) -> bool {
+        self.raw().eq(other.raw())
+    }
+}
+
+impl Hash for Interpreter {
+    fn hash<H>(&self, state: &mut H)
+    where
+        H: Hasher,
+    {
+        self.raw().hash(state)
+    }
+}
+
+impl Clone for Interpreter {
+    fn clone(&self) -> Self {
+        Self::new(self.borrow_data().clone(), |data| {
+            serde_json::from_slice(data).expect("We've already parsed out data successfully once.")
+        })
+    }
+}
 
 impl Interpreter {
     fn identify(
@@ -134,30 +169,34 @@ impl Interpreter {
         identification_script: &IdentifyInterpreter,
     ) -> anyhow::Result<Self> {
         let json_bytes = Self::identify(python_exe.as_ref(), identification_script)?;
-        serde_json::from_slice(&json_bytes).map_err(|err| {
-            anyhow!(
-                "Failed to identify Python interpreter {exe}: {err}",
-                exe = python_exe.as_ref().display()
-            )
+        Self::try_new(json_bytes, |data| {
+            serde_json::from_slice(data).map_err(|err| {
+                anyhow!(
+                    "Failed to identify Python interpreter {exe}: {err}",
+                    exe = python_exe.as_ref().display()
+                )
+            })
         })
     }
 
     #[cfg(unix)]
     pub fn most_specific_exe_name(&self) -> String {
-        let name = if self.pypy_version.is_some() {
+        let interpreter = self.raw();
+        let name = if interpreter.pypy_version.is_some() {
             "pypy"
         } else {
             "python"
         };
         format!(
             "{name}{major}.{minor}",
-            major = self.version.major,
-            minor = self.version.minor
+            major = interpreter.version.major,
+            minor = interpreter.version.minor
         )
     }
 
     pub fn prefix_rel_paths(&self) -> Vec<Cow<'_, Path>> {
-        Self::candidate_rel_paths(&self.version, self.pypy_version.as_ref())
+        let interpreter = self.raw();
+        Self::candidate_rel_paths(&interpreter.version, interpreter.pypy_version.as_ref())
     }
 
     #[cfg(unix)]
@@ -239,7 +278,7 @@ impl Interpreter {
     ) -> anyhow::Result<Self> {
         let check_pypy_version = |interpreter: &Interpreter| match (
             pypy_version.as_ref(),
-            interpreter.pypy_version.as_ref(),
+            interpreter.raw().pypy_version.as_ref(),
         ) {
             (Some(expected_pypy_version), Some(actual_pypy_version))
                 if expected_pypy_version == actual_pypy_version =>
@@ -255,10 +294,12 @@ impl Interpreter {
         for rel_path in candidate_rel_paths {
             let candidate_path = prefix.as_ref().join(rel_path);
             if let Ok(interpreter) = Self::load(candidate_path, &identification_script) {
-                if interpreter.version != version {
+                if interpreter.raw().version != version {
                     if re_cache_version_mismatch
-                        && (interpreter.version.major, interpreter.version.minor)
-                            == (version.major, version.minor)
+                        && (
+                            interpreter.raw().version.major,
+                            interpreter.raw().version.minor,
+                        ) == (version.major, version.minor)
                     {
                         re_cache_candidates.push(interpreter)
                     }
@@ -271,7 +312,7 @@ impl Interpreter {
         }
         for interpreter in re_cache_candidates {
             let interpreter = interpreter.reload(&identification_script)?;
-            if interpreter.version == version && check_pypy_version(&interpreter) {
+            if interpreter.raw().version == version && check_pypy_version(&interpreter) {
                 return Ok(interpreter);
             }
         }
@@ -312,33 +353,42 @@ impl Interpreter {
             BufWriter::new(file).write_all(&json_bytes)?;
             Ok(())
         })?;
-        serde_json::from_reader(BufReader::new(file)).map_err(|err| {
-            anyhow!(
-                "Failed to identify Python interpreter {exe}: {err}",
-                exe = python_exe.as_ref().display()
-            )
+        let size = file.metadata()?.len();
+        let mut data = Vec::with_capacity(usize::try_from(size)?);
+        BufReader::new(file).read_to_end(&mut data)?;
+        Self::try_new(data, |data| {
+            serde_json::from_slice(data).map_err(|err| {
+                anyhow!(
+                    "Failed to identify Python interpreter {exe}: {err}",
+                    exe = python_exe.as_ref().display()
+                )
+            })
         })
     }
 
     fn reload(self, identification_script: &IdentifyInterpreter) -> anyhow::Result<Self> {
-        let interpreter_info = Self::interpreter_info(self.path.as_path())?;
+        let interpreter_info = Self::interpreter_info(self.raw().path.as_ref())?;
         fs::remove_file(&interpreter_info)?;
-        Self::load_internal(&interpreter_info, self.path, identification_script)
+        Self::load_internal(
+            &interpreter_info,
+            self.raw().path.as_ref(),
+            identification_script,
+        )
     }
 
     #[time("debug", "Interpreter.{}")]
     pub fn store(&self) -> anyhow::Result<()> {
-        let hash = hash_file(&self.path, &Self::INTERPRETER_HASH_CONFIG)?;
+        let hash = hash_file(&self.raw().path, &Self::INTERPRETER_HASH_CONFIG)?;
         let interpreter_info = CacheDir::Interpreter.path()?.join(hash.base64_digest());
         atomic_file(&interpreter_info, |file| {
-            serde_json::to_writer(BufWriter::new(file), self)?;
+            serde_json::to_writer(BufWriter::new(file), self.raw())?;
             Ok(())
         })?;
         Ok(())
     }
 
     pub fn hermetic_args(&self) -> &'static str {
-        if self.version.major == 3 && self.version.minor >= 4 {
+        if self.raw().version.major == 3 && self.raw().version.minor >= 4 {
             "-I"
         } else {
             "-sE"
@@ -346,28 +396,40 @@ impl Interpreter {
     }
 
     #[time("debug", "Interpreter.{}")]
-    pub fn resolve_base_interpreter<'a>(
-        self,
-        scripts: &mut Scripts,
-    ) -> anyhow::Result<Interpreter> {
-        if let Some(base_prefix) = self.base_prefix.as_ref()
-            && base_prefix != &self.prefix
+    pub fn resolve_base_interpreter(self, scripts: &mut Scripts) -> anyhow::Result<Interpreter> {
+        if let Some(base_prefix) = self.raw().base_prefix.as_ref()
+            && base_prefix != &self.raw().prefix
         {
-            let resolved =
-                Self::at_prefix(base_prefix, self.version, self.pypy_version, scripts, true)?;
+            let resolved = Self::at_prefix(
+                base_prefix,
+                self.raw().version,
+                self.raw().pypy_version,
+                scripts,
+                true,
+            )?;
             return resolved.resolve_base_interpreter(scripts);
         }
         Ok(self)
     }
 
     pub fn is_venv(&self) -> bool {
-        if let Some(base_prefix) = self.base_prefix.as_deref()
-            && base_prefix != self.prefix.as_path()
+        if let Some(base_prefix) = self.raw().base_prefix.as_deref()
+            && base_prefix != self.raw().prefix
         {
             true
         } else {
             false
         }
+    }
+
+    #[inline]
+    pub fn raw<'a>(&'a self) -> &'a RawInterpreter<'a> {
+        self.borrow_interpreter()
+    }
+
+    #[inline]
+    pub fn with_raw_mut<R>(&mut self, func: impl FnOnce(&mut RawInterpreter) -> R) -> R {
+        self.with_interpreter_mut(func)
     }
 }
 
@@ -434,7 +496,7 @@ mod tests {
                     )
                 })
                 .unwrap();
-        assert_eq!(expected_tags, interpreter.supported_tags);
+        assert_eq!(expected_tags, interpreter.raw().supported_tags);
     }
 
     #[rstest]
@@ -457,6 +519,7 @@ mod tests {
             venv_interpreter
                 .resolve_base_interpreter(&mut embedded_scripts)
                 .unwrap()
+                .raw()
                 .path
         )
     }

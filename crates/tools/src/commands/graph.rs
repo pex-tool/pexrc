@@ -231,7 +231,9 @@ pub(crate) fn create(python: &Path, pex: Pex, args: GraphArgs) -> anyhow::Result
         )));
         for requirement in &wheel_info.requires_dists {
             if !wheels.contains_key(&requirement.name)
-                && !requirement.marker.evaluate(&interpreter.marker_env, &[])
+                && !requirement
+                    .marker
+                    .evaluate(&interpreter.raw().marker_env, &[])
             {
                 let url = format!("https://pypi.org/project/{name}", name = requirement.name);
                 graph.add_stmt(Stmt::Node(node!(
