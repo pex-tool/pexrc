@@ -308,13 +308,13 @@ fn calculate_spread_path(
                         .join("site")
                         .join(format!(
                             "python{major}.{minor}",
-                            major = venv.interpreter.version.major,
-                            minor = venv.interpreter.version.minor
+                            major = venv.interpreter.raw().version.major,
+                            minor = venv.interpreter.raw().version.minor
                         ))
                         .join(project_name)
                         .join(components.collect::<PathBuf>()),
                 ))
-            } else if let Some(spread_path) = venv.interpreter.paths.get(key) {
+            } else if let Some(spread_path) = venv.interpreter.raw().paths.get(key) {
                 Ok(Some(spread_path.join(components.collect::<PathBuf>())))
             } else {
                 bail!(

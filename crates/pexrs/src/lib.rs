@@ -125,7 +125,7 @@ fn prepare_boot(
         #[cfg(unix)]
         env::var_os("_PEXRC_SH_BOOT_SEED_DIR").map(PathBuf::from),
     )?;
-    let mut command = Command::new(&venv.interpreter.path);
+    let mut command = Command::new(venv.interpreter.raw().path.as_ref());
     command
         .args(python_args)
         .arg(venv.prefix().as_os_str())
@@ -186,8 +186,9 @@ fn prepare_venv<'a>(
 
         let interpreter_relpath = venv
             .interpreter
+            .raw()
             .path
-            .strip_prefix(&venv.interpreter.prefix)?;
+            .strip_prefix(&venv.interpreter.raw().prefix)?;
         let shebang_interpreter = venv_dir.join(interpreter_relpath);
         let shebang_arg = if (pex_info.venv && pex_info.venv_hermetic_scripts)
             || (!pex_info.venv
@@ -245,7 +246,9 @@ fn prepare_venv<'a>(
                 venv_interpreter
                     .clone()
                     .resolve_base_interpreter(&mut pex.scripts()?)?
-                    .path,
+                    .raw()
+                    .path
+                    .as_ref(),
                 sh_boot_seed_dir.join(format!("base-{python}")),
                 false,
             )?;

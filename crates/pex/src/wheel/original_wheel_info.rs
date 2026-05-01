@@ -3,7 +3,7 @@
 
 use std::borrow::Cow;
 use std::fmt::Display;
-use std::io::Read;
+use std::io::{BufReader, Read};
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
@@ -94,12 +94,10 @@ impl OriginalWheelInfo {
         })
     }
 
-    pub(crate) fn read(mut contents: impl Read, size: u64) -> anyhow::Result<Self> {
+    pub(crate) fn read(contents: impl Read, size: u64) -> anyhow::Result<Self> {
         let mut data = Vec::with_capacity(usize::try_from(size)?);
-        contents.read_to_end(&mut data)?;
-        Ok(OriginalWheelInfo::try_new(data, |data| {
-            serde_json::from_slice(data)
-        })?)
+        BufReader::new(contents).read_to_end(&mut data)?;
+        Ok(Self::try_new(data, |data| serde_json::from_slice(data))?)
     }
 
     pub(crate) fn filename(&self) -> &str {

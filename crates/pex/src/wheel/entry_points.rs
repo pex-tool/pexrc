@@ -66,7 +66,7 @@ impl EntryPoints {
     }
 
     pub fn load(mut contents: impl Read) -> anyhow::Result<Self> {
-        Ok(EntryPoints::new(
+        Ok(Self::new(
             Ini::read_from(&mut contents)?,
             |contents| parse_entry_points(contents, "console_scripts"),
             |contents| parse_entry_points(contents, "gui_scripts"),
