@@ -5,11 +5,12 @@ use std::path::Path;
 
 use fs_err as fs;
 use python_proxy::ProxySource;
+use target::SimplifiedTarget;
 
 use crate::embeds::read_proxy_content;
 
 pub fn create(
-    target: &str,
+    target: SimplifiedTarget,
     python: &Path,
     script: &Path,
     output_file: &Path,

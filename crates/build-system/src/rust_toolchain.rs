@@ -4,7 +4,7 @@
 use std::borrow::Cow;
 
 use serde::Deserialize;
-use target::Target;
+use target::{SimplifiedTarget, Target};
 
 use crate::metadata::Glibc;
 
@@ -61,7 +61,7 @@ impl<'a> BuildTarget<'a> {
         self.target.binary_name(binary_name, exe_suffix)
     }
 
-    pub fn simplified_target_triple(&self) -> Cow<'a, str> {
+    pub fn simplified_target_triple(&self) -> anyhow::Result<SimplifiedTarget> {
         self.target.simplified_target_triple()
     }
 
@@ -69,7 +69,7 @@ impl<'a> BuildTarget<'a> {
         &self,
         binary_name: &str,
         target_suffix: Option<&str>,
-    ) -> String {
+    ) -> anyhow::Result<String> {
         self.target
             .fully_qualified_binary_name(binary_name, target_suffix)
     }

@@ -184,7 +184,7 @@ fn main() -> anyhow::Result<()> {
             target_dir
                 .join(profile_dir_name)
                 .join(current_target.binary_name("pexrc", None).as_ref()),
-            current_target.fully_qualified_binary_name("pexrc", profile_target_suffix),
+            current_target.fully_qualified_binary_name("pexrc", profile_target_suffix)?,
         )]
     } else {
         let targeted: HashSet<String> = if cli.targets.contains(&ALL_TARGETS) {
@@ -207,7 +207,7 @@ fn main() -> anyhow::Result<()> {
                         .join(target.as_str())
                         .join(profile_dir_name)
                         .join(target.binary_name("pexrc", None).as_ref()),
-                    target.fully_qualified_binary_name("pexrc", profile_target_suffix),
+                    target.fully_qualified_binary_name("pexrc", profile_target_suffix)?,
                 ));
             }
             command.env("PEXRC_TARGETS", "all");
@@ -234,7 +234,7 @@ fn main() -> anyhow::Result<()> {
                         .join(target.as_str())
                         .join(profile_dir_name)
                         .join(target.binary_name("pexrc", None).as_ref()),
-                    target.fully_qualified_binary_name("pexrc", profile_target_suffix),
+                    target.fully_qualified_binary_name("pexrc", profile_target_suffix)?,
                 ));
             }
             command.env("PEXRC_TARGETS", "all");

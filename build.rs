@@ -346,7 +346,7 @@ fn collect_embeds<'a>(
         let clib_name = target.shared_library_name("pexrc");
         let target_name = format!(
             "{target}.{clib_name}",
-            target = target.simplified_target_triple()
+            target = target.simplified_target_triple()?
         );
         collect_embed(
             &clib_name,
@@ -358,7 +358,7 @@ fn collect_embeds<'a>(
             compress,
         )?;
         let python_proxy_name = target.binary_name("python-proxy", None);
-        let target_name = target.fully_qualified_binary_name("python-proxy", None);
+        let target_name = target.fully_qualified_binary_name("python-proxy", None)?;
         collect_embed(
             &python_proxy_name,
             &proxies_dir,

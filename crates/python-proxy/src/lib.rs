@@ -74,7 +74,7 @@ pub fn create(
 
 static PYTHON_PROXY_FILE_NAME: LazyLock<anyhow::Result<String>> = LazyLock::new(|| {
     let current_target = Target::current()?;
-    Ok(current_target.fully_qualified_binary_name("python-proxy", None))
+    current_target.fully_qualified_binary_name("python-proxy", None)
 });
 
 fn python_proxy_file_name<'a>() -> anyhow::Result<&'a str> {

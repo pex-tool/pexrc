@@ -22,13 +22,13 @@ use tempfile::NamedTempFile;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
-use crate::embeds::{CLIBS_DIR, PROXIES_DIR};
+use crate::embeds::Binary;
 
 pub fn inject_all(
     pexes: Vec<PathBuf>,
     options: &WheelOptions,
-    clibs: Option<&HashSet<&Path>>,
-    proxies: Option<&HashSet<&Path>>,
+    clibs: &[&Binary],
+    proxies: &[&Binary],
 ) -> anyhow::Result<()> {
     for pex in pexes {
         inject(&pex, options, clibs, proxies)?
@@ -39,8 +39,8 @@ pub fn inject_all(
 fn inject(
     pex: &Path,
     options: &WheelOptions,
-    clibs: Option<&HashSet<&Path>>,
-    proxies: Option<&HashSet<&Path>>,
+    clibs: &[&Binary],
+    proxies: &[&Binary],
 ) -> anyhow::Result<()> {
     let pex = Pex::load(pex)?;
     match pex.layout {
@@ -52,8 +52,8 @@ fn inject(
 fn inject_pex_dir(
     mut pex: Pex,
     options: &WheelOptions,
-    clibs: Option<&HashSet<&Path>>,
-    proxies: Option<&HashSet<&Path>>,
+    clibs: &[&Binary],
+    proxies: &[&Binary],
 ) -> anyhow::Result<()> {
     // Make sure we have a shebang early. This partially validates the pex to inject is a valid one
     // before expending too much effort copying files below.
@@ -134,26 +134,14 @@ fn inject_pex_dir(
     let clib_dir = pex_dir.join(".clibs");
     fs::create_dir_all(&clib_dir)?;
     info!("Embedded clibs:");
-    for file in CLIBS_DIR.files() {
-        let path = file.path();
-        if let Some(clibs) = clibs.as_ref()
-            && !clibs.contains(path)
-        {
-            continue;
-        }
-        embed_in_dir(path, file.contents(), &clib_dir, false)?;
+    for clib in clibs {
+        embed_in_dir(clib.path, clib.contents, &clib_dir, false)?;
     }
     let scripts_dir = pex_dir.join(".proxies");
     fs::create_dir_all(&scripts_dir)?;
     info!("Embedded proxies:");
-    for file in PROXIES_DIR.files() {
-        let path = file.path();
-        if let Some(proxies) = proxies.as_ref()
-            && !proxies.contains(path)
-        {
-            continue;
-        }
-        embed_in_dir(path, file.contents(), &scripts_dir, true)?;
+    for proxy in proxies {
+        embed_in_dir(proxy.path, proxy.contents, &scripts_dir, true)?;
     }
 
     pex.info
@@ -197,8 +185,8 @@ fn embed_in_dir(
 fn inject_pex_zip(
     mut pex: Pex,
     options: &WheelOptions,
-    clibs: Option<&HashSet<&Path>>,
-    proxies: Option<&HashSet<&Path>>,
+    clibs: &[&Binary],
+    proxies: &[&Binary],
 ) -> anyhow::Result<()> {
     let pex_info = pex.info.raw();
     let zip_read_fp = File::open(pex.path)?;
@@ -291,16 +279,10 @@ fn inject_pex_zip(
         SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
     dst_zip.add_directory("__pex__/.clibs", directory_options)?;
     info!("Embedded clibs:");
-    for file in CLIBS_DIR.files() {
-        let path = file.path();
-        if let Some(clibs) = clibs.as_ref()
-            && !clibs.contains(path)
-        {
-            continue;
-        }
+    for clib in clibs {
         embed_in_zip(
-            path,
-            file.contents(),
+            clib.path,
+            clib.contents,
             &mut dst_zip,
             "__pex__/.clibs",
             deflate_options,
@@ -308,16 +290,10 @@ fn inject_pex_zip(
     }
     dst_zip.add_directory("__pex__/.proxies", directory_options)?;
     info!("Embedded proxies:");
-    for file in PROXIES_DIR.files() {
-        let path = file.path();
-        if let Some(proxies) = proxies.as_ref()
-            && !proxies.contains(path)
-        {
-            continue;
-        }
+    for proxy in proxies {
         embed_in_zip(
-            path,
-            file.contents(),
+            proxy.path,
+            proxy.contents,
             &mut dst_zip,
             "__pex__/.proxies",
             file_options,
