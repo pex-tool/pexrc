@@ -48,17 +48,18 @@ Thrice: include the interpreter's environment markers and its venv affiliation, 
 pub(crate) fn display(python: &Path, pex: Pex, args: InterpreterArgs) -> anyhow::Result<()> {
     let mut out = Output::new(args.output.as_deref())?;
     for interpreter in compatible_interpreters(python, &pex, args.all)? {
+        let raw_interpeter = interpreter.raw();
         match args.verbose {
             0 => {
                 if let Some(indent) = args.indent {
                     warn!("Ignoring --indent={indent} since --verbose mode is not enabled.")
                 }
-                writeln!(&mut out, "{path}", path = interpreter.path.display())?
+                writeln!(&mut out, "{path}", path = raw_interpeter.path.display())?
             }
             1 => crate::json::serialize(
                 &mut out,
                 &json!({
-                    "path": interpreter.path,
+                    "path": raw_interpeter.path,
                     "requirement": InterpreterConstraint::exact_version(&interpreter).to_string(),
                     "platform": Platform::of(&interpreter)?.to_string()
                 }),
@@ -67,10 +68,10 @@ pub(crate) fn display(python: &Path, pex: Pex, args: InterpreterArgs) -> anyhow:
             2 => crate::json::serialize(
                 &mut out,
                 &json!({
-                    "path": interpreter.path,
+                    "path": raw_interpeter.path,
                     "requirement": InterpreterConstraint::exact_version(&interpreter).to_string(),
                     "platform": Platform::of(&interpreter)?.to_string(),
-                    "supported_tags": interpreter.supported_tags
+                    "supported_tags": raw_interpeter.supported_tags
                 }),
                 args.indent,
             )?,
@@ -82,13 +83,13 @@ pub(crate) fn display(python: &Path, pex: Pex, args: InterpreterArgs) -> anyhow:
                     crate::json::serialize(
                         &mut out,
                         &json!({
-                            "path": interpreter.path,
+                            "path": raw_interpeter.path,
                             "requirement": InterpreterConstraint::exact_version(&interpreter).to_string(),
                             "platform": Platform::of(&interpreter)?.to_string(),
-                            "supported_tags": interpreter.supported_tags,
-                            "env_markers": interpreter.marker_env,
+                            "supported_tags": raw_interpeter.supported_tags,
+                            "env_markers": raw_interpeter.marker_env,
                             "venv": true,
-                            "base_interpreter": base_interpreter.path
+                            "base_interpreter": base_interpreter.raw().path
                         }),
                         args.indent,
                     )?
@@ -96,11 +97,11 @@ pub(crate) fn display(python: &Path, pex: Pex, args: InterpreterArgs) -> anyhow:
                     crate::json::serialize(
                         &mut out,
                         &json!({
-                            "path": interpreter.path,
+                            "path": raw_interpeter.path,
                             "requirement": InterpreterConstraint::exact_version(&interpreter).to_string(),
                             "platform": Platform::of(&interpreter)?.to_string(),
-                            "supported_tags": interpreter.supported_tags,
-                            "env_markers": interpreter.marker_env,
+                            "supported_tags": raw_interpeter.supported_tags,
+                            "env_markers": raw_interpeter.marker_env,
                             "venv": false
                         }),
                         args.indent,

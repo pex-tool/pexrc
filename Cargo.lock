@@ -1351,6 +1351,7 @@ dependencies = [
  "indexmap",
  "log",
  "logging_timer",
+ "ouroboros",
  "pep440_rs",
  "pep508_rs",
  "platform",

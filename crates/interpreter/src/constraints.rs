@@ -30,10 +30,14 @@ enum InterpreterImplementation {
 
 impl InterpreterImplementation {
     fn of(interpreter: &Interpreter) -> Option<Self> {
-        match interpreter.marker_env.platform_python_implementation() {
+        match interpreter
+            .raw()
+            .marker_env
+            .platform_python_implementation()
+        {
             "PyPy" => Some(Self::PyPy),
             "CPython" => {
-                if let Some(freethreaded) = interpreter.free_threaded {
+                if let Some(freethreaded) = interpreter.raw().free_threaded {
                     if freethreaded {
                         Some(Self::CPythonFreeThreaded)
                     } else {
@@ -106,9 +110,9 @@ impl InterpreterConstraint {
     pub fn exact_version(interpreter: &Interpreter) -> Self {
         let python_version = Version::new(
             [
-                u64::from(interpreter.version.major),
-                u64::from(interpreter.version.minor),
-                u64::from(interpreter.version.micro),
+                u64::from(interpreter.raw().version.major),
+                u64::from(interpreter.raw().version.minor),
+                u64::from(interpreter.raw().version.micro),
             ]
             .iter(),
         );
@@ -185,7 +189,10 @@ impl InterpreterConstraint {
                 return false;
             }
         }
-        self.contains_version(interpreter.version.major, interpreter.version.minor)
+        self.contains_version(
+            interpreter.raw().version.major,
+            interpreter.raw().version.minor,
+        )
     }
 
     fn contains_version(&self, major: u8, minor: u8) -> bool {

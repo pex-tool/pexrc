@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::borrow::Cow;
-use std::io::{Read, Write};
+use std::io::{BufReader, Read, Write};
 use std::path::Path;
 
 use anyhow::anyhow;
@@ -103,13 +103,13 @@ pub struct PexInfo {
 impl PexInfo {
     #[time("debug", "PexInfo.{}")]
     pub fn parse<'a>(
-        mut contents: impl Read,
+        contents: impl Read,
         size: u64,
         source: Option<impl FnOnce() -> Cow<'a, str>>,
     ) -> anyhow::Result<PexInfo> {
         let mut data = Vec::with_capacity(usize::try_from(size)?);
-        contents.read_to_end(&mut data)?;
-        PexInfo::try_new(data, |data| {
+        BufReader::new(contents).read_to_end(&mut data)?;
+        Self::try_new(data, |data| {
             serde_json::from_slice(data).map_err(|err| {
                 anyhow!(
                     "Failed to parse PEX-INFO from {source}: {err}",
@@ -133,10 +133,12 @@ impl PexInfo {
         Ok(serde_json::to_writer(writer, self.borrow_info())?)
     }
 
+    #[inline]
     pub fn raw<'a>(&'a self) -> &'a RawPexInfo<'a> {
         self.borrow_info()
     }
 
+    #[inline]
     pub fn with_raw_mut<R>(&mut self, func: impl FnOnce(&mut RawPexInfo) -> R) -> R {
         self.with_info_mut(func)
     }
