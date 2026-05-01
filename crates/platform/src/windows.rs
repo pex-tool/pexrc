@@ -8,6 +8,8 @@ use std::process::Command;
 
 use is_executable::IsExecutable;
 
+use crate::Perms;
+
 pub fn symlink_or_link_or_copy(
     src: impl AsRef<Path>,
     dst: impl AsRef<Path>,
@@ -20,7 +22,11 @@ pub fn is_executable(path: impl AsRef<Path>) -> io::Result<bool> {
     Ok(path.as_ref().is_executable())
 }
 
-pub fn mark_executable(_file: &mut File) -> io::Result<()> {
+pub const fn mark_executable(_file: &mut File) -> io::Result<()> {
+    Ok(())
+}
+
+pub const fn set_permissions(_file: &mut File, _perms: Perms) -> io::Result<()> {
     Ok(())
 }
 

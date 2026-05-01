@@ -251,7 +251,6 @@ pub(crate) fn create(python: &Path, pex: Pex, args: VenvArgs) -> anyhow::Result<
         venv
     };
 
-    let scripts_dir = venv.prefix().join(venv.bin_dir_relpath);
     let prompt = args
         .prompt
         .as_deref()
@@ -294,7 +293,7 @@ pub(crate) fn create(python: &Path, pex: Pex, args: VenvArgs) -> anyhow::Result<
             .replace("__PEXRC_VENV_PROMPT__", &prompt)
             .replace("__PEXRC_VENV_DIR__", &venv_dir);
 
-        fs::write(scripts_dir.join(file_name), contents)?;
+        fs::write(venv.script_path(file_name), contents)?;
     }
 
     let shebang_arg = if args.non_hermetic_scripts {

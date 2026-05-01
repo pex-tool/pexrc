@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #![deny(clippy::all)]
+#![feature(str_as_str)]
 
 mod pex;
 mod pex_info;
@@ -10,6 +11,7 @@ mod wheel;
 
 pub use pex::{
     CollectWheelMetadata,
+    DataDir,
     Layout,
     Pex,
     Resolve,

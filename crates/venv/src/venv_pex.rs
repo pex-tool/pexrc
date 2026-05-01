@@ -1,6 +1,7 @@
 // Copyright 2026 Pex project contributors.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::io::{BufReader, ErrorKind, Read, Seek, Write};
 use std::path::{Path, PathBuf};
@@ -16,6 +17,7 @@ use log::warn;
 use logging_timer::time;
 use pex::{
     BinPath,
+    DataDir,
     EntryPoint,
     EntryPoints,
     Layout,
@@ -26,7 +28,7 @@ use pex::{
     collect_zipped_user_source_indexes,
     filter_zipped_user_source,
 };
-use platform::{mark_executable, path_as_bytes, path_as_str, symlink_or_link_or_copy};
+use platform::{Perms, mark_executable, path_as_bytes, path_as_str, symlink_or_link_or_copy};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use scripts::{Scripts, VenvPex, VenvPexRepl};
 use serde_json::Value;
@@ -60,39 +62,32 @@ fn populate_from_loose_pex<'a>(
     scope: InstallScope,
     provenance: Arc<Provenance>,
 ) -> anyhow::Result<()> {
-    let site_packages_path = venv.site_packages_path();
     if matches!(scope, InstallScope::All | InstallScope::Deps) {
         collect_wheels_from_directory_pex(loose_pex, resolved_wheels)?
             .into_par_iter()
-            .try_for_each(|wheel_dir| {
-                populate_wheel_dir(&wheel_dir, &site_packages_path, provenance.clone())
+            .try_for_each(|(wheel, project_name, data_dir)| {
+                populate_wheel_dir(venv, &wheel, project_name, &data_dir, provenance.clone())
             })?;
     }
     if matches!(scope, InstallScope::All | InstallScope::Srcs) {
-        populate_user_code_from_directory_pex(
-            loose_pex,
-            venv,
-            &site_packages_path,
-            populate_pex_info,
-            provenance,
-        )?;
+        populate_user_code_from_directory_pex(loose_pex, venv, populate_pex_info, provenance)?;
     }
     Ok(())
 }
 
-fn collect_wheels_from_directory_pex(
+fn collect_wheels_from_directory_pex<'a>(
     pex: &Pex,
-    resolved_wheels: &IndexMap<&str, ResolvedWheel>,
-) -> anyhow::Result<Vec<PathBuf>> {
+    resolved_wheels: &'a IndexMap<&'a str, ResolvedWheel<'a>>,
+) -> anyhow::Result<Vec<(PathBuf, &'a str, DataDir)>> {
     let mut wheels = Vec::with_capacity(resolved_wheels.len());
     let deps_dir = pex.path.join(".deps");
     if deps_dir.is_dir() {
         for entry in fs::read_dir(deps_dir)? {
             let entry = entry?;
             if let Ok(wheel_file_name) = platform::os_str_as_str(&entry.file_name())
-                && resolved_wheels.contains_key(wheel_file_name)
+                && let Some(wheel) = resolved_wheels.get(wheel_file_name)
             {
-                wheels.push(entry.path())
+                wheels.push((entry.path(), wheel.project_name, wheel.data_dir()))
             }
         }
     }
@@ -108,8 +103,7 @@ fn spread(
     provenance: Arc<Provenance>,
 ) -> anyhow::Result<()> {
     let entry_points = virtualenv
-        .site_packages_path()
-        .join(wheel.dist_info_dir())
+        .site_packages_path(wheel.dist_info_dir())
         .join("entry_points.txt");
     if entry_points.exists() {
         install_scripts(
@@ -137,10 +131,9 @@ fn install_scripts(
         return Ok(());
     }
 
-    let script_dir = virtualenv.prefix().join(virtualenv.bin_dir_relpath);
     for (name, entry_point) in entry_points.console_scripts() {
-        let script_path = script_dir
-            .join(name)
+        let script_path = virtualenv
+            .script_path(name)
             .with_extension(env::consts::EXE_EXTENSION);
         let script_contents =
             create_script_contents(shebang_interpreter, shebang_arg, entry_point)?;
@@ -283,39 +276,107 @@ if __name__ == "__main__":
     }
 }
 
+fn calculate_spread_path(
+    venv: &Virtualenv,
+    project_name: &str,
+    data_dir: &DataDir,
+    dst_rel_path: &Path,
+) -> anyhow::Result<Option<PathBuf>> {
+    if let Ok(data_dir_relpath) = dst_rel_path.strip_prefix(data_dir.as_path()) {
+        let mut components = data_dir_relpath.components();
+        if let Some(paths_key) = components.next() {
+            let key = paths_key.as_os_str().to_str().ok_or_else(|| {
+                anyhow!(
+                    "The first component of .data/ dir path {path} was not a UTF-8 key into \
+                    sysconfig paths.",
+                    path = data_dir.as_path().display()
+                )
+            })?;
+            if key == "headers" {
+                // N.B.: You'd think sysconfig_paths["include"] would be the right answer here but
+                // both `pip`, and by emulation, `uv pip`, use:
+                //   `<venv>/include/site/pythonX.Y/<project name>/`.
+                //
+                // The "mess" is admitted and described at length here:
+                // + https://discuss.python.org/t/clarification-on-a-wheels-header-data/9305
+                // + https://discuss.python.org/t/deprecating-the-headers-wheel-data-key/23712
+                //
+                // Both discussions died out with no path resolved to clean up the mess.
+                Ok(Some(
+                    venv.prefix()
+                        .join("include")
+                        .join("site")
+                        .join(format!(
+                            "python{major}.{minor}",
+                            major = venv.interpreter.raw().version.major,
+                            minor = venv.interpreter.raw().version.minor
+                        ))
+                        .join(project_name)
+                        .join(components.collect::<PathBuf>()),
+                ))
+            } else if let Some(spread_path) = venv.interpreter.raw().paths.get(key) {
+                Ok(Some(spread_path.join(components.collect::<PathBuf>())))
+            } else {
+                bail!(
+                    "Wheel for {project_name} has unknown .data dir entry {key}: {data_dir_relpath}",
+                    data_dir_relpath = data_dir_relpath.display()
+                )
+            }
+        } else {
+            Ok(None)
+        }
+    } else {
+        Ok(Some(venv.site_packages_path(dst_rel_path)))
+    }
+}
+
 fn populate_wheel_dir(
+    venv: &Virtualenv,
     wheel: &Path,
-    site_packages_path: &Path,
+    project_name: &str,
+    data_dir: &DataDir,
     provenance: Arc<Provenance>,
 ) -> anyhow::Result<()> {
     let wheel_contents = walkdir::WalkDir::new(wheel)
         .min_depth(1)
         .into_iter()
+        .filter_map(|entry| {
+            match entry {
+                Ok(entry) => {
+                    let dst_rel_path = entry.path().strip_prefix(wheel).expect(
+                        "Walked sub-paths of a wheel dir should be child paths of the wheel dir.",
+                    );
+                    // TODO: Experiment with creating parent dirs as needed here in this synchronous loop
+                    //  just 1x to save on syscall overhead in the parallel loop over contained files below.
+                    match calculate_spread_path(venv, project_name, data_dir, dst_rel_path) {
+                        Ok(dst) => dst.map(|dst| Ok((entry, dst))),
+                        Err(err) => Some(Err(err)),
+                    }
+                }
+                Err(err) => Some(Err(anyhow!("{err}"))),
+            }
+        })
         .collect::<Result<Vec<_>, _>>()?;
-    wheel_contents.into_par_iter().try_for_each(|entry| {
-        let dst_path = site_packages_path.join(entry.path().strip_prefix(wheel).expect(
-            "Walked unpacked wheel paths should be child paths of the unpacked wheel root dir.",
-        ));
-        if entry.path().is_dir() {
-            fs::create_dir_all(&dst_path)?;
+    wheel_contents.into_par_iter().try_for_each(|(src, dst)| {
+        if src.path().is_dir() {
+            fs::create_dir_all(&dst)?;
         } else {
-            if let Some(parent_dir) = dst_path.parent() {
+            if let Some(parent_dir) = dst.parent() {
                 fs::create_dir_all(parent_dir)?;
             }
-            match File::create_new(&dst_path) {
+            match File::create_new(&dst) {
                 Ok(mut dst_file) => {
-                    provenance.record(entry.path().display(), dst_path);
-                    let mut src = File::open(entry.path())?;
+                    provenance.record(src.path().display(), dst);
+                    let mut src = File::open(src.path())?;
                     io::copy(&mut src, &mut dst_file)?;
+                    platform::set_permissions(
+                        dst_file.file_mut(),
+                        Perms::Perms(src.metadata()?.permissions()),
+                    )?;
                 }
                 Err(err) if err.kind() == ErrorKind::AlreadyExists => {
-                    let (size, fingerprint) = fingerprint_file(entry.path(), default_digest())?;
-                    provenance.record_collision(
-                        entry.path().display(),
-                        fingerprint,
-                        size,
-                        dst_path,
-                    );
+                    let (size, fingerprint) = fingerprint_file(src.path(), default_digest())?;
+                    provenance.record_collision(src.path().display(), fingerprint, size, dst);
                 }
                 Err(err) => bail!("{err}"),
             }
@@ -332,29 +393,24 @@ fn populate_from_packed_pex<'a>(
     scope: InstallScope,
     provenance: Arc<Provenance>,
 ) -> anyhow::Result<()> {
-    let site_packages_path = venv.site_packages_path();
     if matches!(scope, InstallScope::All | InstallScope::Deps) {
         collect_wheels_from_directory_pex(packed_pex, resolved_wheels)?
             .into_par_iter()
-            .try_for_each(|wheel_zip| {
-                populate_whl_zip(&wheel_zip, &site_packages_path, provenance.clone())
+            .try_for_each(|(wheel, project_name, data_dir)| {
+                populate_whl_zip(venv, &wheel, project_name, &data_dir, provenance.clone())
             })?;
     }
     if matches!(scope, InstallScope::All | InstallScope::Srcs) {
-        populate_user_code_from_directory_pex(
-            packed_pex,
-            venv,
-            &site_packages_path,
-            populate_pex_info,
-            provenance,
-        )?;
+        populate_user_code_from_directory_pex(packed_pex, venv, populate_pex_info, provenance)?;
     }
     Ok(())
 }
 
 fn populate_whl_zip(
+    venv: &Virtualenv,
     wheel: &Path,
-    site_packages_path: &Path,
+    project_name: &str,
+    data_dir: &DataDir,
     provenance: Arc<Provenance>,
 ) -> anyhow::Result<()> {
     let whl_zip = ZipArchive::new(File::open(wheel)?.into_file())?;
@@ -362,8 +418,10 @@ fn populate_whl_zip(
     (0..whl_zip.len()).into_par_iter().try_for_each(|index| {
         let zip_fp = File::open(wheel)?;
         let mut zip = unsafe { ZipArchive::unsafe_new_with_metadata(zip_fp, metadata.clone()) };
-        extract_idx(
-            site_packages_path,
+        extract_whl_idx(
+            venv,
+            project_name,
+            data_dir,
             index,
             &mut zip,
             wheel.display(),
@@ -375,14 +433,13 @@ fn populate_whl_zip(
 fn populate_user_code_from_directory_pex<'a>(
     directory_pex: &'a Pex<'a>,
     venv: &Virtualenv,
-    site_packages_path: &Path,
     populate_pex_info: bool,
     provenance: Arc<Provenance>,
 ) -> anyhow::Result<()> {
     let user_code = collect_loose_user_source(directory_pex.path)?;
     user_code.into_par_iter().try_for_each(|entry| {
         let dst_path =
-            site_packages_path.join(entry.path().strip_prefix(directory_pex.path).expect(
+            venv.site_packages_path(entry.path().strip_prefix(directory_pex.path).expect(
                 "Walked directory PEX paths should be child paths of the directory PEX root dir.",
             ));
         if entry.file_type().is_dir() {
@@ -429,13 +486,11 @@ fn populate_from_zip_app_with_whl_deps<'a>(
 ) -> anyhow::Result<()> {
     let pex_zip = ZipArchive::new(File::open(zip_app_pex.path)?)?;
     let metadata = pex_zip.metadata();
-    let site_packages_path = venv.site_packages_path();
-
     if matches!(scope, InstallScope::All | InstallScope::Deps) {
         let wheel_file_names = resolved_wheels.into_iter().collect::<Vec<_>>();
         wheel_file_names
             .into_par_iter()
-            .try_for_each(|(wheel_file_name, _)| {
+            .try_for_each(|(wheel_file_name, wheel)| {
                 let zip_fp = File::open(zip_app_pex.path)?;
                 let mut zip =
                     unsafe { ZipArchive::unsafe_new_with_metadata(zip_fp, metadata.clone()) };
@@ -443,6 +498,7 @@ fn populate_from_zip_app_with_whl_deps<'a>(
                 let whl_file = zip.by_name_seek(&whl_name)?;
                 let whl_zip = ZipArchive::new(whl_file)?;
                 let whl_zip_metadata = whl_zip.metadata();
+                let data_dir = wheel.data_dir();
                 (0..whl_zip.len()).into_par_iter().try_for_each(|index| {
                     let zip_fp = File::open(zip_app_pex.path)?;
                     let mut zip =
@@ -451,8 +507,10 @@ fn populate_from_zip_app_with_whl_deps<'a>(
                     let mut whl_zip = unsafe {
                         ZipArchive::unsafe_new_with_metadata(whl_file, whl_zip_metadata.clone())
                     };
-                    extract_idx(
-                        &site_packages_path,
+                    extract_whl_idx(
+                        venv,
+                        wheel.project_name,
+                        &data_dir,
                         index,
                         &mut whl_zip,
                         format!("{zip}/{whl_name}", zip = zip_app_pex.path.display()),
@@ -470,8 +528,9 @@ fn populate_from_zip_app_with_whl_deps<'a>(
                 let mut zip =
                     unsafe { ZipArchive::unsafe_new_with_metadata(zip_fp, metadata.clone()) };
                 extract_idx(
-                    &site_packages_path,
+                    venv,
                     index,
+                    None,
                     &mut zip,
                     zip_app_pex.path.display(),
                     provenance.clone(),
@@ -491,13 +550,15 @@ fn populate_from_zip_app_with_whl_deps<'a>(
 struct DepFilter<'a>(&'a IndexMap<&'a str, ResolvedWheel<'a>>);
 
 impl<'a> DepFilter<'a> {
-    fn filter_deps(&self, file_name: &str) -> bool {
-        file_name.starts_with(".deps/")
-            && file_name[6..]
+    fn filter_deps<'b>(&self, file_name: &'b str) -> Option<&'b str> {
+        if !file_name.starts_with(".deps/") {
+            None
+        } else {
+            file_name[6..]
                 .split("/")
                 .next()
-                .map(|whl_name| self.0.contains_key(whl_name))
-                .unwrap_or_default()
+                .filter(|&whl_name| self.0.contains_key(whl_name))
+        }
     }
 }
 
@@ -512,39 +573,70 @@ fn populate_from_zip_app<'a>(
     let mut pex_zip = ZipArchive::new(File::open(zip_app_pex.path)?)?;
     let metadata = pex_zip.metadata();
     let dep_filter = DepFilter(resolved_wheels);
-    let extract_indexes = pex_zip
-        .file_names()
-        .enumerate()
-        .filter_map(|(idx, name)| {
-            // TODO: XXX: Deal with .layout and .prefix/ in wheel chroots.
-            if match scope {
-                InstallScope::All => {
-                    dep_filter.filter_deps(name) || filter_zipped_user_source(name)
+    if matches!(scope, InstallScope::All | InstallScope::Deps) {
+        let data_dirs = resolved_wheels
+            .iter()
+            .map(|(file_name, wheel)| (*file_name, (wheel.project_name, wheel.data_dir())))
+            .collect::<HashMap<_, _>>();
+        let extract_indexes = pex_zip
+            .file_names()
+            .enumerate()
+            .filter_map(|(idx, name)| {
+                dep_filter.filter_deps(name).map(|file_name| {
+                    let (project_name, data_dir) = data_dirs
+                        .get(file_name)
+                        .expect("We mapped a data dir for each wheel file name.");
+                    (idx, project_name, data_dir)
+                })
+            })
+            .collect::<Vec<_>>();
+        extract_indexes.into_par_iter().try_for_each(
+            |(index, project_name, data_dir)| -> anyhow::Result<()> {
+                let zip_fp = File::open(zip_app_pex.path)?;
+                let mut zip =
+                    unsafe { ZipArchive::unsafe_new_with_metadata(zip_fp, metadata.clone()) };
+                extract_whl_idx(
+                    venv,
+                    project_name,
+                    data_dir,
+                    index,
+                    &mut zip,
+                    zip_app_pex.path.display(),
+                    provenance.clone(),
+                )?;
+                Ok(())
+            },
+        )?;
+    }
+    if matches!(scope, InstallScope::All | InstallScope::Srcs) {
+        let extract_indexes = pex_zip
+            .file_names()
+            .enumerate()
+            .filter_map(|(idx, name)| {
+                if filter_zipped_user_source(name) {
+                    Some(idx)
+                } else {
+                    None
                 }
-                InstallScope::Deps => dep_filter.filter_deps(name),
-                InstallScope::Srcs => filter_zipped_user_source(name),
-            } {
-                Some(idx)
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<_>>();
-    let site_packages_path = venv.site_packages_path();
-    extract_indexes
-        .into_par_iter()
-        .try_for_each(|index| -> anyhow::Result<()> {
-            let zip_fp = File::open(zip_app_pex.path)?;
-            let mut zip = unsafe { ZipArchive::unsafe_new_with_metadata(zip_fp, metadata.clone()) };
-            extract_idx(
-                &site_packages_path,
-                index,
-                &mut zip,
-                zip_app_pex.path.display(),
-                provenance.clone(),
-            )?;
-            Ok(())
-        })?;
+            })
+            .collect::<Vec<_>>();
+        extract_indexes
+            .into_par_iter()
+            .try_for_each(|index| -> anyhow::Result<()> {
+                let zip_fp = File::open(zip_app_pex.path)?;
+                let mut zip =
+                    unsafe { ZipArchive::unsafe_new_with_metadata(zip_fp, metadata.clone()) };
+                extract_idx(
+                    venv,
+                    index,
+                    None,
+                    &mut zip,
+                    zip_app_pex.path.display(),
+                    provenance.clone(),
+                )?;
+                Ok(())
+            })?;
+    }
     if populate_pex_info && matches!(scope, InstallScope::All | InstallScope::Srcs) {
         let mut pex_info_src_fp = pex_zip.by_name("PEX-INFO")?;
         let mut pex_info_dst_fp = File::create_new(venv.prefix().join("PEX-INFO"))?;
@@ -669,8 +761,10 @@ pub fn populate<'a>(
     Ok(())
 }
 
-fn extract_idx<R>(
-    dst_dir: impl AsRef<Path>,
+fn extract_whl_idx<R>(
+    venv: &Virtualenv,
+    project_name: &str,
+    data_dir: &DataDir,
     index: usize,
     zip: &mut ZipArchive<R>,
     source: impl Display,
@@ -679,17 +773,42 @@ fn extract_idx<R>(
 where
     R: Read + Seek,
 {
-    let mut zip_file = zip.by_index(index)?;
-    let dst_path =
-        dst_dir
-            .as_ref()
-            .join(if zip_file.name().starts_with(".deps/") {
+    let dst_path = {
+        let zip_file = zip.by_index(index)?;
+        let dst_rel_path =
+            if zip_file.name().starts_with(".deps/") {
                 zip_file.name().splitn(3, "/").nth(2).ok_or_else(|| {
                     anyhow!("Invalid PEX .deps/ entry {name}", name = zip_file.name())
                 })?
             } else {
                 zip_file.name()
-            });
+            }
+            .split("/")
+            .collect::<PathBuf>();
+        calculate_spread_path(venv, project_name, data_dir, &dst_rel_path)?
+    };
+    if dst_path.is_some() {
+        extract_idx(venv, index, dst_path, zip, source, provenance)
+    } else {
+        Ok(())
+    }
+}
+
+fn extract_idx<R>(
+    venv: &Virtualenv,
+    index: usize,
+    dst_path: Option<PathBuf>,
+    zip: &mut ZipArchive<R>,
+    source: impl Display,
+    provenance: Arc<Provenance>,
+) -> anyhow::Result<()>
+where
+    R: Read + Seek,
+{
+    let mut zip_file = zip.by_index(index)?;
+    let dst_path = dst_path.unwrap_or_else(|| {
+        venv.site_packages_path(zip_file.name().split("/").collect::<PathBuf>())
+    });
     if zip_file.is_dir() {
         fs::create_dir_all(dst_path)?;
     } else {
@@ -700,6 +819,9 @@ where
             Ok(mut dst_file) => {
                 provenance.record(format!("{source}/{name}", name = zip_file.name()), dst_path);
                 io::copy(&mut zip_file, &mut dst_file)?;
+                if let Some(mode) = zip_file.unix_mode() {
+                    platform::set_permissions(dst_file.file_mut(), Perms::Mode(mode))?;
+                }
             }
             Err(err) if err.kind() == ErrorKind::AlreadyExists => {
                 let size = usize::try_from(zip_file.size())?;

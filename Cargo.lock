@@ -1975,11 +1975,14 @@ dependencies = [
  "itertools 0.14.0",
  "log",
  "logging_timer",
+ "mailparse",
  "ouroboros",
  "pep440_rs",
  "pep508_rs",
  "python-pkginfo",
  "rayon",
+ "regex",
+ "rfc2047-decoder",
  "rstest",
  "rust-ini",
  "scripts",
@@ -1996,7 +1999,7 @@ dependencies = [
 
 [[package]]
 name = "pexrc"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "anstream",
  "anyhow",

@@ -126,28 +126,36 @@ pub struct ResolvedWheel<'a> {
     file_name: &'a str,
     pub project_name: &'a str,
     pub version: &'a str,
+    pub root_is_purelib: bool,
+}
+
+pub struct DataDir(String);
+
+impl DataDir {
+    pub fn as_path(&self) -> &Path {
+        Path::new(&self.0)
+    }
 }
 
 impl<'a> ResolvedWheel<'a> {
-    pub fn data_dir(&self) -> PathBuf {
-        self.pnav_dir("data")
+    pub fn data_dir(&self) -> DataDir {
+        DataDir(self.pnav_dir("data"))
     }
 
     pub fn dist_info_dir(&self) -> PathBuf {
-        self.pnav_dir("dist-info")
+        self.pnav_dir("dist-info").into()
     }
 
     pub fn pex_info_info_dir(&self) -> PathBuf {
-        self.pnav_dir("pex-info")
+        self.pnav_dir("pex-info").into()
     }
 
-    fn pnav_dir(&self, name: &str) -> PathBuf {
+    fn pnav_dir(&self, name: &str) -> String {
         format!(
             "{project_name}-{version}.{name}",
             project_name = self.project_name,
             version = self.version
         )
-        .into()
     }
 }
 
@@ -277,6 +285,7 @@ impl<'a> Pex<'a> {
             version: Version,
             requires_dists: Vec<Requirement<Url>>,
             requires_python: Option<VersionSpecifiers>,
+            root_is_purelib: bool,
             rank: usize,
         }
 
@@ -293,6 +302,7 @@ impl<'a> Pex<'a> {
                     version: ranked_wheel.metadata.version,
                     requires_dists: ranked_wheel.metadata.requires_dists,
                     requires_python: ranked_wheel.metadata.requires_python,
+                    root_is_purelib: ranked_wheel.metadata.root_is_purelib,
                     rank: ranked_wheel.rank,
                 })
         }
@@ -367,6 +377,7 @@ impl<'a> Pex<'a> {
                 version,
                 requires_dists,
                 requires_python,
+                root_is_purelib,
                 ..
             } in wheels
             {
@@ -400,6 +411,7 @@ impl<'a> Pex<'a> {
                         version,
                         requires_dists: requires_dists.clone(),
                         requires_python,
+                        root_is_purelib,
                     })
                 }
                 resolved_by_project_name.insert(
@@ -408,6 +420,7 @@ impl<'a> Pex<'a> {
                         file_name,
                         project_name: raw_project_name,
                         version: raw_version,
+                        root_is_purelib,
                     },
                 );
                 for req in requires_dists {

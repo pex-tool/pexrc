@@ -3,6 +3,8 @@
 
 use std::str::FromStr;
 
+use anyhow::anyhow;
+use mailparse::MailHeaderMap;
 use pep440_rs::{Version, VersionSpecifiers};
 use pep508_rs::{PackageName, Requirement};
 use python_pkginfo::Metadata;
@@ -18,6 +20,7 @@ pub struct WheelMetadata<'a> {
     pub version: Version,
     pub requires_dists: Vec<Requirement<Url>>,
     pub requires_python: Option<VersionSpecifiers>,
+    pub root_is_purelib: bool,
 }
 
 pub(crate) trait MetadataReader<'a> {
@@ -26,6 +29,18 @@ pub(crate) trait MetadataReader<'a> {
         wheel_file_name: &'a str,
         path_components: &[&str],
     ) -> anyhow::Result<String>;
+}
+
+fn parse_root_is_purelib_from_wheel(content: &[u8]) -> anyhow::Result<bool> {
+    let msg = mailparse::parse_mail(content)?;
+    let headers = msg.get_headers();
+    let header = headers
+        .get_first_header("Root-Is-Purelib")
+        .ok_or_else(|| anyhow!(""))?;
+    Ok(matches!(
+        rfc2047_decoder::decode(header.get_value_raw())?.as_str(),
+        "true" | "True"
+    ))
 }
 
 impl<'a> WheelMetadata<'a> {
@@ -55,6 +70,13 @@ impl<'a> WheelMetadata<'a> {
             None
         };
 
+        let components = [&dist_info_dir, "WHEEL"];
+        let root_is_purelib = parse_root_is_purelib_from_wheel(
+            metadata_reader
+                .read(wheel_file.file_name, &components)?
+                .as_bytes(),
+        )?;
+
         Ok(Self {
             file_name: wheel_file.file_name,
             raw_project_name: wheel_file.raw_project_name,
@@ -63,6 +85,7 @@ impl<'a> WheelMetadata<'a> {
             version: wheel_file.version,
             requires_dists,
             requires_python,
+            root_is_purelib,
         })
     }
 }

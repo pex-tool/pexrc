@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::borrow::Cow;
+use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::io::{BufReader, BufWriter, Read, Write};
@@ -76,6 +77,7 @@ pub struct RawInterpreter<'a> {
     pub supported_tags: Vec<&'a str>,
     pub has_ensurepip: bool,
     pub free_threaded: Option<bool>,
+    pub paths: BTreeMap<String, PathBuf>,
 }
 
 #[cfg(target_os = "linux")]

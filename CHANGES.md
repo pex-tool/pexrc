@@ -1,5 +1,11 @@
 # Release Notes
 
+## 0.8.0
+
+This release adds support for "un-spreading" legacy PEX wheel chroots when injecting a PEXrc and
+also for proper spreading of injected wheels at runtime. This covers all content delivered via
+wheel .data/ dirs that was previously not handled by `pexrc`.
+
 ## 0.7.1
 
 This release fixes injected `--sh-boot` PEXes to honor `PEX_TOOLS=1` and be robust to underlying

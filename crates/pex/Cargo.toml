@@ -17,11 +17,14 @@ interpreter = { path = "../interpreter" }
 itertools = { workspace = true }
 log = { workspace = true }
 logging_timer = { workspace = true }
+mailparse = { workspace = true }
 ouroboros = { workspace = true }
 pep440_rs = { workspace = true }
 pep508_rs = { workspace = true }
 python-pkginfo = { workspace = true }
 rayon = { workspace = true }
+regex = { workspace = true }
+rfc2047-decoder = { workspace = true }
 rust-ini = { workspace = true }
 scripts = { path = "../scripts" }
 serde = { workspace = true }
