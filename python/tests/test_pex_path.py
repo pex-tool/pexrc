@@ -101,7 +101,11 @@ def test_data_dirs(
         args=[
             "pex",
             "greenlet",
-            "uWSGI",
+            "jupyterlab_pygments==0.3.0",
+            "tritonclient==2.41.0",
+            "py-spy==0.4.2",
+            "--intransitive",
+            "--ignore-errors",
             "-o",
             data_dirs_pex,
             "--runtime-pex-root",
@@ -151,10 +155,19 @@ def test_data_dirs(
         ]
     )
 
+    def test_result(
+        result,  # type: ProcessResult
+        _is_traditional_pex,  # type: bool
+    ):
+        # type: (...) -> None
+        result.assert_success()
+        assert result.stdout.strip() == "py-spy 0.4.2"
+
     injected_pex = compare(
         primary_pex,
         args=["--version"],
-        env=dict(PEX_PATH=data_dirs_pex, PEX_SCRIPT="uwsgi", PEXRC_ROOT=pexrc_root),
+        env=dict(PEX_PATH=data_dirs_pex, PEX_SCRIPT="py-spy", PEXRC_ROOT=pexrc_root),
+        test_result=test_result,
     )
 
     data = json.loads(
@@ -162,9 +175,22 @@ def test_data_dirs(
             args=[injected_pex], env=dict(os.environ, PEX_PATH=data_dirs_pex, PEXRC_ROOT=pexrc_root)
         )
     )
-    assert os.path.exists(os.path.join(data["site-packages"], "uwsgidecorators.py")), (
+    assert os.path.exists(os.path.join(data["site-packages"], "jupyterlab_pygments", "style.py")), (
+        "Expected un-differentiated wheel files to be spread to site-packages."
+    )
+    assert os.path.exists(os.path.join(data["site-packages"], "tritonclient", "__init__.py")), (
         "Expected .data/purelib to be spread to site-packages."
     )
+    assert os.path.exists(
+        os.path.join(
+            data["sys-prefix"],
+            "share",
+            "jupyter",
+            "labextensions",
+            "jupyterlab_pygments",
+            "install.json",
+        )
+    ), "Expected .data/data to be spread under the prefix."
     assert os.path.exists(
         os.path.join(
             data["sys-prefix"], "include", "site", data["python"], "greenlet", "greenlet.h"

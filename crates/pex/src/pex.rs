@@ -347,6 +347,13 @@ impl<'a> Pex<'a> {
             }
             let wheels = wheels_by_project_name
                 .remove(&requirement.name)
+                .or_else(|| {
+                    if self.info.raw().ignore_errors {
+                        Some(vec![])
+                    } else {
+                        None
+                    }
+                })
                 .ok_or_else(|| {
                     let inapplicable_wheels = self
                         .info

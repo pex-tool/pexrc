@@ -72,6 +72,7 @@ pub struct RawPexInfo<'a> {
     pub emit_warnings: bool,
     pub entry_point: Option<&'a str>,
     pub excluded: Vec<&'a str>,
+    pub ignore_errors: bool,
     pub inherit_path: Option<InheritPath>,
     pub inject_args: Vec<&'a str>,
     pub inject_env: Option<IndexMap<&'a str, &'a str>>,
