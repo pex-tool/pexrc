@@ -402,7 +402,7 @@ fn calculate_spread_path(
                     path = wheel_details.data_dir
                 )
             })?;
-            if key == "bin" {
+            if ["bin", "Scripts"].into_iter().any(|dir| key == dir) {
                 Ok(Some(venv.script_path(components.collect::<PathBuf>())))
             } else if key == "include" {
                 Ok(Some(
