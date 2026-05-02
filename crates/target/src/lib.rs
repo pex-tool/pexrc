@@ -4,9 +4,11 @@
 #![deny(clippy::all)]
 
 use std::borrow::Cow;
+use std::fmt::{Display, Formatter};
 use std::sync::LazyLock;
 
 use anyhow::bail;
+use enumset::{EnumSet, EnumSetType, enum_set};
 use target_lexicon::HOST;
 
 pub enum Target<'a> {
@@ -79,8 +81,8 @@ impl<'a> Target<'a> {
             .expect("Target triples always have a leading arch component.")
     }
 
-    pub fn simplified_target_triple(&self) -> Cow<'a, str> {
-        match self {
+    pub fn simplified_target_triple(&self) -> anyhow::Result<SimplifiedTarget> {
+        let simplified_target_triple: Cow<'_, str> = match self {
             Target::Apple(_target) => Cow::Owned(format!("{arch}-macos", arch = self.arch())),
             Target::GnuLinux(target) | Target::Unix(target) => {
                 if target.contains("-unknown-") {
@@ -90,21 +92,132 @@ impl<'a> Target<'a> {
                 }
             }
             Target::Windows(_target) => Cow::Owned(format!("{arch}-windows", arch = self.arch())),
-        }
+        };
+        SimplifiedTarget::try_from(simplified_target_triple.as_ref())
     }
 
     pub fn fully_qualified_binary_name(
         &self,
         binary_name: &str,
         target_suffix: Option<&str>,
-    ) -> String {
-        let triple = self.simplified_target_triple();
+    ) -> anyhow::Result<String> {
+        let triple = self.simplified_target_triple()?;
         let target_suffix = target_suffix.unwrap_or_default();
-        match self {
+        Ok(match self {
             Target::Windows(_) => {
                 format!("{binary_name}-{triple}{target_suffix}.exe")
             }
             _ => format!("{binary_name}-{triple}{target_suffix}"),
+        })
+    }
+}
+
+#[derive(Debug, EnumSetType, Ord, PartialOrd, Hash)]
+pub enum SimplifiedTarget {
+    Arm64LinuxGnu,
+    Arm64LinuxMusl,
+    Arm64Macos,
+    Arm64Windows,
+    Armv7LinuxGnuabihf,
+    Ppc64leLinuxGnu,
+    Riscv64gcLinuxGnu,
+    S390xLinuxGnu,
+    X64LinuxGnu,
+    X64LinuxMusl,
+    X64Macos,
+    X64Windows,
+}
+
+impl SimplifiedTarget {
+    pub fn try_from(value: impl AsRef<str>) -> anyhow::Result<Self> {
+        Ok(match value.as_ref() {
+            "aarch64-linux-gnu" => Self::Arm64LinuxGnu,
+            "aarch64-linux-musl" => Self::Arm64LinuxMusl,
+            "aarch64-macos" => Self::Arm64Macos,
+            "aarch64-windows" => Self::Arm64Windows,
+            "armv7-linux-gnueabihf" => Self::Armv7LinuxGnuabihf,
+            "powerpc64le-linux-gnu" => Self::Ppc64leLinuxGnu,
+            "riscv64gc-linux-gnu" => Self::Riscv64gcLinuxGnu,
+            "s390x-linux-gnu" => Self::S390xLinuxGnu,
+            "x86_64-linux-gnu" => Self::X64LinuxGnu,
+            "x86_64-linux-musl" => Self::X64LinuxMusl,
+            "x86_64-macos" => Self::X64Macos,
+            "x86_64-windows" => Self::X64Windows,
+            value => bail!("Not a supported simple platform: {value}"),
+        })
+    }
+
+    pub fn for_platform_tag(platform_tag: &str) -> anyhow::Result<Option<EnumSet<Self>>> {
+        if platform_tag == "any" {
+            return Ok(None);
+        } else if platform_tag.starts_with("manylinux") {
+            if platform_tag.contains("x86_64") {
+                return Ok(Some(enum_set!(Self::X64LinuxGnu)));
+            } else if platform_tag.contains("aarch64") {
+                return Ok(Some(enum_set!(Self::Arm64LinuxGnu)));
+            } else if platform_tag.contains("armv7l") {
+                return Ok(Some(enum_set!(Self::Armv7LinuxGnuabihf)));
+            } else if platform_tag.contains("ppc64le") {
+                return Ok(Some(enum_set!(Self::Ppc64leLinuxGnu)));
+            } else if platform_tag.contains("riscv64") {
+                return Ok(Some(enum_set!(Self::Riscv64gcLinuxGnu)));
+            } else if platform_tag.contains("s390x") {
+                return Ok(Some(enum_set!(Self::S390xLinuxGnu)));
+            }
+        } else if platform_tag.starts_with("musllinux") {
+            if platform_tag.contains("x86_64") {
+                return Ok(Some(enum_set!(Self::X64LinuxMusl)));
+            } else if platform_tag.contains("aarch64") {
+                return Ok(Some(enum_set!(Self::Arm64LinuxMusl)));
+            }
+        } else if platform_tag.starts_with("macos") {
+            // For the psuedo-arch (universal2, etc) matches, see:
+            // https://packaging.python.org/en/latest/specifications/platform-compatibility-tags/#macos
+            if platform_tag.contains("aarch64") {
+                return Ok(Some(enum_set!(Self::Arm64Macos)));
+            } else if platform_tag.contains("x86_64") {
+                return Ok(Some(enum_set!(Self::X64Macos)));
+            } else if platform_tag.contains("universal2") {
+                return Ok(Some(Self::Arm64Macos | Self::X64Macos));
+            } else if ["universal", "intel", "fat3", "fat64"]
+                .iter()
+                .any(|arch| platform_tag.contains(arch))
+            {
+                return Ok(Some(enum_set!(Self::X64Macos)));
+            }
+        } else if platform_tag.starts_with("win") {
+            if platform_tag.contains("x86_64") {
+                return Ok(Some(enum_set!(Self::X64Windows)));
+            } else if platform_tag.contains("aarch64") {
+                return Ok(Some(enum_set!(Self::Arm64Windows)));
+            }
         }
+        bail!(
+            "There are no pexrc binaries available that support the Python wheel platform tag \
+            {platform_tag}."
+        )
+    }
+
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Arm64LinuxGnu => "aarch64-linux-gnu",
+            Self::Arm64LinuxMusl => "aarch64-linux-musl",
+            Self::Arm64Macos => "aarch64-macos",
+            Self::Arm64Windows => "aarch64-windows",
+            Self::Armv7LinuxGnuabihf => "armv7-linux-gnueabihf",
+            Self::Ppc64leLinuxGnu => "powerpc64le-linux-gnu",
+            Self::Riscv64gcLinuxGnu => "riscv64gc-linux-gnu",
+            Self::S390xLinuxGnu => "s390x-linux-gnu",
+            Self::X64LinuxGnu => "x86_64-linux-gnu",
+            Self::X64LinuxMusl => "x86_64-linux-musl",
+            Self::X64Macos => "x86_64-macos",
+            Self::X64Windows => "x86_64-windows",
+        }
+    }
+}
+
+impl Display for SimplifiedTarget {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        f.write_str(self.as_str())
     }
 }

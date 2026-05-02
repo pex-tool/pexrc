@@ -55,13 +55,13 @@ impl<'a> Display for WheelDir<'a> {
 }
 
 pub struct WheelFile<'a> {
-    pub(crate) file_name: &'a str,
+    pub file_name: &'a str,
     pub(crate) raw_project_name: &'a str,
-    pub(crate) project_name: PackageName,
+    pub project_name: PackageName,
     pub(crate) raw_version: &'a str,
     pub(crate) version: Version,
     _build_tag: Option<&'a str>,
-    pub(crate) tags: Vec<Tag<'a>>,
+    pub tags: Vec<Tag<'a>>,
 }
 
 impl<'a> WheelFile<'a> {

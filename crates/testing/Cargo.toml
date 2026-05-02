@@ -3,12 +3,12 @@
 
 [package]
 name = "testing"
-edition = "2024"
+edition = { workspace = true }
 publish = false
 
 [dependencies]
 cache = { path = "../cache" }
-ctor = { workspace = true }
+dtor = { workspace = true }
 fs-err = { workspace = true }
 rstest = { workspace = true }
 scripts = { path = "../scripts", features = ["embedded"] }

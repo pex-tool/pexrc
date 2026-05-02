@@ -3,10 +3,13 @@
 
 #![deny(clippy::all)]
 
-use std::collections::HashSet;
+use std::fmt::Display;
 use std::path::PathBuf;
+use std::sync::LazyLock;
 
+use clap::builder::PossibleValue;
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
+use indexmap::{Equivalent, IndexSet};
 use pex::{Pex, WheelOptions};
 use pexrc::commands::{extract, info, inject, repackage, script};
 use pexrc::embeds::{CLIB_BY_TARGET, PROXY_BY_TARGET};
@@ -42,6 +45,47 @@ impl From<CompressionMethod> for zip::CompressionMethod {
     }
 }
 
+#[derive(Clone, Hash, Eq, PartialEq)]
+struct SimplifiedTarget(target::SimplifiedTarget);
+
+impl Display for SimplifiedTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        f.write_str(self.0.as_str())
+    }
+}
+
+impl Equivalent<target::SimplifiedTarget> for SimplifiedTarget {
+    fn equivalent(&self, key: &target::SimplifiedTarget) -> bool {
+        &self.0 == key
+    }
+}
+
+static AVAILABLE_TARGETS: LazyLock<Vec<SimplifiedTarget>> = LazyLock::new(|| {
+    CLIB_BY_TARGET
+        .keys()
+        .chain(PROXY_BY_TARGET.keys())
+        .collect::<IndexSet<_>>()
+        .into_iter()
+        .map(|target| SimplifiedTarget(*target))
+        .collect()
+});
+
+impl ValueEnum for SimplifiedTarget {
+    fn value_variants<'a>() -> &'a [Self] {
+        AVAILABLE_TARGETS.as_slice()
+    }
+
+    fn to_possible_value(&self) -> Option<PossibleValue> {
+        Some(PossibleValue::new(self.0.as_str()))
+    }
+}
+
+impl From<SimplifiedTarget> for target::SimplifiedTarget {
+    fn from(value: SimplifiedTarget) -> Self {
+        value.0
+    }
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// Extract Pex dependencies as zstd wheels.
@@ -70,8 +114,7 @@ enum Commands {
 
         #[arg(long = "target")]
         #[arg(action=ArgAction::Append)]
-        #[arg(value_parser=clap::builder::PossibleValuesParser::new(CLIB_BY_TARGET.keys()))]
-        targets: Vec<String>,
+        targets: Vec<SimplifiedTarget>,
 
         #[arg(value_name = "PEX", required = true)]
         pexes: Vec<String>,
@@ -96,8 +139,7 @@ enum Commands {
     /// Create a Windows-style Python venv console script executable.
     Script {
         #[arg(long)]
-        #[arg(value_parser=clap::builder::PossibleValuesParser::new(PROXY_BY_TARGET.keys()))]
-        target: Option<String>,
+        target: Option<SimplifiedTarget>,
 
         #[arg(short = 'p', long, required = true)]
         python: PathBuf,
@@ -137,31 +179,28 @@ fn main() -> anyhow::Result<()> {
         } => {
             let (clibs, proxies) = if !targets.is_empty() {
                 (
-                    Some(
-                        targets
-                            .iter()
-                            .map(|target| {
-                                CLIB_BY_TARGET.get(target.as_str()).copied().expect(
-                                "The allowed --target values are all keys in the CLIB_BY_TARGET \
-                                map.",
+                    targets
+                        .iter()
+                        .map(|target| {
+                            CLIB_BY_TARGET.get(target).expect(
+                                "The allowed --target values are all keys in CLIB_BY_TARGET.",
                             )
-                            })
-                            .collect::<HashSet<_>>(),
-                    ),
-                    Some(
-                        targets
-                            .iter()
-                            .map(|target| {
-                                PROXY_BY_TARGET.get(target.as_str()).copied().expect(
-                                "The allowed --target values are all keys in the PROXY_BY_TARGET \
-                                map.",
+                        })
+                        .collect::<Vec<_>>(),
+                    targets
+                        .iter()
+                        .map(|target| {
+                            PROXY_BY_TARGET.get(target).expect(
+                                "The allowed --target values are all keys in PROXY_BY_TARGET.",
                             )
-                            })
-                            .collect::<HashSet<_>>(),
-                    ),
+                        })
+                        .collect::<Vec<_>>(),
                 )
             } else {
-                (None, None)
+                (
+                    CLIB_BY_TARGET.values().collect::<Vec<_>>(),
+                    PROXY_BY_TARGET.values().collect::<Vec<_>>(),
+                )
             };
             let pexes = pexes
                 .into_iter()
@@ -170,8 +209,8 @@ fn main() -> anyhow::Result<()> {
             inject::inject_all(
                 pexes,
                 &WheelOptions::new(compression_method.into(), compression_level, None),
-                clibs.as_ref(),
-                proxies.as_ref(),
+                clibs.as_slice(),
+                proxies.as_slice(),
             )
         }
         Commands::Info => info::display(),
@@ -198,11 +237,11 @@ fn main() -> anyhow::Result<()> {
             output_file,
         } => {
             if let Some(target) = target {
-                script::create(target.as_str(), &python, &script, &output_file)
+                script::create(target.into(), &python, &script, &output_file)
             } else {
                 let current_target = Target::current()?;
                 script::create(
-                    current_target.simplified_target_triple().as_ref(),
+                    current_target.simplified_target_triple()?,
                     &python,
                     &script,
                     &output_file,

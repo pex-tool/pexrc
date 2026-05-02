@@ -3,9 +3,10 @@
 
 [package]
 name = "target"
-edition = "2024"
+edition = { workspace = true }
 publish = false
 
 [dependencies]
 anyhow = { workspace = true }
+enumset = { workspace = true }
 target-lexicon = { workspace = true }
