@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{LazyLock, Mutex};
 
-use ctor::dtor;
+use dtor::dtor;
 use fs_err as fs;
 use rstest::fixture;
 use scripts::{IdentifyInterpreter, Scripts};
@@ -31,7 +31,7 @@ pub fn create_tmp_dir() -> PathBuf {
     chroot
 }
 
-#[dtor]
+#[dtor(unsafe)]
 fn cleanup_tmp_dirs() {
     let tmp_dirs = TMP_DIRS.lock().unwrap();
     for tmp_dir in tmp_dirs.as_slice() {
