@@ -1,5 +1,11 @@
 # Release Notes
 
+## 0.9.0
+
+This release adds support for auto-scoping the clibs and python-proxies injected into PEXes when
+the PEX contains native wheels. For pure-Python PEXes, you still need to pare down manually using
+`--target`.
+
 ## 0.8.0
 
 This release adds support for "un-spreading" legacy PEX wheel chroots when injecting a PEXrc and

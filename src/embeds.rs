@@ -11,6 +11,7 @@ use include_dir::{Dir, include_dir};
 use indexmap::IndexMap;
 use target::SimplifiedTarget;
 
+#[derive(Eq, PartialEq, Hash)]
 pub struct Binary<'a> {
     pub target: SimplifiedTarget,
     pub path: &'a Path,

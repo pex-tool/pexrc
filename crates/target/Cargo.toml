@@ -8,4 +8,5 @@ publish = false
 
 [dependencies]
 anyhow = { workspace = true }
+enumset = { workspace = true }
 target-lexicon = { workspace = true }

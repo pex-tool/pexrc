@@ -8,6 +8,7 @@ use std::fmt::{Display, Formatter};
 use std::sync::LazyLock;
 
 use anyhow::bail;
+use enumset::{EnumSet, EnumSetType, enum_set};
 use target_lexicon::HOST;
 
 pub enum Target<'a> {
@@ -111,7 +112,7 @@ impl<'a> Target<'a> {
     }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, EnumSetType, Ord, PartialOrd, Hash)]
 pub enum SimplifiedTarget {
     Arm64LinuxGnu,
     Arm64LinuxMusl,
@@ -144,6 +145,57 @@ impl SimplifiedTarget {
             "x86_64-windows" => Self::X64Windows,
             value => bail!("Not a supported simple platform: {value}"),
         })
+    }
+
+    pub fn for_platform_tag(platform_tag: &str) -> anyhow::Result<Option<EnumSet<Self>>> {
+        if platform_tag == "any" {
+            return Ok(None);
+        } else if platform_tag.starts_with("manylinux") {
+            if platform_tag.contains("x86_64") {
+                return Ok(Some(enum_set!(Self::X64LinuxGnu)));
+            } else if platform_tag.contains("aarch64") {
+                return Ok(Some(enum_set!(Self::Arm64LinuxGnu)));
+            } else if platform_tag.contains("armv7l") {
+                return Ok(Some(enum_set!(Self::Armv7LinuxGnuabihf)));
+            } else if platform_tag.contains("ppc64le") {
+                return Ok(Some(enum_set!(Self::Ppc64leLinuxGnu)));
+            } else if platform_tag.contains("riscv64") {
+                return Ok(Some(enum_set!(Self::Riscv64gcLinuxGnu)));
+            } else if platform_tag.contains("s390x") {
+                return Ok(Some(enum_set!(Self::S390xLinuxGnu)));
+            }
+        } else if platform_tag.starts_with("musllinux") {
+            if platform_tag.contains("x86_64") {
+                return Ok(Some(enum_set!(Self::X64LinuxMusl)));
+            } else if platform_tag.contains("aarch64") {
+                return Ok(Some(enum_set!(Self::Arm64LinuxMusl)));
+            }
+        } else if platform_tag.starts_with("macos") {
+            // For the psuedo-arch (universal2, etc) matches, see:
+            // https://packaging.python.org/en/latest/specifications/platform-compatibility-tags/#macos
+            if platform_tag.contains("aarch64") {
+                return Ok(Some(enum_set!(Self::Arm64Macos)));
+            } else if platform_tag.contains("x86_64") {
+                return Ok(Some(enum_set!(Self::X64Macos)));
+            } else if platform_tag.contains("universal2") {
+                return Ok(Some(Self::Arm64Macos | Self::X64Macos));
+            } else if ["universal", "intel", "fat3", "fat64"]
+                .iter()
+                .any(|arch| platform_tag.contains(arch))
+            {
+                return Ok(Some(enum_set!(Self::X64Macos)));
+            }
+        } else if platform_tag.starts_with("win") {
+            if platform_tag.contains("x86_64") {
+                return Ok(Some(enum_set!(Self::X64Windows)));
+            } else if platform_tag.contains("aarch64") {
+                return Ok(Some(enum_set!(Self::Arm64Windows)));
+            }
+        }
+        bail!(
+            "There are no pexrc binaries available that support the Python wheel platform tag \
+            {platform_tag}."
+        )
     }
 
     pub const fn as_str(&self) -> &'static str {

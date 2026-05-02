@@ -5,7 +5,7 @@ cargo-features = ["profile-rustflags"]
 
 [package]
 name = "pexrc"
-version = "0.8.0"
+version = "0.9.0"
 edition = { workspace = true }
 publish = false
 
@@ -158,6 +158,7 @@ dirs = "6.0"
 dot-generator = "0.2"
 dot-structures = "0.1"
 elf = "0.8"
+enumset = "1.1"
 env_filter = "1.0"
 env_logger = "0.11"
 flate2 = "1.1"
@@ -225,6 +226,7 @@ clap-verbosity-flag = { workspace = true }
 cli = { path = "crates/cli" }
 colorchoice-clap = { workspace = true }
 digest = { workspace = true }
+enumset = { workspace = true }
 env_logger = { workspace = true }
 fs-err = { workspace = true }
 include_dir = { workspace = true }

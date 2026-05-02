@@ -2,22 +2,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::borrow::Cow;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::fmt::{Display, Formatter};
 use std::io;
 use std::io::{BufRead, BufReader, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, anyhow};
+use anyhow::{Context, anyhow, bail};
 use boot::{inject_boot, sh_boot_shebang, write_boot};
 use cache::{DigestingReader, Fingerprint, default_digest};
+use enumset::EnumSet;
 use fs_err as fs;
 use fs_err::File;
+use indexmap::IndexSet;
 use log::info;
 use owo_colors::OwoColorize;
-use pex::{Layout, Pex, WheelOptions};
+use pex::{Layout, Pex, WheelFile, WheelOptions};
 use platform::mark_executable;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use scripts::Scripts;
+use target::SimplifiedTarget;
 use tempfile::NamedTempFile;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
@@ -36,6 +40,109 @@ pub fn inject_all(
     Ok(())
 }
 
+#[derive(Eq, PartialEq, Hash)]
+struct RequiredTarget<'a> {
+    targets: EnumSet<SimplifiedTarget>,
+    required_by: &'a str,
+}
+
+impl<'a> RequiredTarget<'a> {
+    fn satisfied_by(&self, target: SimplifiedTarget) -> bool {
+        self.targets.contains(target)
+    }
+}
+
+impl<'a> Display for RequiredTarget<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{targets} required by {wheel}",
+            targets = self.targets,
+            wheel = self.required_by
+        )
+    }
+}
+
+struct RequiredTargets<'a> {
+    pex: &'a Path,
+    required_targets: IndexSet<RequiredTarget<'a>>,
+}
+
+impl<'a> RequiredTargets<'a> {
+    fn for_pex(pex: &'a Pex) -> anyhow::Result<Self> {
+        let wheels = pex
+            .info
+            .raw()
+            .distributions
+            .keys()
+            .map(|wheel_file_name| WheelFile::parse_file_name(wheel_file_name))
+            .collect::<anyhow::Result<Vec<_>>>()?;
+
+        let mut targets_by_project_name = HashMap::new();
+        for wheel in wheels {
+            targets_by_project_name
+                .entry(wheel.project_name)
+                .or_insert_with(HashSet::new)
+                .extend(
+                    wheel
+                        .tags
+                        .iter()
+                        .map(|tag| {
+                            SimplifiedTarget::for_platform_tag(tag.platform)
+                                .map(|targets| targets.map(|targets| (wheel.file_name, targets)))
+                        })
+                        .collect::<anyhow::Result<Vec<_>>>()?,
+                );
+        }
+        let mut required_targets = IndexSet::new();
+        for required in targets_by_project_name.values() {
+            if required.contains(&None) {
+                // If a project has an "-any" whl, we can always resolve that, potentially at the cost
+                // of perf; so we ignore these projects.
+                continue;
+            }
+            for required_target in required {
+                let (required_by, targets) =
+                    required_target.expect("We confirmed all targets were Some above.");
+                required_targets.insert(RequiredTarget {
+                    targets,
+                    required_by,
+                });
+            }
+        }
+        Ok(Self {
+            pex: pex.path,
+            required_targets,
+        })
+    }
+
+    fn select_binaries<'b>(
+        &self,
+        binaries: &[&'b Binary<'b>],
+    ) -> anyhow::Result<IndexSet<&'b Binary<'b>>> {
+        if self.required_targets.is_empty() {
+            return Ok(binaries.iter().copied().collect());
+        }
+        let mut selected = IndexSet::with_capacity(binaries.len());
+        for required_target in &self.required_targets {
+            let mut satisifed = false;
+            for binary in binaries {
+                if required_target.satisfied_by(binary.target) {
+                    selected.insert(*binary);
+                    satisifed = true;
+                }
+            }
+            if !satisifed {
+                bail!(
+                    "This pexrc binary has no clib that satisfies {required_target} in PEX {pex}.",
+                    pex = self.pex.display()
+                )
+            }
+        }
+        Ok(selected)
+    }
+}
+
 fn inject(
     pex: &Path,
     options: &WheelOptions,
@@ -43,6 +150,9 @@ fn inject(
     proxies: &[&Binary],
 ) -> anyhow::Result<()> {
     let pex = Pex::load(pex)?;
+    let required_targets = RequiredTargets::for_pex(&pex)?;
+    let clibs = required_targets.select_binaries(clibs)?;
+    let proxies = required_targets.select_binaries(proxies)?;
     match pex.layout {
         Layout::Loose | Layout::Packed => inject_pex_dir(pex, options, clibs, proxies),
         Layout::ZipApp => inject_pex_zip(pex, options, clibs, proxies),
@@ -52,8 +162,8 @@ fn inject(
 fn inject_pex_dir(
     mut pex: Pex,
     options: &WheelOptions,
-    clibs: &[&Binary],
-    proxies: &[&Binary],
+    clibs: IndexSet<&Binary>,
+    proxies: IndexSet<&Binary>,
 ) -> anyhow::Result<()> {
     // Make sure we have a shebang early. This partially validates the pex to inject is a valid one
     // before expending too much effort copying files below.
@@ -185,8 +295,8 @@ fn embed_in_dir(
 fn inject_pex_zip(
     mut pex: Pex,
     options: &WheelOptions,
-    clibs: &[&Binary],
-    proxies: &[&Binary],
+    clibs: IndexSet<&Binary>,
+    proxies: IndexSet<&Binary>,
 ) -> anyhow::Result<()> {
     let pex_info = pex.info.raw();
     let zip_read_fp = File::open(pex.path)?;
