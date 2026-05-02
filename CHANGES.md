@@ -1,5 +1,10 @@
 # Release Notes
 
+## 0.9.1
+
+This release fixes injected PEXes to properly resolve from legacy PEXes on the PEX_PATH at runtime
+when those legacy PEXes expose items from the wheel .data/ dir in wheel chroot stashes.
+
 ## 0.9.0
 
 This release adds support for auto-scoping the clibs and python-proxies injected into PEXes when

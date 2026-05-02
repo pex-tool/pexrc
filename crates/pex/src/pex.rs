@@ -4,6 +4,7 @@
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::OsStr;
+use std::fmt::{Display, Formatter};
 use std::io;
 use std::io::{BufReader, Read, Seek};
 use std::path::{Path, PathBuf};
@@ -129,33 +130,45 @@ pub struct ResolvedWheel<'a> {
     pub root_is_purelib: bool,
 }
 
-pub struct DataDir(String);
+macro_rules! generate_dir_type {
+    ( $script_type:ident, $name:literal ) => {
+        pub struct $script_type(String);
 
-impl DataDir {
-    pub fn as_path(&self) -> &Path {
-        Path::new(&self.0)
-    }
+        impl $script_type {
+            fn new(project_name: &str, version: &str) -> Self {
+                Self(format!("{project_name}-{version}.{name}", name = $name))
+            }
+        }
+
+        impl Display for $script_type {
+            fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+                f.write_str(&self.0)
+            }
+        }
+
+        impl AsRef<Path> for $script_type {
+            fn as_ref(&self) -> &Path {
+                Path::new(&self.0)
+            }
+        }
+    };
 }
+
+generate_dir_type!(DataDir, "data");
+generate_dir_type!(DistInfoDir, "dist-info");
+generate_dir_type!(PexInfoDir, "pex-info");
 
 impl<'a> ResolvedWheel<'a> {
     pub fn data_dir(&self) -> DataDir {
-        DataDir(self.pnav_dir("data"))
+        DataDir::new(self.project_name, self.version)
     }
 
-    pub fn dist_info_dir(&self) -> PathBuf {
-        self.pnav_dir("dist-info").into()
+    pub fn dist_info_dir(&self) -> DistInfoDir {
+        DistInfoDir::new(self.project_name, self.version)
     }
 
-    pub fn pex_info_info_dir(&self) -> PathBuf {
-        self.pnav_dir("pex-info").into()
-    }
-
-    fn pnav_dir(&self, name: &str) -> String {
-        format!(
-            "{project_name}-{version}.{name}",
-            project_name = self.project_name,
-            version = self.version
-        )
+    pub fn pex_info_info_dir(&self) -> PexInfoDir {
+        PexInfoDir::new(self.project_name, self.version)
     }
 }
 

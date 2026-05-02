@@ -12,8 +12,10 @@ mod wheel;
 pub use pex::{
     CollectWheelMetadata,
     DataDir,
+    DistInfoDir,
     Layout,
     Pex,
+    PexInfoDir,
     Resolve,
     ResolveError,
     ResolvedWheel,
@@ -27,7 +29,9 @@ pub use pex_path::PexPath;
 pub use wheel::{
     EntryPoint,
     EntryPoints,
+    Record,
     WheelFile,
+    WheelLayout,
     WheelMetadata,
     WheelOptions,
     recompress_zipped_whl,

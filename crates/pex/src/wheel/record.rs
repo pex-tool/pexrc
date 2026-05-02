@@ -61,7 +61,7 @@ fn parse_entry_record<'a>(
 }
 
 #[self_referencing]
-pub(crate) struct Record {
+pub struct Record {
     records: Vec<csv::Result<StringRecord>>,
     terminator: Terminator,
 
@@ -71,16 +71,13 @@ pub(crate) struct Record {
 }
 
 impl Record {
-    pub(crate) fn parse(
-        wheel_dir: &Path,
-        wheel_file: &WheelFile,
-    ) -> anyhow::Result<(Self, PathBuf)> {
+    pub fn parse(wheel_dir: &Path, wheel_file: &WheelFile) -> anyhow::Result<(Self, PathBuf)> {
         let record_rel_path = wheel_file.dist_info_dir().as_path().join("RECORD");
         let record = Self::read(File::open(wheel_dir.join(&record_rel_path))?)?;
         Ok((record, record_rel_path))
     }
 
-    pub(crate) fn read(source: impl Read + Seek) -> anyhow::Result<Self> {
+    pub fn read(source: impl Read + Seek) -> anyhow::Result<Self> {
         let mut first_line = String::new();
         let mut buffered_source = BufReader::new(source);
         buffered_source.read_line(&mut first_line)?;
@@ -111,7 +108,7 @@ impl Record {
         self.borrow_entries().as_slice()
     }
 
-    pub(crate) fn wheel_has_bin_dir(&self) -> bool {
+    pub fn wheel_has_bin_dir(&self) -> bool {
         self.entries().iter().any(|entry| {
             matches!(entry.path.components().next(), Some(Component::Normal(name)) if name == "bin")
         })
