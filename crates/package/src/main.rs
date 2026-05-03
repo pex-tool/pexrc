@@ -103,6 +103,9 @@ struct Cli {
     #[arg(value_parser=clap::builder::PossibleValuesParser::new(AVAILABLE_TARGETS.iter()))]
     targets: Vec<String>,
 
+    #[arg(short = 't', visible_alias = "tools", long, default_value = "false")]
+    include_tools: bool,
+
     #[arg(short = 'o', long)]
     dist_dir: Option<PathBuf>,
 
@@ -170,10 +173,15 @@ fn main() -> anyhow::Result<()> {
         (profile, None)
     };
 
+    let mut env = vec![("PEXRC_TARGETS", "all")];
+    if cli.include_tools {
+        env.push(("PEXRC_CLIB_FEATURES", "tools"));
+    }
+
     let built = if cli.targets.is_empty() {
         let result = Command::new(cargo)
             .args(["build", "--profile", profile])
-            .env("PEXRC_TARGETS", "all")
+            .envs(env)
             .spawn()?
             .wait()?;
         if !result.success() {
@@ -210,7 +218,7 @@ fn main() -> anyhow::Result<()> {
                     target.fully_qualified_binary_name("pexrc", profile_target_suffix)?,
                 ));
             }
-            command.env("PEXRC_TARGETS", "all");
+            command.envs(env.clone());
             for found_tool in &found_tools {
                 command.env(found_tool.env_var, &found_tool.path);
             }
@@ -237,7 +245,7 @@ fn main() -> anyhow::Result<()> {
                     target.fully_qualified_binary_name("pexrc", profile_target_suffix)?,
                 ));
             }
-            command.env("PEXRC_TARGETS", "all");
+            command.envs(env);
             for found_tool in &found_tools {
                 command.env(found_tool.env_var, &found_tool.path);
             }
