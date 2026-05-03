@@ -6,6 +6,7 @@ from __future__ import absolute_import
 import json
 import os.path
 import subprocess
+import sys
 from textwrap import dedent
 
 import colors  # type: ignore[import-untyped]
@@ -172,7 +173,8 @@ def test_data_dirs(
 
     data = json.loads(
         subprocess.check_output(
-            args=[injected_pex], env=dict(os.environ, PEX_PATH=data_dirs_pex, PEXRC_ROOT=pexrc_root)
+            args=[sys.executable, injected_pex],
+            env=dict(os.environ, PEX_PATH=data_dirs_pex, PEXRC_ROOT=pexrc_root),
         )
     )
     assert os.path.exists(os.path.join(data["site-packages"], "jupyterlab_pygments", "style.py")), (
