@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
-use std::io::{BufReader, ErrorKind, Read, Seek, Write};
+use std::io::{BufReader, Cursor, ErrorKind, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::{env, io};
@@ -18,12 +18,16 @@ use logging_timer::time;
 use pex::{
     BinPath,
     DataDir,
+    DistInfoDir,
     EntryPoint,
     EntryPoints,
     Layout,
     Pex,
+    PexInfoDir,
     RawPexInfo,
+    Record,
     ResolvedWheel,
+    WheelLayout,
     collect_loose_user_source,
     collect_zipped_user_source_indexes,
     filter_zipped_user_source,
@@ -65,8 +69,21 @@ fn populate_from_loose_pex<'a>(
     if matches!(scope, InstallScope::All | InstallScope::Deps) {
         collect_wheels_from_directory_pex(loose_pex, resolved_wheels)?
             .into_par_iter()
-            .try_for_each(|(wheel, project_name, data_dir)| {
-                populate_wheel_dir(venv, &wheel, project_name, &data_dir, provenance.clone())
+            .try_for_each(|(project_name, wheel_paths)| {
+                let layout = WheelLayout::load_from_dir(&wheel_paths.path)?;
+                let record_file = File::open(wheel_paths.path.join(format!(
+                    "{dist_info_dir}/RECORD",
+                    dist_info_dir = wheel_paths.dist_info_dir
+                )))?;
+                let record = Record::read(record_file)?;
+                let wheel_details = WheelDetails::new(
+                    project_name,
+                    wheel_paths.data_dir,
+                    wheel_paths.pex_info_dir,
+                    layout,
+                    record.wheel_has_bin_dir(),
+                );
+                populate_wheel_dir(venv, &wheel_paths.path, &wheel_details, provenance.clone())
             })?;
     }
     if matches!(scope, InstallScope::All | InstallScope::Srcs) {
@@ -75,10 +92,17 @@ fn populate_from_loose_pex<'a>(
     Ok(())
 }
 
+struct WheelPaths {
+    path: PathBuf,
+    data_dir: DataDir,
+    dist_info_dir: DistInfoDir,
+    pex_info_dir: PexInfoDir,
+}
+
 fn collect_wheels_from_directory_pex<'a>(
     pex: &Pex,
     resolved_wheels: &'a IndexMap<&'a str, ResolvedWheel<'a>>,
-) -> anyhow::Result<Vec<(PathBuf, &'a str, DataDir)>> {
+) -> anyhow::Result<Vec<(&'a str, WheelPaths)>> {
     let mut wheels = Vec::with_capacity(resolved_wheels.len());
     let deps_dir = pex.path.join(".deps");
     if deps_dir.is_dir() {
@@ -87,7 +111,15 @@ fn collect_wheels_from_directory_pex<'a>(
             if let Ok(wheel_file_name) = platform::os_str_as_str(&entry.file_name())
                 && let Some(wheel) = resolved_wheels.get(wheel_file_name)
             {
-                wheels.push((entry.path(), wheel.project_name, wheel.data_dir()))
+                wheels.push((
+                    wheel.project_name,
+                    WheelPaths {
+                        path: entry.path(),
+                        data_dir: wheel.data_dir(),
+                        dist_info_dir: wheel.dist_info_dir(),
+                        pex_info_dir: wheel.pex_info_info_dir(),
+                    },
+                ))
             }
         }
     }
@@ -276,20 +308,50 @@ if __name__ == "__main__":
     }
 }
 
+struct WheelDetails<'a> {
+    project_name: &'a str,
+    data_dir: DataDir,
+    pex_info_dir: PexInfoDir,
+    stash_dir: Option<PathBuf>,
+    legacy_bin_dir: bool,
+}
+
+impl<'a> WheelDetails<'a> {
+    fn new(
+        project_name: &'a str,
+        data_dir: DataDir,
+        pex_info_dir: PexInfoDir,
+        layout: Option<WheelLayout>,
+        legacy_bin_dir: bool,
+    ) -> Self {
+        let stash_dir = if let Some(layout) = layout {
+            Some(layout.stash_dir)
+        } else {
+            None
+        };
+        Self {
+            project_name,
+            data_dir,
+            pex_info_dir,
+            stash_dir,
+            legacy_bin_dir,
+        }
+    }
+}
+
 fn calculate_spread_path(
     venv: &Virtualenv,
-    project_name: &str,
-    data_dir: &DataDir,
+    wheel_details: &WheelDetails,
     dst_rel_path: &Path,
 ) -> anyhow::Result<Option<PathBuf>> {
-    if let Ok(data_dir_relpath) = dst_rel_path.strip_prefix(data_dir.as_path()) {
+    if let Ok(data_dir_relpath) = dst_rel_path.strip_prefix(wheel_details.data_dir.as_ref()) {
         let mut components = data_dir_relpath.components();
         if let Some(paths_key) = components.next() {
             let key = paths_key.as_os_str().to_str().ok_or_else(|| {
                 anyhow!(
                     "The first component of .data/ dir path {path} was not a UTF-8 key into \
                     sysconfig paths.",
-                    path = data_dir.as_path().display()
+                    path = wheel_details.data_dir
                 )
             })?;
             if key == "headers" {
@@ -311,20 +373,71 @@ fn calculate_spread_path(
                             major = venv.interpreter.raw().version.major,
                             minor = venv.interpreter.raw().version.minor
                         ))
-                        .join(project_name)
+                        .join(wheel_details.project_name)
                         .join(components.collect::<PathBuf>()),
                 ))
             } else if let Some(spread_path) = venv.interpreter.raw().paths.get(key) {
                 Ok(Some(spread_path.join(components.collect::<PathBuf>())))
             } else {
                 bail!(
-                    "Wheel for {project_name} has unknown .data dir entry {key}: {data_dir_relpath}",
+                    "Wheel for {project_name} has unknown .data dir entry {key}: \
+                    {data_dir_relpath}",
+                    project_name = wheel_details.project_name,
                     data_dir_relpath = data_dir_relpath.display()
                 )
             }
         } else {
             Ok(None)
         }
+    } else if let Some(stash_dir) = wheel_details.stash_dir.as_deref()
+        && let Ok(stash_rel_path) = dst_rel_path.strip_prefix(stash_dir)
+    {
+        let mut components = stash_rel_path.components();
+        if let Some(paths_key) = components.next() {
+            let key = paths_key.as_os_str().to_str().ok_or_else(|| {
+                anyhow!(
+                    "The first component of {stash_dir} dir path {path} was not a UTF-8 key into \
+                    sysconfig paths.",
+                    stash_dir = stash_dir.display(),
+                    path = wheel_details.data_dir
+                )
+            })?;
+            if ["bin", "Scripts"].into_iter().any(|dir| key == dir) {
+                Ok(Some(venv.script_path(components.collect::<PathBuf>())))
+            } else if key == "include" {
+                Ok(Some(
+                    venv.prefix()
+                        .components()
+                        .chain(stash_rel_path.components())
+                        .collect(),
+                ))
+            } else if let Some(spread_path) = venv.interpreter.raw().paths.get(key) {
+                Ok(Some(spread_path.components().chain(components).collect()))
+            } else {
+                bail!(
+                    "Wheel for {project_name} has unknown {stash_dir} dir entry {key}: \
+                    {stash_rel_path}",
+                    project_name = wheel_details.project_name,
+                    stash_dir = stash_dir.display(),
+                    stash_rel_path = stash_rel_path.display()
+                )
+            }
+        } else {
+            Ok(None)
+        }
+    } else if wheel_details.stash_dir.is_some()
+        && (dst_rel_path == WheelLayout::file_name()
+            || dst_rel_path
+                .components()
+                .next()
+                .map(|first| wheel_details.pex_info_dir.as_ref() == Path::new(first.as_os_str()))
+                .unwrap_or_default())
+    {
+        Ok(None)
+    } else if wheel_details.legacy_bin_dir
+        && let Ok(script) = dst_rel_path.strip_prefix("bin")
+    {
+        Ok(Some(venv.script_path(script)))
     } else {
         Ok(Some(venv.site_packages_path(dst_rel_path)))
     }
@@ -333,8 +446,7 @@ fn calculate_spread_path(
 fn populate_wheel_dir(
     venv: &Virtualenv,
     wheel: &Path,
-    project_name: &str,
-    data_dir: &DataDir,
+    wheel_details: &WheelDetails,
     provenance: Arc<Provenance>,
 ) -> anyhow::Result<()> {
     let wheel_contents = walkdir::WalkDir::new(wheel)
@@ -348,7 +460,7 @@ fn populate_wheel_dir(
                     );
                     // TODO: Experiment with creating parent dirs as needed here in this synchronous loop
                     //  just 1x to save on syscall overhead in the parallel loop over contained files below.
-                    match calculate_spread_path(venv, project_name, data_dir, dst_rel_path) {
+                    match calculate_spread_path(venv, wheel_details, dst_rel_path) {
                         Ok(dst) => dst.map(|dst| Ok((entry, dst))),
                         Err(err) => Some(Err(err)),
                     }
@@ -396,8 +508,16 @@ fn populate_from_packed_pex<'a>(
     if matches!(scope, InstallScope::All | InstallScope::Deps) {
         collect_wheels_from_directory_pex(packed_pex, resolved_wheels)?
             .into_par_iter()
-            .try_for_each(|(wheel, project_name, data_dir)| {
-                populate_whl_zip(venv, &wheel, project_name, &data_dir, provenance.clone())
+            .try_for_each(|(project_name, wheel_paths)| {
+                populate_whl_zip(
+                    venv,
+                    &wheel_paths.path,
+                    project_name,
+                    wheel_paths.data_dir,
+                    wheel_paths.pex_info_dir,
+                    wheel_paths.dist_info_dir,
+                    provenance.clone(),
+                )
             })?;
     }
     if matches!(scope, InstallScope::All | InstallScope::Srcs) {
@@ -410,18 +530,35 @@ fn populate_whl_zip(
     venv: &Virtualenv,
     wheel: &Path,
     project_name: &str,
-    data_dir: &DataDir,
+    data_dir: DataDir,
+    pex_info_dir: PexInfoDir,
+    dist_info_dir: DistInfoDir,
     provenance: Arc<Provenance>,
 ) -> anyhow::Result<()> {
-    let whl_zip = ZipArchive::new(File::open(wheel)?.into_file())?;
+    let mut whl_zip = ZipArchive::new(File::open(wheel)?.into_file())?;
     let metadata = whl_zip.metadata();
+    let layout = if let Ok(layout_file) = whl_zip.by_name(WheelLayout::file_name()) {
+        Some(WheelLayout::read(layout_file)?)
+    } else {
+        None
+    };
+    let record_name = format!("{dist_info_dir}/RECORD");
+    let record = Record::read(Cursor::new(io::read_to_string(
+        whl_zip.by_name(&record_name)?,
+    )?))?;
+    let wheel_details = WheelDetails::new(
+        project_name,
+        data_dir,
+        pex_info_dir,
+        layout,
+        record.wheel_has_bin_dir(),
+    );
     (0..whl_zip.len()).into_par_iter().try_for_each(|index| {
         let zip_fp = File::open(wheel)?;
         let mut zip = unsafe { ZipArchive::unsafe_new_with_metadata(zip_fp, metadata.clone()) };
         extract_whl_idx(
             venv,
-            project_name,
-            data_dir,
+            &wheel_details,
             index,
             &mut zip,
             wheel.display(),
@@ -496,9 +633,27 @@ fn populate_from_zip_app_with_whl_deps<'a>(
                     unsafe { ZipArchive::unsafe_new_with_metadata(zip_fp, metadata.clone()) };
                 let whl_name = [".deps", wheel_file_name].join("/");
                 let whl_file = zip.by_name_seek(&whl_name)?;
-                let whl_zip = ZipArchive::new(whl_file)?;
+                let mut whl_zip = ZipArchive::new(whl_file)?;
                 let whl_zip_metadata = whl_zip.metadata();
-                let data_dir = wheel.data_dir();
+                let layout = if let Ok(layout_file) = whl_zip.by_name(WheelLayout::file_name()) {
+                    Some(WheelLayout::read(layout_file)?)
+                } else {
+                    None
+                };
+                let record_name = format!(
+                    "{dist_info_dir}/RECORD",
+                    dist_info_dir = wheel.dist_info_dir()
+                );
+                let record = Record::read(Cursor::new(io::read_to_string(
+                    whl_zip.by_name(&record_name)?,
+                )?))?;
+                let wheel_details = WheelDetails::new(
+                    wheel.project_name,
+                    wheel.data_dir(),
+                    wheel.pex_info_info_dir(),
+                    layout,
+                    record.wheel_has_bin_dir(),
+                );
                 (0..whl_zip.len()).into_par_iter().try_for_each(|index| {
                     let zip_fp = File::open(zip_app_pex.path)?;
                     let mut zip =
@@ -509,8 +664,7 @@ fn populate_from_zip_app_with_whl_deps<'a>(
                     };
                     extract_whl_idx(
                         venv,
-                        wheel.project_name,
-                        &data_dir,
+                        &wheel_details,
                         index,
                         &mut whl_zip,
                         format!("{zip}/{whl_name}", zip = zip_app_pex.path.display()),
@@ -576,29 +730,55 @@ fn populate_from_zip_app<'a>(
     if matches!(scope, InstallScope::All | InstallScope::Deps) {
         let data_dirs = resolved_wheels
             .iter()
-            .map(|(file_name, wheel)| (*file_name, (wheel.project_name, wheel.data_dir())))
-            .collect::<HashMap<_, _>>();
+            .map(|(file_name, wheel)| {
+                let layout: Option<WheelLayout> = if let Ok(layout_file) =
+                    pex_zip.by_name(&format!(
+                        ".deps/{file_name}/{layout_file}",
+                        layout_file = WheelLayout::file_name()
+                    )) {
+                    Some(WheelLayout::read(layout_file)?)
+                } else {
+                    None
+                };
+                let record_name = format!(
+                    ".deps/{file_name}/{dist_info_dir}/RECORD",
+                    dist_info_dir = wheel.dist_info_dir()
+                );
+                let record = Record::read(Cursor::new(io::read_to_string(
+                    pex_zip.by_name(&record_name)?,
+                )?))?;
+                Ok((
+                    *file_name,
+                    WheelDetails::new(
+                        wheel.project_name,
+                        wheel.data_dir(),
+                        wheel.pex_info_info_dir(),
+                        layout,
+                        record.wheel_has_bin_dir(),
+                    ),
+                ))
+            })
+            .collect::<anyhow::Result<HashMap<_, _>>>()?;
         let extract_indexes = pex_zip
             .file_names()
             .enumerate()
             .filter_map(|(idx, name)| {
                 dep_filter.filter_deps(name).map(|file_name| {
-                    let (project_name, data_dir) = data_dirs
+                    let wheel_details = data_dirs
                         .get(file_name)
-                        .expect("We mapped a data dir for each wheel file name.");
-                    (idx, project_name, data_dir)
+                        .expect("We mapped a wheel details for each wheel file name.");
+                    (idx, wheel_details)
                 })
             })
             .collect::<Vec<_>>();
         extract_indexes.into_par_iter().try_for_each(
-            |(index, project_name, data_dir)| -> anyhow::Result<()> {
+            |(index, wheel_details)| -> anyhow::Result<()> {
                 let zip_fp = File::open(zip_app_pex.path)?;
                 let mut zip =
                     unsafe { ZipArchive::unsafe_new_with_metadata(zip_fp, metadata.clone()) };
                 extract_whl_idx(
                     venv,
-                    project_name,
-                    data_dir,
+                    wheel_details,
                     index,
                     &mut zip,
                     zip_app_pex.path.display(),
@@ -763,8 +943,7 @@ pub fn populate<'a>(
 
 fn extract_whl_idx<R>(
     venv: &Virtualenv,
-    project_name: &str,
-    data_dir: &DataDir,
+    wheel_details: &WheelDetails,
     index: usize,
     zip: &mut ZipArchive<R>,
     source: impl Display,
@@ -785,7 +964,7 @@ where
             }
             .split("/")
             .collect::<PathBuf>();
-        calculate_spread_path(venv, project_name, data_dir, &dst_rel_path)?
+        calculate_spread_path(venv, wheel_details, &dst_rel_path)?
     };
     if dst_path.is_some() {
         extract_idx(venv, index, dst_path, zip, source, provenance)

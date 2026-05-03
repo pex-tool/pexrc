@@ -8,16 +8,16 @@ use fs_err::File;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
-pub(crate) struct WheelLayout {
-    pub(crate) stash_dir: PathBuf,
+pub struct WheelLayout {
+    pub stash_dir: PathBuf,
 }
 
 impl WheelLayout {
-    pub(crate) const fn file_name() -> &'static str {
+    pub const fn file_name() -> &'static str {
         ".layout.json"
     }
 
-    pub(crate) fn load_from_dir(dir: impl AsRef<Path>) -> anyhow::Result<Option<Self>> {
+    pub fn load_from_dir(dir: impl AsRef<Path>) -> anyhow::Result<Option<Self>> {
         let path = dir.as_ref().join(Self::file_name());
         if path.exists() {
             return Ok(Some(serde_json::from_reader(File::open(path)?)?));
@@ -25,7 +25,7 @@ impl WheelLayout {
         Ok(None)
     }
 
-    pub(crate) fn read(contents: impl Read) -> anyhow::Result<Self> {
+    pub fn read(contents: impl Read) -> anyhow::Result<Self> {
         Ok(serde_json::from_reader(contents)?)
     }
 }

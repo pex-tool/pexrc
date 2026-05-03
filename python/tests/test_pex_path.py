@@ -3,8 +3,10 @@
 
 from __future__ import absolute_import
 
+import json
 import os.path
 import subprocess
+import sys
 from textwrap import dedent
 
 import colors  # type: ignore[import-untyped]
@@ -86,3 +88,113 @@ def test_via_env(
         env=dict(PEX_PATH=ansicolors_pex, PEXRC_ROOT=pexrc_root),
         test_result=test_result,
     )
+
+
+def test_data_dirs(
+    tmpdir,  # type: Any
+    pexrc_root,  # type: str
+):
+    # type: (...) -> None
+
+    pex_root = os.path.join(str(tmpdir), "pex-root")
+    data_dirs_pex = os.path.join(str(tmpdir), "data-dirs.pex")
+    subprocess.check_call(
+        args=[
+            "pex",
+            "greenlet",
+            "jupyterlab_pygments==0.3.0",
+            "tritonclient==2.41.0",
+            "py-spy==0.4.2",
+            "--intransitive",
+            "--ignore-errors",
+            "-o",
+            data_dirs_pex,
+            "--runtime-pex-root",
+            pex_root,
+        ]
+    )
+
+    exe = os.path.join(str(tmpdir), "exe.py")
+    with open(exe, "w") as fp:
+        fp.write(
+            dedent(
+                """\
+                import json
+                import os
+                import pkgutil
+                import sys
+
+                import greenlet
+
+
+                def locate_data():
+                    return {
+                        "python": "python{major}.{minor}".format(
+                            major=sys.version_info[0], minor=sys.version_info[1]
+                        ),
+                        "site-packages": os.path.dirname(os.path.dirname(greenlet.__file__)),
+                        "sys-prefix": sys.prefix,
+                    }
+
+
+                if __name__ == "__main__":
+                    json.dump(locate_data(), sys.stdout)
+                """
+            )
+        )
+
+    primary_pex = os.path.join(str(tmpdir), "primary.pex")
+    subprocess.check_call(
+        args=[
+            "pex",
+            "--exe",
+            exe,
+            "-o",
+            primary_pex,
+            "--runtime-pex-root",
+            pex_root,
+        ]
+    )
+
+    def test_result(
+        result,  # type: ProcessResult
+        _is_traditional_pex,  # type: bool
+    ):
+        # type: (...) -> None
+        result.assert_success()
+        assert result.stdout.strip() == "py-spy 0.4.2"
+
+    injected_pex = compare(
+        primary_pex,
+        args=["--version"],
+        env=dict(PEX_PATH=data_dirs_pex, PEX_SCRIPT="py-spy", PEXRC_ROOT=pexrc_root),
+        test_result=test_result,
+    )
+
+    data = json.loads(
+        subprocess.check_output(
+            args=[sys.executable, injected_pex],
+            env=dict(os.environ, PEX_PATH=data_dirs_pex, PEXRC_ROOT=pexrc_root),
+        )
+    )
+    assert os.path.exists(os.path.join(data["site-packages"], "jupyterlab_pygments", "style.py")), (
+        "Expected un-differentiated wheel files to be spread to site-packages."
+    )
+    assert os.path.exists(os.path.join(data["site-packages"], "tritonclient", "__init__.py")), (
+        "Expected .data/purelib to be spread to site-packages."
+    )
+    assert os.path.exists(
+        os.path.join(
+            data["sys-prefix"],
+            "share",
+            "jupyter",
+            "labextensions",
+            "jupyterlab_pygments",
+            "install.json",
+        )
+    ), "Expected .data/data to be spread under the prefix."
+    assert os.path.exists(
+        os.path.join(
+            data["sys-prefix"], "include", "site", data["python"], "greenlet", "greenlet.h"
+        )
+    ), "Expected .data/headers to be spread to Pip's include/site/... dir."

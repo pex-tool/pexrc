@@ -4,7 +4,6 @@
 [package]
 name = "tools"
 edition = { workspace = true }
-version = "0.1.0"
 publish = false
 
 [dependencies]
