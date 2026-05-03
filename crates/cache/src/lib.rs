@@ -8,12 +8,14 @@ mod fingerprint;
 mod key;
 
 use std::borrow::Cow;
-use std::env;
-use std::path::{Path, PathBuf};
+use std::ops::Deref;
+use std::path::{Component, Path, PathBuf};
 use std::sync::LazyLock;
+use std::{env, fs};
 
 use anyhow::anyhow;
 pub use atomic::{atomic_dir, atomic_file};
+use dtor::dtor;
 pub use fingerprint::{
     DigestingReader,
     Fingerprint,
@@ -23,7 +25,9 @@ pub use fingerprint::{
     hash_file,
 };
 pub use key::Key;
+use log::{debug, warn};
 use logging_timer::time;
+use tempfile::TempDir;
 
 pub fn cache_dir(name: &str, alt_name: &str) -> Option<PathBuf> {
     if let Some(cache_dir) = dirs::cache_dir() {
@@ -33,25 +37,95 @@ pub fn cache_dir(name: &str, alt_name: &str) -> Option<PathBuf> {
     }
 }
 
-static PEXRC_ROOT: LazyLock<Result<PathBuf, Cow<'static, str>>> = LazyLock::new(|| {
-    if let Some(pexrc_root) = env::var_os("PEXRC_ROOT") {
-        let path = Path::new(&pexrc_root);
-        let components = path.components();
-        let mut cache_dir = PathBuf::with_capacity(components.count() + 1);
-        for component in path {
-            if component == "~" {
-                if let Some(home_dir) = dirs::home_dir() {
-                    cache_dir.push(home_dir)
-                } else {
-                    return Err(Cow::Owned(format!(
-                        "Failed to expand home dir in PEXRC_ROOT={pexrc_root:?}"
-                    )));
-                }
-            } else {
-                cache_dir.push(component)
-            }
+fn is_home_dir(component: Component) -> bool {
+    matches!(component, Component::Normal(name) if name == "~")
+}
+
+fn expand_home_dir(path: PathBuf) -> Result<PathBuf, Cow<'static, str>> {
+    let mut expand = false;
+    let mut count = 0;
+    for component in path.components() {
+        count += 1;
+        if !expand && is_home_dir(component) {
+            expand = true;
         }
-        Ok(cache_dir.iter().collect())
+    }
+    if !expand {
+        return Ok(path);
+    }
+    let home_dir = dirs::home_dir().ok_or_else(|| {
+        Cow::Owned(format!(
+            "Failed to expand home dir in {path}",
+            path = path.display()
+        ))
+    })?;
+    let mut expanded_path = PathBuf::with_capacity(count);
+    for component in path.components() {
+        if is_home_dir(component) {
+            expanded_path.push(&home_dir)
+        } else {
+            expanded_path.push(component)
+        }
+    }
+    Ok(expanded_path.iter().collect())
+}
+
+pub enum CacheRoot {
+    Dir(PathBuf),
+    TempDir(TempDir),
+}
+
+impl Deref for CacheRoot {
+    type Target = Path;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            CacheRoot::Dir(root) => root,
+            CacheRoot::TempDir(root) => root.path(),
+        }
+    }
+}
+
+impl AsRef<Path> for CacheRoot {
+    fn as_ref(&self) -> &Path {
+        self.deref()
+    }
+}
+
+fn ensure_writeable(path: PathBuf) -> Result<CacheRoot, Cow<'static, str>> {
+    for ancestor in path.ancestors() {
+        if !ancestor.exists() {
+            continue;
+        }
+        if tempfile::tempfile_in(ancestor).is_ok() {
+            return Ok(CacheRoot::Dir(path));
+        }
+    }
+    tempfile::tempdir()
+        .inspect(|temp_dir| {
+            warn!(
+                "The pexrc cache root of {path} is not writeable\n\
+                Falling back to a temporary cache root of {fallback} which will hurt \
+                performance.",
+                path = path.display(),
+                fallback = temp_dir.path().display()
+            )
+        })
+        .map(CacheRoot::TempDir)
+        .map_err(|err| {
+            Cow::Owned(format!(
+                "The pexrc cache root of {path} is not writeable and a temporary cache dir \
+                could not be established: {err}",
+                path = path.display()
+            ))
+        })
+}
+
+static PEXRC_ROOT: LazyLock<Result<CacheRoot, Cow<'static, str>>> = LazyLock::new(|| {
+    if let Some(pexrc_root) = env::var_os("PEXRC_ROOT") {
+        expand_home_dir(pexrc_root.into())
+    } else if let Some(pex_root) = env::var_os("PEX_ROOT") {
+        expand_home_dir(pex_root.into()).map(|pex_root| pex_root.join("rc").join("cache"))
     } else if let Some(cache_dir) = cache_dir("pexrc", ".pexrc") {
         Ok(cache_dir)
     } else {
@@ -61,7 +135,25 @@ static PEXRC_ROOT: LazyLock<Result<PathBuf, Cow<'static, str>>> = LazyLock::new(
             dir could not be determined and the user's home directory could not be determined.",
         ))
     }
+    .and_then(ensure_writeable)
 });
+
+#[dtor(unsafe)]
+fn cleanup_tmp_cache_root() {
+    if let Some(Ok(CacheRoot::TempDir(temp_dir))) = LazyLock::get(&PEXRC_ROOT) {
+        if let Err(err) = fs::remove_dir_all(temp_dir.path()) {
+            warn!(
+                "Leaked temp pexrc cache root {dir}: {err}",
+                dir = temp_dir.path().display()
+            )
+        } else {
+            debug!(
+                "Removed temp pexrc cache root: {dir}",
+                dir = temp_dir.path().display()
+            )
+        }
+    }
+}
 
 pub enum CacheDir {
     Interpreter,
@@ -70,8 +162,8 @@ pub enum CacheDir {
 }
 
 impl CacheDir {
-    pub fn root() -> anyhow::Result<&'static Path> {
-        PEXRC_ROOT.as_deref().map_err(|err| anyhow!("{err}"))
+    pub fn root() -> anyhow::Result<&'static CacheRoot> {
+        PEXRC_ROOT.as_ref().map_err(|err| anyhow!("{err}"))
     }
 
     fn version(&self) -> &'static str {
@@ -95,10 +187,16 @@ impl CacheDir {
     }
 }
 
-pub fn read_lock() -> Result<std::fs::File, Cow<'static, str>> {
-    let root = PEXRC_ROOT.as_deref().map_err(|err| err.clone())?;
-    std::fs::create_dir_all(root).map_err(|_| Cow::Borrowed("Failed to create PEXRC_ROOT dir."))?;
-    let lock = std::fs::File::create(root.join(".lck"))
+pub fn read_lock() -> Result<fs::File, Cow<'static, str>> {
+    let root = match PEXRC_ROOT.as_ref().map_err(|err| err.clone())? {
+        CacheRoot::Dir(root) => {
+            fs::create_dir_all(root)
+                .map_err(|_| Cow::Borrowed("Failed to create PEXRC_ROOT dir."))?;
+            root
+        }
+        CacheRoot::TempDir(root) => root.path(),
+    };
+    let lock = fs::File::create(root.join(".lck"))
         .map_err(|_| Cow::Borrowed("Failed to open PEXRC_ROOT read lock."))?;
     lock.lock_shared()
         .map_err(|_| Cow::Borrowed("Failed to obtain PEXRC_ROOT read lock."))?;

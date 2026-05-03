@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::{env, mem};
 
 use anyhow::{anyhow, bail};
-use cache::{CacheDir, HashOptions, Key, atomic_dir};
+use cache::{CacheDir, CacheRoot, HashOptions, Key, atomic_dir};
 use fs_err as fs;
 use interpreter::SearchPath;
 use itertools::Itertools;
@@ -89,10 +89,6 @@ pub fn boot(
     pex: impl AsRef<Path>,
     argv: Vec<String>,
 ) -> anyhow::Result<i32> {
-    let lock = match cache::read_lock() {
-        Ok(lock) => lock,
-        Err(err) => bail!("Failed to obtain PEXRC cache read lock: {err}"),
-    };
     #[cfg(feature = "tools")]
     if let Ok(tools) = env::var("PEX_TOOLS")
         && tools == "1"
@@ -103,13 +99,23 @@ pub fn boot(
         }
         std::process::exit(0);
     }
+    logging::init_default()?;
+    let lock = match cache::read_lock() {
+        Ok(lock) => lock,
+        Err(err) => bail!("Failed to obtain PEXRC cache read lock: {err}"),
+    };
     let mut command = prepare_boot(python, python_args, pex, argv)?;
     info!(
         "Booting with {exe} {args}",
         exe = command.get_program().to_string_lossy(),
         args = command.get_args().map(OsStr::to_string_lossy).join(" ")
     );
-    Ok(platform::exec(&mut command, &[lock])?)
+    if let Ok(CacheRoot::TempDir(temp_dir)) = CacheDir::root() {
+        command.env("PEXRC_ROOT", temp_dir.path());
+        Ok(platform::spawn(&mut command)?)
+    } else {
+        Ok(platform::exec(&mut command, &[lock])?)
+    }
 }
 
 fn prepare_boot(
@@ -118,7 +124,6 @@ fn prepare_boot(
     pex: impl AsRef<Path>,
     argv: Vec<String>,
 ) -> anyhow::Result<Command> {
-    logging::init_default()?;
     let venv = prepare_venv(
         python,
         pex.as_ref(),
@@ -134,6 +139,7 @@ fn prepare_boot(
 }
 
 pub fn mount(python: impl AsRef<Path>, pex: impl AsRef<Path>) -> anyhow::Result<PathBuf> {
+    logging::init_default()?;
     match cache::read_lock() {
         Ok(lock) => {
             // N.B.: We're being called from a Python program that lives longer than us via an
@@ -144,8 +150,6 @@ pub fn mount(python: impl AsRef<Path>, pex: impl AsRef<Path>) -> anyhow::Result<
         }
         Err(err) => bail!("Failed to obtain PEXRC cache read lock: {err}"),
     };
-
-    logging::init_default()?;
     prepare_venv(
         python,
         pex.as_ref(),

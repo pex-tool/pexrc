@@ -35,10 +35,5 @@ pub fn path_as_bytes(path: &Path) -> io::Result<&[u8]> {
 }
 
 pub fn exec(command: &mut Command, _files_to_keep_open: &[File]) -> io::Result<i32> {
-    let mut child = command.spawn()?;
-    child.wait().map(|exit_status| {
-        exit_status
-            .code()
-            .unwrap_or_else(|| if exit_status.success() { 0 } else { 1 })
-    })
+    crate::spawn(command)
 }
