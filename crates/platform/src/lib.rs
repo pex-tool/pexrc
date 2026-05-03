@@ -15,6 +15,7 @@ mod windows;
 
 use std::ffi::OsStr;
 use std::path::Path;
+use std::process::Command;
 use std::{fs, io};
 
 pub enum Perms {
@@ -72,4 +73,13 @@ pub fn link_or_copy(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> io::Result<
                 ),
             )
         })
+}
+
+pub fn spawn(command: &mut Command) -> io::Result<i32> {
+    let mut child = command.spawn()?;
+    child.wait().map(|exit_status| {
+        exit_status
+            .code()
+            .unwrap_or_else(|| if exit_status.success() { 0 } else { 1 })
+    })
 }

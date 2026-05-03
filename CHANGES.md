@@ -1,5 +1,13 @@
 # Release Notes
 
+## 0.10.0
+
+This release adds support for `PEX_ROOT`. When `PEXRC_ROOT` is set in the environment, it is still
+preferred, but if not, a subdir of `PEX_ROOT` will be used to house the pexrc cache.
+
+Additionally, if the final calculated pexrc cache root is not writable, a temporary cache dir will
+be established and a warning issued just as is the case for Pex.
+
 ## 0.9.2
 
 This release fixes injected `--sh-boot` PEXes to have the same interpreter selection logic as PEX.
