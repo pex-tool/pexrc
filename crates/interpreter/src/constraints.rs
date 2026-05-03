@@ -102,11 +102,6 @@ pub struct InterpreterConstraint {
 }
 
 impl InterpreterConstraint {
-    const ANY: Self = Self {
-        implementation: None,
-        version_specifiers: None,
-    };
-
     pub fn exact_version(interpreter: &Interpreter) -> Self {
         let python_version = Version::new(
             [
@@ -315,80 +310,40 @@ impl InterpreterConstraints {
     fn calculate_compatible_binary_specs(
         &self,
         selection_strategy: SelectionStrategy,
+        preferred_interpreter: Option<&Interpreter>,
     ) -> IndexSet<PythonBinarySpec> {
-        let versions = match selection_strategy {
-            SelectionStrategy::Oldest => &SUPPORTED_VERSIONS,
-            SelectionStrategy::Newest => &SUPPORTED_VERSIONS_NEWEST_FIRST,
-        };
-        let constraints = if self.0.is_empty() {
-            &[InterpreterConstraint::ANY]
-        } else {
-            self.0.as_slice()
-        };
         let mut binary_specs: IndexSet<PythonBinarySpec> = IndexSet::new();
-        for (major, minor) in versions.iter() {
-            for constraint in constraints {
-                if constraint.contains_version(*major, *minor) {
-                    match constraint.implementation.as_ref() {
-                        None => {
-                            binary_specs.insert(PythonBinarySpec {
-                                name: "python",
-                                major: *major,
-                                minor: *minor,
-                                suffix: None,
-                            });
-                            if (*major, *minor) >= (3, 13) {
-                                binary_specs.insert(PythonBinarySpec {
-                                    name: "python",
-                                    major: *major,
-                                    minor: *minor,
-                                    suffix: Some("t"),
-                                });
-                            }
-                            binary_specs.insert(PythonBinarySpec {
-                                name: "pypy",
-                                major: *major,
-                                minor: *minor,
-                                suffix: None,
-                            });
-                        }
-                        Some(implementation) => match implementation {
-                            InterpreterImplementation::CPython
-                            | InterpreterImplementation::CPythonGil => {
-                                binary_specs.insert(PythonBinarySpec {
-                                    name: "python",
-                                    major: *major,
-                                    minor: *minor,
-                                    suffix: None,
-                                });
-                            }
-                            InterpreterImplementation::CPythonFreeThreaded => {
-                                if (*major, *minor) >= (3, 13) {
-                                    binary_specs.insert(PythonBinarySpec {
-                                        name: "python",
-                                        major: *major,
-                                        minor: *minor,
-                                        suffix: Some("t"),
-                                    });
-                                } else {
-                                    debug!(
-                                        "Ignoring {constraint} for CPython {major}.{minor} since \
-                                        free-threaded CPython only exists for >=3.13."
-                                    );
-                                }
-                            }
-                            InterpreterImplementation::PyPy => {
-                                binary_specs.insert(PythonBinarySpec {
-                                    name: "pypy",
-                                    major: *major,
-                                    minor: *minor,
-                                    suffix: None,
-                                });
-                            }
-                        },
+        if let Some(interpreter) = preferred_interpreter
+            && self.contains(interpreter)
+        {
+            let implementation = InterpreterImplementation::of(interpreter);
+            insert_specs(
+                &mut binary_specs,
+                implementation.as_ref(),
+                interpreter.raw().version.major,
+                interpreter.raw().version.minor,
+            );
+        }
+        if !self.0.is_empty() {
+            let versions = match selection_strategy {
+                SelectionStrategy::Oldest => &SUPPORTED_VERSIONS,
+                SelectionStrategy::Newest => &SUPPORTED_VERSIONS_NEWEST_FIRST,
+            };
+            for (major, minor) in versions.iter() {
+                for constraint in &self.0 {
+                    if constraint.contains_version(*major, *minor) {
+                        insert_specs(
+                            &mut binary_specs,
+                            constraint.implementation.as_ref(),
+                            *major,
+                            *minor,
+                        );
                     }
                 }
             }
+        }
+        for (major, minor) in SUPPORTED_VERSIONS_NEWEST_FIRST.iter() {
+            insert_specs(&mut binary_specs, None, *major, *minor);
         }
         binary_specs
     }
@@ -396,8 +351,10 @@ impl InterpreterConstraints {
     pub fn calculate_compatible_binary_names(
         &self,
         selection_strategy: SelectionStrategy,
+        preferred_interpreter: Option<&Interpreter>,
     ) -> IndexMap<OsString, Option<VersionSpec>> {
-        let binary_specs = self.calculate_compatible_binary_specs(selection_strategy);
+        let binary_specs =
+            self.calculate_compatible_binary_specs(selection_strategy, preferred_interpreter);
         let mut binary_names: IndexMap<OsString, Option<VersionSpec>> = IndexMap::new();
         for binary_spec in &binary_specs {
             binary_names.insert(
@@ -441,7 +398,7 @@ impl InterpreterConstraints {
         let binary_names = if let Some(python) = python {
             vec![python]
         } else {
-            self.calculate_compatible_binary_names(selection_strategy)
+            self.calculate_compatible_binary_names(selection_strategy, None)
                 .into_keys()
                 .collect()
         };
@@ -453,6 +410,71 @@ impl InterpreterConstraints {
             binary_paths: None,
             seen: HashSet::new(),
         })
+    }
+}
+
+fn insert_specs(
+    binary_specs: &mut IndexSet<PythonBinarySpec>,
+    implementation: Option<&InterpreterImplementation>,
+    major: u8,
+    minor: u8,
+) {
+    match implementation {
+        None => {
+            binary_specs.insert(PythonBinarySpec {
+                name: "python",
+                major,
+                minor,
+                suffix: None,
+            });
+            if (major, minor) >= (3, 13) {
+                binary_specs.insert(PythonBinarySpec {
+                    name: "python",
+                    major,
+                    minor,
+                    suffix: Some("t"),
+                });
+            }
+            binary_specs.insert(PythonBinarySpec {
+                name: "pypy",
+                major,
+                minor,
+                suffix: None,
+            });
+        }
+        Some(implementation) => match implementation {
+            InterpreterImplementation::CPython | InterpreterImplementation::CPythonGil => {
+                binary_specs.insert(PythonBinarySpec {
+                    name: "python",
+                    major,
+                    minor,
+                    suffix: None,
+                });
+            }
+            InterpreterImplementation::CPythonFreeThreaded => {
+                if (major, minor) >= (3, 13) {
+                    binary_specs.insert(PythonBinarySpec {
+                        name: "python",
+                        major,
+                        minor,
+                        suffix: Some("t"),
+                    });
+                } else {
+                    debug!(
+                        "Ignoring free-threaded constraint for CPython {major}.{minor} since \
+                        free-threaded CPython only exists for >=3.13."
+                    );
+                }
+            }
+            InterpreterImplementation::PyPy => {
+                binary_specs.insert(PythonBinarySpec {
+                    name: "pypy",
+                    major,
+                    minor,
+                    suffix: None,
+                });
+            }
+        },
     }
 }
 
@@ -619,58 +641,67 @@ mod tests {
         unsafe { OsStr::from_encoded_bytes_unchecked(value.as_bytes()) }
     }
 
+    // N.B.: As time advances, the supported set by PEXrc will steadily add python3.16, etc to
+    // the top of this list per https://peps.python.org/pep-0602/ (c.f. code above); so we just
+    // check a known run as of this test writing.
+    const EXPECTED_PER_PEXRC_MAJOR_MINOR: &[&str] = &[
+        "python3.15",
+        "python3.15t",
+        "pypy3.15",
+        "python3.14",
+        "python3.14t",
+        "pypy3.14",
+        "python3.13",
+        "python3.13t",
+        "pypy3.13",
+        "python3.12",
+        "pypy3.12",
+        "python3.11",
+        "pypy3.11",
+        "python3.10",
+        "pypy3.10",
+        "python3.9",
+        "pypy3.9",
+        "python3.8",
+        "pypy3.8",
+        "python3.7",
+        "pypy3.7",
+        "python3.6",
+        "pypy3.6",
+        "python3.5",
+        "pypy3.5",
+        "python2.7",
+        "pypy2.7",
+    ];
+
+    const EXPECTED_PER_PEXRC_REST: &[&str] =
+        &["python3", "pypy3", "python2", "pypy2", "python", "pypy"];
+
     #[test]
     fn test_interpreter_constraints_binary_names_all_default_order() {
         let ics = InterpreterConstraints::try_from::<&str>(&[]).unwrap();
         let binary_names = ics
-            .calculate_compatible_binary_names(SelectionStrategy::Oldest)
+            .calculate_compatible_binary_names(SelectionStrategy::Oldest, None)
             .into_keys()
             .collect::<IndexSet<_>>();
 
-        assert_eq!(&["python2.7", "pypy2.7"], &binary_names[0..2]);
+        let major_minor_start = binary_names.len()
+            - EXPECTED_PER_PEXRC_REST.len()
+            - EXPECTED_PER_PEXRC_MAJOR_MINOR.len();
+        let rest_start = binary_names.len() - EXPECTED_PER_PEXRC_REST.len();
 
-        assert!(
-            binary_names.get_index_of(os_str("pypy2.7"))
-                < binary_names.get_index_of(os_str("python3.14"))
-        );
-        assert!(
-            binary_names.get_index_of(os_str("python3.14"))
-                < binary_names.get_index_of(os_str("pypy3.14"))
-        );
-        assert!(
-            binary_names.get_index_of(os_str("pypy3.14"))
-                < binary_names.get_index_of(os_str("python3.15"))
-        );
-        assert!(
-            binary_names.get_index_of(os_str("python3.15"))
-                < binary_names.get_index_of(os_str("pypy3.15"))
-        );
         assert_eq!(
-            &["python2", "pypy2", "python3", "pypy3", "python", "pypy"],
-            &binary_names[binary_names.len() - 6..]
+            EXPECTED_PER_PEXRC_MAJOR_MINOR,
+            &binary_names[major_minor_start..rest_start]
         );
-
-        assert!(!binary_names.contains(os_str("python2.6")));
-        assert!(!binary_names.contains(os_str("python2.8")));
-        assert!(!binary_names.contains(os_str("python3.0")));
-        assert!(!binary_names.contains(os_str("python3.1")));
-        assert!(!binary_names.contains(os_str("python3.2")));
-        assert!(!binary_names.contains(os_str("python3.3")));
-        assert!(!binary_names.contains(os_str("python3.4")));
-        assert!(binary_names.contains(os_str("python3.5")));
-        assert!(binary_names.contains(os_str("python3.6")));
-
-        assert!(!binary_names.contains(os_str("python3.12t")));
-        assert!(binary_names.contains(os_str("python3.13t")));
-        assert!(binary_names.contains(os_str("python3.14t")));
-        assert!(binary_names.contains(os_str("python3.15t")));
+        assert_eq!(EXPECTED_PER_PEXRC_REST, &binary_names[rest_start..]);
     }
 
     #[test]
     fn test_interpreter_constraints_binary_names_all_newest_first() {
         let ics = InterpreterConstraints::try_from::<&str>(&[]).unwrap();
         let binary_names = ics
-            .calculate_compatible_binary_names(SelectionStrategy::Newest)
+            .calculate_compatible_binary_names(SelectionStrategy::Newest, None)
             .into_keys()
             .collect::<IndexSet<_>>();
 
@@ -716,43 +747,62 @@ mod tests {
         ])
         .unwrap();
 
+        let binary_names = ics
+            .calculate_compatible_binary_names(SelectionStrategy::Newest, None)
+            .into_keys()
+            .collect::<Vec<_>>();
+
+        let expected_per_ics = &[
+            "python3.15t",
+            "python3.14t",
+            "python3.13",
+            "python3.12",
+            "pypy3.11",
+            "pypy3.10",
+            "pypy3.9",
+        ];
+
+        let expexcted_per_pexrc_major_minor = EXPECTED_PER_PEXRC_MAJOR_MINOR
+            .into_iter()
+            .filter(|name| !expected_per_ics.contains(name))
+            .copied()
+            .collect::<Vec<_>>();
+
+        let major_minor_start = binary_names.len()
+            - EXPECTED_PER_PEXRC_REST.len()
+            - expexcted_per_pexrc_major_minor.len();
+        let rest_start = binary_names.len() - EXPECTED_PER_PEXRC_REST.len();
+
+        assert_eq!(expected_per_ics, &binary_names[..expected_per_ics.len()]);
         assert_eq!(
-            &[
-                "python3.15t",
-                "python3.14t",
-                "python3.13",
-                "python3.12",
-                "pypy3.11",
-                "pypy3.10",
-                "pypy3.9",
-                "python3",
-                "pypy3",
-                "python",
-                "pypy",
-            ],
-            ics.calculate_compatible_binary_names(SelectionStrategy::Newest)
-                .into_keys()
-                .collect::<Vec<_>>()
-                .as_slice()
+            expexcted_per_pexrc_major_minor,
+            &binary_names[major_minor_start..rest_start]
         );
+        assert_eq!(EXPECTED_PER_PEXRC_REST, &binary_names[rest_start..]);
+
+        let binary_names = ics
+            .calculate_compatible_binary_names(SelectionStrategy::Oldest, None)
+            .into_keys()
+            .collect::<Vec<_>>();
+
+        let expected_per_ics = &[
+            "pypy3.9",
+            "pypy3.10",
+            "pypy3.11",
+            "python3.12",
+            "python3.13",
+            "python3.14t",
+            "python3.15t",
+        ];
+        let expected_shared = &["pypy3", "python3", "python2", "pypy2", "pypy", "python"];
+
+        let rest_start = binary_names.len() - expected_shared.len();
+
+        assert_eq!(expected_per_ics, &binary_names[..expected_per_ics.len()]);
         assert_eq!(
-            &[
-                "pypy3.9",
-                "pypy3.10",
-                "pypy3.11",
-                "python3.12",
-                "python3.13",
-                "python3.14t",
-                "python3.15t",
-                "pypy3",
-                "python3",
-                "pypy",
-                "python",
-            ],
-            ics.calculate_compatible_binary_names(SelectionStrategy::Oldest)
-                .into_keys()
-                .collect::<Vec<_>>()
-                .as_slice()
+            expexcted_per_pexrc_major_minor,
+            &binary_names[major_minor_start..rest_start]
         );
+        assert_eq!(expected_shared, &binary_names[rest_start..]);
     }
 }

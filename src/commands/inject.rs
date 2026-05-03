@@ -15,12 +15,13 @@ use enumset::EnumSet;
 use fs_err as fs;
 use fs_err::File;
 use indexmap::IndexSet;
+use interpreter::Interpreter;
 use log::info;
 use owo_colors::OwoColorize;
 use pex::{Layout, Pex, WheelFile, WheelOptions};
 use platform::mark_executable;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
-use scripts::Scripts;
+use scripts::{IdentifyInterpreter, Scripts};
 use target::SimplifiedTarget;
 use tempfile::NamedTempFile;
 use zip::write::SimpleFileOptions;
@@ -33,9 +34,10 @@ pub fn inject_all(
     options: &WheelOptions,
     clibs: &[&Binary],
     proxies: &[&Binary],
+    preferred_python: Option<&Path>,
 ) -> anyhow::Result<()> {
     for pex in pexes {
-        inject(&pex, options, clibs, proxies)?
+        inject(&pex, options, clibs, proxies, preferred_python)?
     }
     Ok(())
 }
@@ -148,14 +150,25 @@ fn inject(
     options: &WheelOptions,
     clibs: &[&Binary],
     proxies: &[&Binary],
+    preferred_python: Option<&Path>,
 ) -> anyhow::Result<()> {
     let pex = Pex::load(pex)?;
     let required_targets = RequiredTargets::for_pex(&pex)?;
     let clibs = required_targets.select_binaries(clibs)?;
     let proxies = required_targets.select_binaries(proxies)?;
+    let preferred_interpreter = if let Some(python) = preferred_python {
+        let identification_script = IdentifyInterpreter::read(&mut Scripts::Embedded)?;
+        Some(Interpreter::load(python, &identification_script)?)
+    } else {
+        None
+    };
     match pex.layout {
-        Layout::Loose | Layout::Packed => inject_pex_dir(pex, options, clibs, proxies),
-        Layout::ZipApp => inject_pex_zip(pex, options, clibs, proxies),
+        Layout::Loose | Layout::Packed => {
+            inject_pex_dir(pex, options, clibs, proxies, preferred_interpreter.as_ref())
+        }
+        Layout::ZipApp => {
+            inject_pex_zip(pex, options, clibs, proxies, preferred_interpreter.as_ref())
+        }
     }
 }
 
@@ -164,12 +177,16 @@ fn inject_pex_dir(
     options: &WheelOptions,
     clibs: IndexSet<&Binary>,
     proxies: IndexSet<&Binary>,
+    preferred_interpreter: Option<&Interpreter>,
 ) -> anyhow::Result<()> {
     // Make sure we have a shebang early. This partially validates the pex to inject is a valid one
     // before expending too much effort copying files below.
-    let shebang = if let Some(sh_boot_shebang) =
-        sh_boot_shebang(pex.path, pex.info.raw().venv_hermetic_scripts, true)?
-    {
+    let shebang = if let Some(sh_boot_shebang) = sh_boot_shebang(
+        &pex,
+        pex.info.raw().venv_hermetic_scripts,
+        true,
+        preferred_interpreter,
+    )? {
         sh_boot_shebang
     } else {
         let original_main = pex.path.join("__main__.py");
@@ -297,13 +314,17 @@ fn inject_pex_zip(
     options: &WheelOptions,
     clibs: IndexSet<&Binary>,
     proxies: IndexSet<&Binary>,
+    preferred_interpreter: Option<&Interpreter>,
 ) -> anyhow::Result<()> {
     let pex_info = pex.info.raw();
     let zip_read_fp = File::open(pex.path)?;
     let mut src_zip = ZipArchive::new(&zip_read_fp)?;
-    let prefix = if let Some(sh_boot_shebang) =
-        sh_boot_shebang(pex.path, pex_info.venv_hermetic_scripts, false)?
-    {
+    let prefix = if let Some(sh_boot_shebang) = sh_boot_shebang(
+        &pex,
+        pex_info.venv_hermetic_scripts,
+        false,
+        preferred_interpreter,
+    )? {
         Some(sh_boot_shebang.into_bytes())
     } else {
         let first_entry = src_zip.by_index(0)?;

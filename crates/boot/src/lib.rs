@@ -11,7 +11,13 @@ use cache::CacheDir;
 use const_format::str_split;
 use fs_err as fs;
 use fs_err::File;
-use interpreter::{InterpreterConstraints, SearchPath, SelectionStrategy, VersionSpec};
+use interpreter::{
+    Interpreter,
+    InterpreterConstraints,
+    SearchPath,
+    SelectionStrategy,
+    VersionSpec,
+};
 use itertools::Itertools;
 use pex::{Pex, PexPath};
 use pexrs::venv_dir;
@@ -23,12 +29,11 @@ const SH_BOOT_SHEBANG: &[u8] = b"#!/bin/sh\n";
 const SH_BOOT_PARTS: [&str; 4] = str_split!(include_str!("boot.sh"), "# --- split --- #\n");
 
 pub fn sh_boot_shebang(
-    pex: &Path,
+    pex: &Pex,
     hermetic: bool,
     escaped: bool,
+    preferred_interpreter: Option<&Interpreter>,
 ) -> anyhow::Result<Option<String>> {
-    let pex = Pex::load(pex)?;
-
     let mut sh_boot_shebang_buffer: [_; SH_BOOT_SHEBANG.len()] = [0; SH_BOOT_SHEBANG.len()];
     let mut pex_fp = File::open(pex.file())?;
     match pex_fp.read_exact(&mut sh_boot_shebang_buffer) {
@@ -46,7 +51,7 @@ pub fn sh_boot_shebang(
     let pex_path = PexPath::from_pex_info(&pex.info, false);
     let additional_pexes = pex_path.load_pexes()?;
 
-    let venv_dir = venv_dir(None, &pex, &SearchPath::EMPTY, &additional_pexes)?;
+    let venv_dir = venv_dir(None, pex, &SearchPath::EMPTY, &additional_pexes)?;
     let venv_relpath = venv_dir.strip_prefix(CacheDir::root()?)?;
 
     let interpreter_constraints =
@@ -58,7 +63,7 @@ pub fn sh_boot_shebang(
         .unwrap_or(pex::InterpreterSelectionStrategy::Oldest)
         .into();
     let pythons = interpreter_constraints
-        .calculate_compatible_binary_names(selection_strategy)
+        .calculate_compatible_binary_names(selection_strategy, preferred_interpreter)
         .into_iter()
         .map(|(binary_name, version_spec)| {
             binary_name

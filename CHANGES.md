@@ -1,5 +1,9 @@
 # Release Notes
 
+## 0.9.2
+
+This release fixes injected `--sh-boot` PEXes to have the same interpreter selection logic as PEX.
+
 ## 0.9.1
 
 This release fixes injected PEXes to properly resolve from legacy PEXes on the PEX_PATH at runtime

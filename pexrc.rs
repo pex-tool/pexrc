@@ -116,6 +116,9 @@ enum Commands {
         #[arg(action=ArgAction::Append)]
         targets: Vec<SimplifiedTarget>,
 
+        #[arg(short = 'p', long)]
+        preferred_python: Option<PathBuf>,
+
         #[arg(value_name = "PEX", required = true)]
         pexes: Vec<String>,
     },
@@ -175,6 +178,7 @@ fn main() -> anyhow::Result<()> {
             compression_method,
             compression_level,
             targets,
+            preferred_python,
             pexes,
         } => {
             let (clibs, proxies) = if !targets.is_empty() {
@@ -211,6 +215,7 @@ fn main() -> anyhow::Result<()> {
                 &WheelOptions::new(compression_method.into(), compression_level, None),
                 clibs.as_slice(),
                 proxies.as_slice(),
+                preferred_python.as_deref(),
             )
         }
         Commands::Info => info::display(),

@@ -83,7 +83,7 @@ echo >&2 "Failed to find any of these python binaries on the PATH:"
 for python in ${PYTHONS} ; do
     echo >&2 "${python}"
 done
-echo >&2 "Either adjust your \$PATH which is currently:"
+echo >&2 "Either adjust your PATH, which is currently:"
 echo >&2 "${PATH}"
 echo >&2 "Or else install an appropriate Python that provides one of the binaries in this list."
 exit 1
