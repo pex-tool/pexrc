@@ -5,7 +5,7 @@ cargo-features = ["profile-rustflags"]
 
 [package]
 name = "pexrc"
-version = "0.10.0"
+version = "0.11.0"
 edition = { workspace = true }
 publish = false
 
@@ -193,6 +193,7 @@ serde_json = "1.0"
 sha2 = "0.11"
 shell-quote = "0.7"
 strum = { version = "0.28", features = ["strum_macros"] }
+# N.B.: We let strum dictate the strum_macros version.
 strum_macros = "*"
 tar = "0.4"
 target-lexicon = "0.13"
@@ -201,6 +202,9 @@ textwrap = "0.16"
 time = "0.3"
 toml = "1.1"
 url = "2.5"
+# N.B.: We take whatever version is supported by pep440_rs - it uses an optional dependency but
+# does not have a feature to activate the dep.
+version-ranges = "*"
 walkdir = "2.5"
 which = "8.0"
 xz2 = "0.1"

@@ -30,7 +30,7 @@ use walkdir::{DirEntry, WalkDir};
 use zip::ZipArchive;
 
 use crate::wheel::{MetadataReader, WheelFile, WheelMetadata};
-use crate::{InterpreterSelectionStrategy, PexInfo};
+use crate::{DependencyConfiguration, InterpreterSelectionStrategy, PexInfo};
 
 #[derive(AsRefStr, EnumString)]
 pub enum Layout {
@@ -254,11 +254,15 @@ impl<'a> Pex<'a> {
             Layout::ZipApp => Ok(Scripts::Zipped(ZipArchive::new(File::open(&path)?)?)),
         }
     }
+    pub fn dependency_configuration(&self) -> anyhow::Result<DependencyConfiguration> {
+        DependencyConfiguration::load(&self.info)
+    }
 
     #[time("debug", "Pex.{}")]
     fn resolve_wheels(
         &'a self,
         interpreter: &Interpreter,
+        dependency_configuration: &DependencyConfiguration,
         collect_extra_metadata: Option<CollectWheelMetadata<'a>>,
     ) -> anyhow::Result<IndexMap<&'a str, ResolvedWheel<'a>>> {
         let supported_tags: HashMap<Tag, usize> = interpreter
@@ -334,14 +338,25 @@ impl<'a> Pex<'a> {
             .map(|requirement| {
                 Requirement::from_str(requirement).map(|requirement| (requirement, 0))
             })
+            .filter_map(|result| match result {
+                Ok((requirement, extras_index)) => {
+                    if dependency_configuration.excluded(&requirement) {
+                        None
+                    } else {
+                        Some(Ok((requirement, extras_index)))
+                    }
+                }
+                Err(err) => Some(Err(err)),
+            })
             .collect::<Result<_, _>>()?;
+        let marker_env = &interpreter.raw().marker_env;
         while let Some((requirement, extras_index)) = to_resolve.pop_front() {
             if resolved_by_project_name.contains_key(&requirement.name) {
                 continue;
             }
             if !requirement
                 .marker
-                .evaluate(&interpreter.raw().marker_env, &indexed_extras[extras_index])
+                .evaluate(marker_env, &indexed_extras[extras_index])
             {
                 continue;
             }
@@ -444,7 +459,15 @@ impl<'a> Pex<'a> {
                     },
                 );
                 for req in requires_dists {
-                    to_resolve.push_back((req, extras_index))
+                    if dependency_configuration.excluded(&req) {
+                        continue;
+                    }
+                    to_resolve.push_back((
+                        dependency_configuration
+                            .overridden(&req, interpreter, &indexed_extras[extras_index])?
+                            .unwrap_or(req),
+                        extras_index,
+                    ))
                 }
                 break;
             }
@@ -460,6 +483,7 @@ impl<'a> Pex<'a> {
         identification_script: &IdentifyInterpreter,
         interpreter_constraints: &InterpreterConstraints,
         search_path: SearchPath,
+        dependency_configuration: &DependencyConfiguration,
         collect_extra_metadata: Option<CollectWheelMetadata<'a>>,
     ) -> anyhow::Result<impl ParallelIterator<Item = Result<ResolvedWheels<'a>, ResolveError>>>
     {
@@ -490,7 +514,11 @@ impl<'a> Pex<'a> {
             )
             .filter(|interpreter| interpreter_constraints.contains(interpreter))
             .map(move |interpreter| {
-                match self.resolve_wheels(&interpreter, collect_extra_metadata.clone()) {
+                match self.resolve_wheels(
+                    &interpreter,
+                    dependency_configuration,
+                    collect_extra_metadata.clone(),
+                ) {
                     Ok(selected_wheels) => Ok(ResolvedWheels {
                         interpreter,
                         wheels: selected_wheels,
@@ -516,18 +544,27 @@ impl<'a> Pex<'a> {
 
         let interpreter_constraints =
             InterpreterConstraints::try_from(&self.info.raw().interpreter_constraints)?;
+        let dependency_configuration = self.dependency_configuration()?;
         let mut errors = Vec::new();
         if let Some(python_exe) = python_exe
             && let Ok(interpreter) = Interpreter::load(python_exe, &identification_script)
             && interpreter_constraints.contains(&interpreter)
             && search_path.contains(python_exe)
         {
-            match self.resolve_wheels(&interpreter, collect_extra_metadata.clone()) {
+            match self.resolve_wheels(
+                &interpreter,
+                &dependency_configuration,
+                collect_extra_metadata.clone(),
+            ) {
                 Ok(wheels) => {
                     let additional_wheels = additional_pexes
                         .map(|pex| {
-                            pex.resolve_wheels(&interpreter, collect_extra_metadata.clone())
-                                .map(|wheels| (pex, wheels))
+                            pex.resolve_wheels(
+                                &interpreter,
+                                &dependency_configuration,
+                                collect_extra_metadata.clone(),
+                            )
+                            .map(|wheels| (pex, wheels))
                         })
                         .collect::<anyhow::Result<Vec<_>>>()?;
                     return Ok(Resolve {
@@ -545,6 +582,7 @@ impl<'a> Pex<'a> {
             &identification_script,
             &interpreter_constraints,
             search_path,
+            &dependency_configuration,
             collect_extra_metadata.clone(),
         )?;
         let errors: Arc<Mutex<Vec<(PathBuf, anyhow::Error)>>> = Arc::new(Mutex::new(errors));
@@ -570,8 +608,12 @@ impl<'a> Pex<'a> {
         {
             let additional_wheels = additional_pexes
                 .map(|pex| {
-                    pex.resolve_wheels(&interpreter, collect_extra_metadata.clone())
-                        .map(|wheels| (pex, wheels))
+                    pex.resolve_wheels(
+                        &interpreter,
+                        &dependency_configuration,
+                        collect_extra_metadata.clone(),
+                    )
+                    .map(|wheels| (pex, wheels))
                 })
                 .collect::<anyhow::Result<Vec<_>>>()?;
             return Ok(Resolve {
@@ -772,11 +814,13 @@ mod tests {
     use fs_err::File;
     use indexmap::{IndexMap, IndexSet, indexset};
     use interpreter::{Interpreter, SearchPath};
+    use pep440_rs::VersionSpecifiers;
     use pep508_rs::{Requirement, VersionOrUrl};
     use rstest::{fixture, rstest};
     use scripts::{IdentifyInterpreter, Scripts};
     use testing::{embedded_scripts, interpreter_identification_script, python_exe, tmp_dir};
     use url::Url;
+    use version_ranges::Ranges;
     use zip::write::SimpleFileOptions;
     use zip::{CompressionMethod, ZipWriter};
 
@@ -885,7 +929,10 @@ mod tests {
         let pex = Pex::load(&requests_pex).unwrap();
         let interpreter =
             Interpreter::load(python_exe, &interpreter_identification_script).unwrap();
-        let wheels = pex.resolve_wheels(&interpreter, None).unwrap();
+        let dependency_configuration = pex.dependency_configuration().unwrap();
+        let wheels = pex
+            .resolve_wheels(&interpreter, &dependency_configuration, None)
+            .unwrap();
         assert_wheels(wheels, EXPECTED_REQUESTS_PEX_WHEELS);
     }
 
@@ -904,5 +951,16 @@ mod tests {
         assert_eq!(1, resolve.additional_wheels.len());
         let (_, additional_wheels) = resolve.additional_wheels.into_iter().next().unwrap();
         assert_wheels(additional_wheels, EXPECTED_ANSICOLORS_PEX_WHEELS);
+    }
+
+    #[test]
+    fn test_ranges() {
+        let range1 = Ranges::from(VersionSpecifiers::from_str(">=3.9,<3.15").unwrap());
+        let range2 = Ranges::from(VersionSpecifiers::from_str(">=3.10,<3.16").unwrap());
+        let range3 = Ranges::from(VersionSpecifiers::from_str(">=3.10,<3.14").unwrap());
+        assert!(range3.subset_of(&range1));
+        assert!(range3.subset_of(&range2));
+        assert!(!range1.subset_of(&range2));
+        assert!(!range2.subset_of(&range1));
     }
 }
