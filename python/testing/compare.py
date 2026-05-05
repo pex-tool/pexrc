@@ -105,6 +105,7 @@ def compare(
     test_result=None,  # type: Optional[Callable[[ProcessResult, bool], None]]
     compare_results=None,  # type: Optional[Callable[[ProcessResult, ProcessResult], None]]
     injected_pex=None,  # type: Optional[str]
+    assert_faster=True,  # type: bool
 ):
     # type: (...) -> str
 
@@ -123,7 +124,7 @@ def compare(
         file=sys.stderr,
     )
 
-    assert injected_result.elapsed < traditional_result.elapsed, (
+    assert not assert_faster or (injected_result.elapsed < traditional_result.elapsed), (
         "An injected PEXRC ({injected_elapsed:.5}ms) should always run faster than a traditional "
         "PEX ({traditional_elapsed:.5}ms).".format(
             injected_elapsed=injected_result.elapsed, traditional_elapsed=traditional_result.elapsed

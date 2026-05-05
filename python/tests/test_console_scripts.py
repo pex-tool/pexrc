@@ -7,6 +7,7 @@ import os.path
 import subprocess
 from textwrap import dedent
 
+from testing import IS_MAC
 from testing.compare import compare
 
 TYPE_CHECKING = False
@@ -67,4 +68,7 @@ def test_venv_console_scripts(
         args=["Moo!"],
         env=dict(PEXRC_ROOT=pexrc_root),
         test_result=test_result,
+        # N.B.: Mac SIP causes this 1st run of the console script to be unavoidably slow.
+        # the conftest.py pexrc_root fixture for more details about this.
+        assert_faster=not IS_MAC,
     )
