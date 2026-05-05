@@ -59,13 +59,13 @@ def test_overrides_and_excludes(
                 """\
                 [build-system]
                 requires = ["setuptools"]
-                backend = "setuptools.build_meta"
+                build-backend = "setuptools.build_meta"
                 """
             )
         )
 
     wheels = os.path.join(str(tmpdir), "wheels")
-    subprocess.check_call(args=["pex3", "wheel", "-d", wheels, project])
+    subprocess.check_call(args=["pyproject-build", "--wheel", "-o", wheels, project])
 
     example_pex = os.path.join(str(tmpdir), "example.pex")
     subprocess.check_call(

@@ -9,6 +9,7 @@ package = false
 [dependency-groups]
 dev = [
     "ansicolors",
+    "build",
     "dev-cmd[old-pythons]; python_version >= '3.8'",
     "mypy",
     "pex",
