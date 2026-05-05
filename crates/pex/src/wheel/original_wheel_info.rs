@@ -28,7 +28,7 @@ impl DateTime {
 }
 
 #[derive(Deserialize)]
-pub(crate) struct ZipFileName<'a>(Cow<'a, str>);
+pub(crate) struct ZipFileName<'a>(#[serde(borrow)] Cow<'a, str>);
 
 impl<'a> ZipFileName<'a> {
     pub(crate) fn from(path: PathBuf) -> anyhow::Result<Self> {
