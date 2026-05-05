@@ -4,12 +4,14 @@
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
+use std::sync::LazyLock;
 
 use anyhow::{anyhow, bail};
 use indexmap::IndexSet;
 use interpreter::Interpreter;
 use pep440_rs::Version;
 use pep508_rs::{ExtraName, PackageName, Requirement, VersionOrUrl};
+use regex::{Regex, RegexBuilder};
 use url::Url;
 use version_ranges::Ranges;
 
@@ -25,6 +27,12 @@ pub struct DependencyConfiguration {
     excluded: HashMap<PackageName, ExcludeConstraint>,
     overridden: HashMap<PackageName, IndexSet<Requirement<Url>>>,
 }
+
+static OVERRIDE_REPLACE: LazyLock<Regex> = LazyLock::new(|| {
+    RegexBuilder::new(
+        r"^(?P<project>[A-Z0-9]|[A-Z0-9][A-Z0-9._-]*[A-Z0-9])\s*=\s*(?P<requirement>[A-Z0-9]|[A-Z0-9][A-Z0-9._-]*[A-Z0-9].*)$"
+    ).case_insensitive(true).build().expect("This is a valid regex.")
+});
 
 impl DependencyConfiguration {
     pub(crate) fn load(pex_info: &PexInfo) -> anyhow::Result<Self> {
@@ -50,12 +58,21 @@ impl DependencyConfiguration {
             .collect::<anyhow::Result<HashMap<_, _>>>()?;
 
         let mut overridden: HashMap<PackageName, IndexSet<Requirement<Url>>> = HashMap::new();
-        for requirement in &pex_info.raw().overridden {
-            let requirement = Requirement::from_str(requirement)?;
-            overridden
-                .entry(requirement.name.clone())
-                .or_default()
-                .insert(requirement);
+        for override_spec in &pex_info.raw().overridden {
+            let (name, requirement) = if let Some(captures) =
+                OVERRIDE_REPLACE.captures(override_spec)
+                && let Some(name) = captures.name("project")
+                && let Some(requirement) = captures.name("requirement")
+            {
+                (
+                    PackageName::new(name.as_str().to_string())?,
+                    Requirement::from_str(requirement.as_str())?,
+                )
+            } else {
+                let requirement = Requirement::from_str(override_spec)?;
+                (requirement.name.clone(), requirement)
+            };
+            overridden.entry(name).or_default().insert(requirement);
         }
 
         Ok(Self {
