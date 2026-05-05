@@ -4,6 +4,7 @@
 from __future__ import absolute_import
 
 import contextlib
+import glob
 import json
 import os
 import subprocess
@@ -49,7 +50,8 @@ def test_overrides_and_excludes(
                 [options]
                 install_requires =
                     cowsay<6
-                    ansicolors==1.1.8
+                    requests==2.33.1
+                    psutil
                 """
             )
         )
@@ -66,20 +68,21 @@ def test_overrides_and_excludes(
 
     wheels = os.path.join(str(tmpdir), "wheels")
     subprocess.check_call(args=["pyproject-build", "--wheel", "-o", wheels, project])
+    built_wheels = glob.glob(os.path.join(wheels, "*.whl"))
+    assert len(built_wheels) == 1
+    example_wheel = built_wheels[0]
 
     example_pex = os.path.join(str(tmpdir), "example.pex")
     subprocess.check_call(
         args=[
             "pex",
-            "--find-links",
-            "fl={wheels}".format(wheels=wheels),
-            "--source",
-            "fl=example",
-            "example",
+            example_wheel,
             "--exclude",
-            "ansicolors<2",
+            "requests<3",
             "--override",
             "cowsay==6",
+            "--override",
+            "psutil=ansicolors==1.1.8",
             "-o",
             example_pex,
         ]
@@ -94,15 +97,16 @@ def test_overrides_and_excludes(
                 import sys
 
                 try:
-                    import ansicolors
-                    sys.exit("Imported ansicolors from {file}".format(file=ansicolors.__file__))
+                    import requests
+                    sys.exit("Imported requests from {file}".format(file=requests.__file__))
                 except ImportError:
                     pass
 
+                import colors
                 import cowsay
 
 
-                cowsay.tux("Moo?")
+                cowsay.tux(colors.cyan("Moo?"))
                 """
             ),
         ],
@@ -113,6 +117,7 @@ def test_overrides_and_excludes(
         pex_info = json.loads(zf.read("PEX-INFO"))
 
     assert [
+        "ansicolors-1.1.8-py2.py3-none-any.whl",
         "cowsay-6.0-py{major}-none-any.whl".format(major=sys.version_info[0]),
         "example-0.1.0-py{major}-none-any.whl".format(major=sys.version_info[0]),
     ] == sorted(pex_info["distributions"])
