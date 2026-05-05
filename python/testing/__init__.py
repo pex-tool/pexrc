@@ -7,9 +7,14 @@ import os
 import platform
 import subprocess
 
+IS_CI = "true" == os.environ.get("CI", "false")
+
 IS_LINUX = platform.system().lower() == "linux"
 IS_MAC = platform.system().lower() == "darwin"
 IS_WINDOWS = platform.system().lower() == "windows"
+
+IS_ARM64 = platform.machine().lower in ("aarch64", "arm64")
+IS_X86_64 = platform.machine().lower in ("amd64", "x86_64")
 
 
 def pexrc():

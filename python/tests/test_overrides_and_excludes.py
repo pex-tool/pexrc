@@ -12,6 +12,8 @@ import sys
 import zipfile
 from textwrap import dedent
 
+import pytest
+from testing import IS_CI, IS_WINDOWS, IS_X86_64
 from testing.compare import compare
 
 TYPE_CHECKING = False
@@ -20,6 +22,10 @@ if TYPE_CHECKING:
     from typing import Any  # noqa: F401
 
 
+@pytest.mark.skipif(
+    IS_CI and IS_WINDOWS and IS_X86_64,
+    reason="The example PEX fails to build on Windows x86_64 CI for unknown reasons (works in a VM)",
+)
 def test_overrides_and_excludes(
     tmpdir,  # type: Any
     pexrc_root,  # type: str
