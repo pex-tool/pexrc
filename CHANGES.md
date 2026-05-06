@@ -1,5 +1,9 @@
 # Release Notes
 
+## 0.11.1
+
+This release fixes bugs in the `repository {info,extract}` `PEX_TOOLS`.
+
 ## 0.11.0
 
 This release adds support for PEX-INFO `overridden` and `excluded` dependencies.

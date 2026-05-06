@@ -42,7 +42,7 @@ pub(crate) fn display(python: &Path, pex: Pex, args: InfoArgs) -> anyhow::Result
                     "version": wheel_info.version,
                     "requires_python": wheel_info.requires_python,
                     "requires_dists": wheel_info.requires_dists,
-                    "location": pex.path.join(wheel_info.file_name)
+                    "location": pex.path.join(".deps").join(wheel_info.file_name)
                 }),
                 args.indent,
             )?;

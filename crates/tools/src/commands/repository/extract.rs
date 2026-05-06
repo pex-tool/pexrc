@@ -328,7 +328,7 @@ fn add_file(
     content: Cow<'_, str>,
 ) -> anyhow::Result<()> {
     let size = u64::try_from(content.as_ref().len())?;
-    let header = create_header(top_dir.join(path), size, timestamp)?;
+    let header = create_header(top_dir.join(path), size, false, timestamp)?;
     tar.append(&header, Cursor::new(content.as_ref()))?;
     Ok(())
 }
@@ -336,12 +336,13 @@ fn add_file(
 fn create_header(
     path: impl AsRef<Path>,
     size: u64,
+    is_executable: bool,
     timestamp: Option<DateTime<Utc>>,
 ) -> anyhow::Result<Header> {
     let mut header = tar::Header::new_ustar();
     header.set_path(path.as_ref())?;
     header.set_size(size);
-    header.set_mode(0o644);
+    header.set_mode(if is_executable { 0o755 } else { 0o644 });
     if let Some(timestamp) = timestamp {
         header.set_mtime(u64::try_from(timestamp.timestamp())?)
     }
@@ -460,6 +461,7 @@ fn add_loose_source(
                 }
             }
             sources.packages.insert(package);
+            continue;
         }
         let dst = src_dir.join(
             entry
@@ -469,7 +471,8 @@ fn add_loose_source(
         );
         if timestamp.is_some() {
             let size = entry.metadata()?.len();
-            let header = create_header(dst, size, timestamp)?;
+            let is_executable = platform::is_executable(entry.path())?;
+            let header = create_header(dst, size, is_executable, timestamp)?;
             tar.append(&header, File::open(entry.path())?)?
         } else {
             tar.append_path_with_name(entry.path(), dst)?
