@@ -208,15 +208,13 @@ impl Display for InterpreterConstraint {
         if let Some(implementation) = self.implementation.as_ref() {
             match implementation {
                 InterpreterImplementation::CPython => f.write_str("CPython")?,
-                InterpreterImplementation::CPythonFreeThreaded => {
-                    f.write_str("CPython[free-threaded]")?
-                }
-                InterpreterImplementation::CPythonGil => f.write_str("CPython[gil]")?,
+                InterpreterImplementation::CPythonFreeThreaded => f.write_str("CPython+t")?,
+                InterpreterImplementation::CPythonGil => f.write_str("CPython-t")?,
                 InterpreterImplementation::PyPy => f.write_str("PyPy")?,
             }
         }
         if let Some(version_specifiers) = self.version_specifiers.as_ref() {
-            f.write_fmt(format_args!("{}", version_specifiers))?;
+            write!(f, "{version_specifiers}")?;
         }
         Ok(())
     }

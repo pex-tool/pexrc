@@ -1,5 +1,11 @@
 # Release Notes
 
+## 0.11.2
+
+This release fixes another `repository info` `PEX_TOOLS` bug, fixes an inconsistency in interpreter
+constraint rendering for CPython threaded and non-threaded implementations and fixes PEXrc venvs
+missing `PEX_EXTRA_SYS_PATH` handling.
+
 ## 0.11.1
 
 This release fixes bugs in the `repository {info,extract}` `PEX_TOOLS`.

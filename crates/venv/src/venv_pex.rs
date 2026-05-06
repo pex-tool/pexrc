@@ -1090,6 +1090,22 @@ fn write_main(
     scripts: &mut Scripts,
     bin_path_override: Option<BinPath>,
 ) -> anyhow::Result<()> {
+    let pex_extra_sys_path_pth = venv.site_packages_path("PEX_EXTRA_SYS_PATH.pth");
+    let mut pex_extra_sys_path_pth_fp = File::create_new(&pex_extra_sys_path_pth)?;
+    for env_var in ["PEX_EXTRA_SYS_PATH", "__PEX_EXTRA_SYS_PATH__"].into_iter() {
+        // # N.B.: .pth import lines must be single lines:
+        // https://docs.python.org/3/library/site.html
+        writeln!(
+            pex_extra_sys_path_pth_fp,
+            "import os, sys; \
+            sys.path.extend(\
+            entry \
+            for entry in os.environ.get('{env_var}', '').split(os.pathsep) \
+            if entry\
+            )",
+        )?;
+    }
+
     let main_py = venv.prefix().join("__main__.py");
     let mut main_py_fp = File::create_new(&main_py)?;
     write_shebang_bytes(&mut main_py_fp, shebang_interpreter, shebang_arg)?;

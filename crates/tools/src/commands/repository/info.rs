@@ -34,6 +34,7 @@ pub(crate) fn display(python: &Path, pex: Pex, args: InfoArgs) -> anyhow::Result
 
     let mut output = Output::new(args.output.as_deref())?;
     for (project_name, wheel_info) in wheels {
+        let location = pex.path.join(".deps").join(wheel_info.file_name);
         if args.verbose {
             json::serialize(
                 &mut output,
@@ -42,7 +43,7 @@ pub(crate) fn display(python: &Path, pex: Pex, args: InfoArgs) -> anyhow::Result
                     "version": wheel_info.version,
                     "requires_python": wheel_info.requires_python,
                     "requires_dists": wheel_info.requires_dists,
-                    "location": pex.path.join(".deps").join(wheel_info.file_name)
+                    "location": location
                 }),
                 args.indent,
             )?;
@@ -51,7 +52,7 @@ pub(crate) fn display(python: &Path, pex: Pex, args: InfoArgs) -> anyhow::Result
                 output,
                 "{project_name} {version} {location}",
                 version = wheel_info.version,
-                location = pex.path.join(wheel_info.file_name).display()
+                location = location.display()
             )?;
         }
     }
