@@ -81,8 +81,11 @@ pub struct RawPexInfo<'a> {
     pub interpreter_selection_strategy: Option<InterpreterSelectionStrategy>,
     pub overridden: Vec<&'a str>,
     pub pex_hash: &'a str,
+    #[serde(borrow)]
     pub pex_path: Option<Cow<'a, str>>,
+    #[serde(borrow)]
     pub pex_paths: Vec<Cow<'a, Path>>,
+    #[serde(borrow)]
     pub pex_root: Option<Cow<'a, str>>,
     pub requirements: Vec<&'a str>,
     pub script: Option<&'a str>,

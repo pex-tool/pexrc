@@ -66,8 +66,11 @@ impl Display for PyPyVersion {
 }
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Deserialize, Serialize)]
 pub struct RawInterpreter<'a> {
+    #[serde(borrow)]
     pub path: Cow<'a, Path>,
+    #[serde(borrow)]
     pub realpath: Cow<'a, Path>,
+    #[serde(borrow)]
     pub prefix: Cow<'a, Path>,
     pub base_prefix: Option<Cow<'a, Path>>,
     #[serde(borrow)]

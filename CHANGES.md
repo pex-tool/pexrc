@@ -1,5 +1,9 @@
 # Release Notes
 
+## 0.11.0
+
+This release adds support for PEX-INFO `overridden` and `excluded` dependencies.
+
 ## 0.10.0
 
 This release adds support for `PEX_ROOT`. When `PEXRC_ROOT` is set in the environment, it is still

@@ -2032,13 +2032,14 @@ dependencies = [
  "tempfile",
  "testing",
  "url",
+ "version-ranges",
  "walkdir",
  "zip",
 ]
 
 [[package]]
 name = "pexrc"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "anstream",
  "anyhow",

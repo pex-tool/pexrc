@@ -38,6 +38,7 @@ pub(crate) struct Fingerprint<'a> {
 
 #[derive(Deserialize)]
 pub(crate) struct Download<'a> {
+    #[serde(borrow)]
     pub(crate) url: Cow<'a, str>,
     #[serde(rename = "type")]
     pub(crate) file_type: FileType,

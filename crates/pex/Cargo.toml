@@ -33,6 +33,7 @@ strum = { workspace = true }
 strum_macros = { workspace = true }
 tempfile = { workspace = true }
 url = { workspace = true }
+version-ranges = { workspace = true }
 walkdir = { workspace = true }
 zip = { workspace = true }
 

@@ -122,7 +122,6 @@ def test_collision_warn(
 def test_collision_error(
     tmpdir,  # type: Any
     cowsay_pex,  # type: str
-    pexrc_root,  # type: str
 ):
     # type: (...) -> None
 

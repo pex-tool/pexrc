@@ -8,7 +8,7 @@ import subprocess
 import sys
 import time
 
-from testing import pexrc_inject
+from testing import IS_WINDOWS, pexrc_inject
 
 TYPE_CHECKING = False
 if TYPE_CHECKING:
@@ -105,6 +105,7 @@ def compare(
     test_result=None,  # type: Optional[Callable[[ProcessResult, bool], None]]
     compare_results=None,  # type: Optional[Callable[[ProcessResult, ProcessResult], None]]
     injected_pex=None,  # type: Optional[str]
+    assert_faster=True,  # type: bool
 ):
     # type: (...) -> str
 
@@ -123,7 +124,13 @@ def compare(
         file=sys.stderr,
     )
 
-    assert injected_result.elapsed < traditional_result.elapsed, (
+    # N.B.: The traditional PEX runtime has never been supported on Windows; so we don't do a
+    # comparison here. Observation shows the same general speedup as on Linux, but there is the
+    # complication of virus scans that do slow things down much like the Mac case, leading to some
+    # CI instability for no obvious gain.
+    assert (
+        IS_WINDOWS or not assert_faster or (injected_result.elapsed < traditional_result.elapsed)
+    ), (
         "An injected PEXRC ({injected_elapsed:.5}ms) should always run faster than a traditional "
         "PEX ({traditional_elapsed:.5}ms).".format(
             injected_elapsed=injected_result.elapsed, traditional_elapsed=traditional_result.elapsed

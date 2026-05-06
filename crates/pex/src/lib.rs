@@ -4,11 +4,13 @@
 #![deny(clippy::all)]
 #![feature(str_as_str)]
 
+mod dependency_configuration;
 mod pex;
 mod pex_info;
 mod pex_path;
 mod wheel;
 
+pub use dependency_configuration::DependencyConfiguration;
 pub use pex::{
     CollectWheelMetadata,
     DataDir,
