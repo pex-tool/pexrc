@@ -262,14 +262,8 @@ build-backend = "setuptools.build_meta"
     let mut console_scripts = Vec::with_capacity(1);
     if let Some(entry_point) = pex_info.entry_point
         && entry_point.contains(":")
+        && let Some(name) = project_name.to_str()
     {
-        let mut entry_point = entry_point.splitn(2, ":");
-        let name = entry_point
-            .next()
-            .expect("We confirmed 2 components with : contains check above");
-        let entry_point = entry_point
-            .next()
-            .expect("We confirmed 2 components with : contains check above");
         console_scripts.push(Cow::Owned(format!("{name} = {entry_point}")))
     }
     let entry_points = IniList("console_scripts", console_scripts);

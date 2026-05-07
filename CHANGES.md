@@ -8,7 +8,8 @@ with native runtimes bringing parity with the equivalent Pex feature.
 Additionally, this release fixes `pexrc inject` target detection for `linux_*` wheels; previously
 only `{many,musl}linux` wheels were handled.
 
-Finally, `--source` extraction from directory PEXes is fixed for the `repository extract` PEX tool.
+Finally, `--source` extraction from directory PEXes and for console scripts is fixed for the
+`repository extract` PEX tool.
 
 ## 0.11.2
 
