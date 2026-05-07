@@ -179,7 +179,7 @@ fn add_sdist_files(
             r#"
 [build-system]
 requires = ["setuptools"]
-backend = "setuptools.build_meta"
+build-backend = "setuptools.build_meta"
 "#,
         ),
     )?;
@@ -425,14 +425,17 @@ fn add_loose_source(
 ) -> anyhow::Result<Sources> {
     let mut sources = Sources::new();
     for entry in collect_loose_user_source(pex)? {
+        let entry_relpath = entry
+            .path()
+            .strip_prefix(pex)
+            .expect("Walker paths of a PEX directory are always sub-paths");
         if entry.path().is_file()
-            && !entry.path().as_os_str().as_encoded_bytes().contains(&b'/')
-            && let Some(file_name) = entry.path().file_name()
+            && !entry_relpath.as_os_str().as_encoded_bytes().contains(&b'/')
+            && let Some(file_name) = entry_relpath.file_name()
             && file_name.as_encoded_bytes().ends_with(b".py")
         {
             sources.modules.insert(
-                entry
-                    .path()
+                entry_relpath
                     .as_os_str()
                     .to_str()
                     .ok_or_else(|| {
@@ -447,7 +450,7 @@ fn add_loose_source(
             );
         } else if entry.path().is_dir() {
             let mut package = String::new();
-            for component in entry.path().components() {
+            for component in entry_relpath.components() {
                 if let Component::Normal(name) = component {
                     if !package.is_empty() {
                         package.push('.')
@@ -463,12 +466,7 @@ fn add_loose_source(
             sources.packages.insert(package);
             continue;
         }
-        let dst = src_dir.join(
-            entry
-                .path()
-                .strip_prefix(pex)
-                .expect("Walker paths of a PEX directory are always sub-paths"),
-        );
+        let dst = src_dir.join(entry_relpath);
         if timestamp.is_some() {
             let size = entry.metadata()?.len();
             let is_executable = platform::is_executable(entry.path())?;
