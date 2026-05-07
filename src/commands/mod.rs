@@ -4,5 +4,4 @@
 pub mod extract;
 pub mod info;
 pub mod inject;
-pub mod repackage;
 pub mod script;
