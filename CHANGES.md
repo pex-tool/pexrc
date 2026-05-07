@@ -1,5 +1,15 @@
 # Release Notes
 
+## 0.12.0
+
+This release introduces `pexrc inject --jobs` to control maximum parallelism when injecting PEXes
+with native runtimes bringing parity with the equivalent Pex feature.
+
+Additionally, this release fixes `pexrc inject` target detection for `linux_*` wheels; previously
+only `{many,musl}linux` wheels were handled.
+
+Finally, `--source` extraction from directory PEXes is fixed for the `repository extract` PEX tool.
+
 ## 0.11.2
 
 This release fixes another `repository info` `PEX_TOOLS` bug, fixes an inconsistency in interpreter
