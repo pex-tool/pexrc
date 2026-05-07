@@ -11,7 +11,7 @@ use clap::builder::PossibleValue;
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use indexmap::{Equivalent, IndexSet};
 use pex::{Pex, WheelOptions};
-use pexrc::commands::{extract, info, inject, repackage, script};
+use pexrc::commands::{extract, info, inject, script};
 use pexrc::embeds::{CLIB_BY_TARGET, PROXY_BY_TARGET};
 use pexrc::source;
 use target::Target;
@@ -88,8 +88,12 @@ impl From<SimplifiedTarget> for target::SimplifiedTarget {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Extract Pex dependencies as zstd wheels.
+    /// Extract PEX dependencies as wheels.
     Extract {
+        /// The maximum number of parallel jobs to use when extracting wheels.
+        #[arg(short = 'j', long)]
+        jobs: Option<usize>,
+
         #[arg(short = 'Z', long, value_enum, default_value_t = CompressionMethod::Zstd)]
         compression_method: CompressionMethod,
 
@@ -100,12 +104,16 @@ enum Commands {
         #[arg(short = 'd', long)]
         dest_dir: PathBuf,
 
-        /// The Pex to extract dependency wheels from. Can be a path or URL.
+        /// The PEX to extract dependency wheels from. Can be a path or URL.
         #[arg(value_name = "PEX")]
         pex: String,
     },
-    /// Inject a traditional PEX with the pexrc runtime.
+    /// Inject traditional PEXes with native runtimes.
     Inject {
+        /// The maximum number of parallel jobs to use when injecting PEXes.
+        #[arg(short = 'j', long)]
+        jobs: Option<usize>,
+
         #[arg(short = 'Z', long, value_enum, default_value_t = CompressionMethod::Zstd)]
         compression_method: CompressionMethod,
 
@@ -119,26 +127,12 @@ enum Commands {
         #[arg(short = 'p', long)]
         preferred_python: Option<PathBuf>,
 
+        /// The PEXes to inject with a native runtime. Can be paths or URLs.
         #[arg(value_name = "PEX", required = true)]
         pexes: Vec<String>,
     },
     /// Provide information about the supported target runtimes.
     Info,
-    /// Re-package a traditional whl as a zstd compressed whl.
-    Repackage {
-        #[arg(short = 'Z', long, value_enum, default_value_t = CompressionMethod::Zstd)]
-        compression_method: CompressionMethod,
-
-        #[arg(long)]
-        compression_level: Option<i64>,
-
-        /// The directory to extract the wheels to.
-        #[arg(short = 'd', long)]
-        dest_dir: PathBuf,
-
-        #[arg(value_name = "WHEEL", required = true)]
-        wheels: Vec<String>,
-    },
     /// Create a Windows-style Python venv console script executable.
     Script {
         #[arg(long)]
@@ -155,6 +149,15 @@ enum Commands {
     },
 }
 
+fn configure_jobs(jobs: Option<usize>) -> anyhow::Result<()> {
+    if let Some(jobs) = jobs {
+        rayon::ThreadPoolBuilder::default()
+            .num_threads(jobs)
+            .build_global()?;
+    }
+    Ok(())
+}
+
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     logging::init(cli.verbosity.map(|verbosity| verbosity.log_level_filter()))?;
@@ -162,11 +165,13 @@ fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Commands::Extract {
+            jobs,
             compression_method,
             compression_level,
             dest_dir,
             pex,
         } => {
+            configure_jobs(jobs)?;
             let pex = source::to_path(pex, Some(&dest_dir))?;
             extract::to_dir(
                 &dest_dir,
@@ -175,12 +180,14 @@ fn main() -> anyhow::Result<()> {
             )
         }
         Commands::Inject {
+            jobs,
             compression_method,
             compression_level,
             targets,
             preferred_python,
             pexes,
         } => {
+            configure_jobs(jobs)?;
             let (clibs, proxies) = if !targets.is_empty() {
                 (
                     targets
@@ -219,22 +226,6 @@ fn main() -> anyhow::Result<()> {
             )
         }
         Commands::Info => info::display(),
-        Commands::Repackage {
-            compression_method,
-            compression_level,
-            dest_dir,
-            wheels,
-        } => {
-            let wheels = wheels
-                .into_iter()
-                .map(|source| source::to_path(source, None))
-                .collect::<anyhow::Result<Vec<_>>>()?;
-            repackage::repackage_all(
-                wheels,
-                &WheelOptions::new(compression_method.into(), compression_level, None),
-                &dest_dir,
-            )
-        }
         Commands::Script {
             target,
             python,

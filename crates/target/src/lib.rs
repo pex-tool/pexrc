@@ -150,6 +150,23 @@ impl SimplifiedTarget {
     pub fn for_platform_tag(platform_tag: &str) -> anyhow::Result<Option<EnumSet<Self>>> {
         if platform_tag == "any" {
             return Ok(None);
+        } else if platform_tag.starts_with("linux") {
+            // N.B.: The linux_* platform tag is illegal on PyPI and generally indicates a locally
+            // built wheel. We cannot infer if the wheel was built against gnu or musl libc; so we
+            // include both targets where applicable.
+            if platform_tag.contains("x86_64") {
+                return Ok(Some(Self::X64LinuxGnu | Self::X64LinuxMusl));
+            } else if platform_tag.contains("aarch64") {
+                return Ok(Some(Self::Arm64LinuxGnu | Self::Arm64LinuxMusl));
+            } else if platform_tag.contains("armv7l") {
+                return Ok(Some(enum_set!(Self::Armv7LinuxGnuabihf)));
+            } else if platform_tag.contains("ppc64le") {
+                return Ok(Some(enum_set!(Self::Ppc64leLinuxGnu)));
+            } else if platform_tag.contains("riscv64") {
+                return Ok(Some(enum_set!(Self::Riscv64gcLinuxGnu)));
+            } else if platform_tag.contains("s390x") {
+                return Ok(Some(enum_set!(Self::S390xLinuxGnu)));
+            }
         } else if platform_tag.starts_with("manylinux") {
             if platform_tag.contains("x86_64") {
                 return Ok(Some(enum_set!(Self::X64LinuxGnu)));
