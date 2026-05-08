@@ -1,5 +1,9 @@
 # Release Notes
 
+## 0.12.1
+
+This release fixes the `venv` PEX tool `--pip` option for Python 2.7.
+
 ## 0.12.0
 
 This release introduces `pexrc inject --jobs` to control maximum parallelism when injecting PEXes

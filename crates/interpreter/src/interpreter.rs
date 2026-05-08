@@ -428,7 +428,7 @@ impl Interpreter {
     }
 
     #[inline]
-    pub fn raw<'a>(&'a self) -> &'a RawInterpreter<'a> {
+    pub fn raw(&self) -> &RawInterpreter<'_> {
         self.borrow_interpreter()
     }
 

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #![deny(clippy::all)]
+#![feature(exit_status_error)]
 #![feature(trim_prefix_suffix)]
 
 mod provenance;
