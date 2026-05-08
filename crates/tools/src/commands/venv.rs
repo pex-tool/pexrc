@@ -6,6 +6,7 @@ use std::ffi::OsStr;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::{anyhow, bail};
@@ -15,7 +16,8 @@ use clap::{Args, ValueEnum};
 use fs_err as fs;
 use interpreter::SearchPath;
 use log::warn;
-use pex::{Layout, Pex, PexPath};
+use pep508_rs::PackageName;
+use pex::{CollectWheelMetadata, Layout, Pex, PexPath};
 use shell_quote::Quote;
 use venv::virtualenv::FileSystemLinker;
 use venv::{Provenance, Virtualenv, venv_pex};
@@ -226,7 +228,53 @@ pub(crate) fn create(python: &Path, pex: Pex, args: VenvArgs) -> anyhow::Result<
     let search_path = SearchPath::from_env()?;
     let pex_path = PexPath::from_pex_info(&pex.info, true);
     let additional_pexes = pex_path.load_pexes()?;
-    let resolve = pex.resolve(Some(python), additional_pexes.iter(), search_path, None)?;
+
+    let resolved_wheel_metadata = if args.pip {
+        Some(CollectWheelMetadata::new())
+    } else {
+        None
+    };
+    let resolve = pex.resolve(
+        Some(python),
+        additional_pexes.iter(),
+        search_path,
+        resolved_wheel_metadata.clone(),
+    )?;
+    let pip = if let Some(resolved_wheel_metadata) = resolved_wheel_metadata {
+        let pip = PackageName::from_str("pip")?;
+        if let Some(pip_wheel) = resolved_wheel_metadata
+            .into_collected()?
+            .iter()
+            .filter_map(|metadata| {
+                if metadata.project_name == pip {
+                    Some(metadata.file_name)
+                } else {
+                    None
+                }
+            })
+            .next()
+        {
+            let message = format_args!(
+                "You asked for --pip to be installed in the venv at {venv_dir},\n\
+                but the PEX at {pex} already contains {pip_wheel}",
+                venv_dir = args.venv_dir.display(),
+                pex = pex.path.display()
+            );
+            if args.collisions_ok {
+                warn!("{message}\nUsing {pip_wheel} from the PEX.");
+                false
+            } else {
+                bail!(
+                    "{message}\nConsider re-running either without --pip or with --collisions-ok."
+                )
+            }
+        } else {
+            true
+        }
+    } else {
+        false
+    };
+
     let mut scripts = pex.scripts()?;
 
     if args.force && args.venv_dir.exists() {
@@ -244,7 +292,7 @@ pub(crate) fn create(python: &Path, pex: Pex, args: VenvArgs) -> anyhow::Result<
             FileSystemLinker(),
             &mut scripts,
             args.system_site_packages,
-            args.pip,
+            pip,
             args.prompt.as_deref(),
         )?;
         venv.create_additional_pythons()?;
