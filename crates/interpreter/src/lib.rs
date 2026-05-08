@@ -12,6 +12,7 @@ mod linux;
 mod platform;
 mod search_path;
 mod tag;
+mod version;
 
 pub use constraints::{
     InterpreterConstraint,
@@ -19,7 +20,8 @@ pub use constraints::{
     SelectionStrategy,
     VersionSpec,
 };
-pub use interpreter::Interpreter;
+pub use interpreter::{Interpreter, RawInterpreter};
 pub use platform::Platform;
 pub use search_path::SearchPath;
 pub use tag::Tag;
+pub use version::{LATEST_STABLE, OLDEST_SUPPORTED_STABLE};

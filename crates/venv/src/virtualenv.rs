@@ -354,29 +354,15 @@ fn create_pep_405_venv<'a>(
     };
     pyvenv_cfg.write(path)?;
 
-    let dest = path.join(executable_rel_path);
-    if let Some(parent) = dest.parent() {
+    let venv_python = path.join(executable_rel_path);
+    if let Some(parent) = venv_python.parent() {
         fs::create_dir_all(parent)?;
     }
-    linker.link(&dest, Some(&raw_base_interpreter.realpath))?;
+    linker.link(&venv_python, Some(&raw_base_interpreter.realpath))?;
     let site_packages_relpath = site_packages_relpath(&base_interpreter);
     fs::create_dir_all(path.join(site_packages_relpath.as_ref()))?;
     if pip {
-        if !raw_base_interpreter.has_ensurepip {
-            // TODO: Consider embedding or fetching: https://bootstrap.pypa.io/pip/
-            bail!(
-                "Cannot install Pip since the selected interpreter does not have the `ensurepip` \
-                module: {interpreter}",
-                interpreter = raw_base_interpreter.path.display()
-            )
-        }
-
-        Command::new(dest)
-            .args(["-m", "ensurepip", "--default-pip"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()?
-            .wait()?;
+        ensure_pip(raw_base_interpreter, &venv_python)?;
     }
     Ok(site_packages_relpath)
 }
@@ -387,7 +373,7 @@ fn create_virtualenv_venv<'a>(
     linker: impl Linker,
     virtualenv_script: VendoredVirtualenv<'a>,
     include_system_site_packages: bool,
-    _pip: bool,
+    pip: bool,
     prompt: Option<&'a str>,
 ) -> anyhow::Result<Cow<'a, Path>> {
     let mut script = tempfile::Builder::new()
@@ -433,8 +419,8 @@ fn create_virtualenv_venv<'a>(
     })?;
     let executable_rel_path = executable_rel_path(interpreter);
     let executable_rel_path = Path::new(executable_rel_path.as_ref());
-    let dest = path.join(executable_rel_path);
-    assert!(dest.is_file());
+    let venv_python = path.join(executable_rel_path);
+    assert!(venv_python.is_file());
     let pyvenv_cfg = PyVenvCfg {
         home: Cow::Borrowed(home),
         include_system_site_packages,
@@ -445,11 +431,31 @@ fn create_virtualenv_venv<'a>(
     };
     pyvenv_cfg.write(path.as_ref())?;
 
-    linker.link(&dest, None)?;
-    // TODO: XXX: Handle pip. The ensurepip module is optional, consider embedding or fetching:
-    //  https://bootstrap.pypa.io/pip/
-    //  https://bootstrap.pypa.io/virtualenv/
+    linker.link(&venv_python, None)?;
+    if pip {
+        ensure_pip(raw_interpreter, &venv_python)?;
+    }
     Ok(site_packages_relpath(interpreter))
+}
+
+fn ensure_pip(base_interpreter: &interpreter::RawInterpreter, python: &Path) -> anyhow::Result<()> {
+    if !base_interpreter.has_ensurepip {
+        // TODO: Consider embedding or fetching: https://bootstrap.pypa.io/pip/
+        bail!(
+            "Cannot install Pip since the selected interpreter does not have the `ensurepip` \
+            module: {interpreter}",
+            interpreter = base_interpreter.path.display()
+        )
+    }
+
+    Command::new(python)
+        .args(["-m", "ensurepip", "--default-pip"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?
+        .wait()?
+        .exit_ok()?;
+    Ok(())
 }
 
 fn site_packages_relpath<'a>(interpreter: &Interpreter) -> Cow<'a, Path> {
