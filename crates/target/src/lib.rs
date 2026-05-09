@@ -190,7 +190,7 @@ impl SimplifiedTarget {
         } else if platform_tag.starts_with("macos") {
             // For the psuedo-arch (universal2, etc) matches, see:
             // https://packaging.python.org/en/latest/specifications/platform-compatibility-tags/#macos
-            if platform_tag.contains("aarch64") {
+            if platform_tag.contains("arm64") {
                 return Ok(Some(enum_set!(Self::Arm64Macos)));
             } else if platform_tag.contains("x86_64") {
                 return Ok(Some(enum_set!(Self::X64Macos)));
@@ -203,9 +203,9 @@ impl SimplifiedTarget {
                 return Ok(Some(enum_set!(Self::X64Macos)));
             }
         } else if platform_tag.starts_with("win") {
-            if platform_tag.contains("x86_64") {
+            if platform_tag.contains("amd64") {
                 return Ok(Some(enum_set!(Self::X64Windows)));
-            } else if platform_tag.contains("aarch64") {
+            } else if platform_tag.contains("arm64") {
                 return Ok(Some(enum_set!(Self::Arm64Windows)));
             }
         }
