@@ -5,7 +5,7 @@ cargo-features = ["profile-rustflags"]
 
 [package]
 name = "pexrc"
-version = "0.12.2"
+version = "0.12.3"
 edition = { workspace = true }
 publish = false
 

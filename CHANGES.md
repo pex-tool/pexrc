@@ -1,5 +1,9 @@
 # Release Notes
 
+## 0.12.3
+
+This release fixes platform tag detection for macOS arm64 and Windows arm64 and amd64.
+
 ## 0.12.2
 
 This release fixes the `venv` PEX tool from trampling Pip provided by PEX deps when `--pip` is
