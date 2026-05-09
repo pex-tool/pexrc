@@ -1,5 +1,15 @@
 # Release Notes
 
+## 0.12.2
+
+This release fixes the `venv` PEX tool from trampling Pip provided by PEX deps when `--pip` is
+specified. At parity with Pex, a warning is issued if `--collisions-ok`; otherwise the tool exits
+with an error message explaining the conflict and the remedies.
+
+Additionally, the `repository extract` tool is changed to wait forever when `--serve`ing instead
+of timing out at 5 seconds if the server fails to come up. This is, again, at parity with Pex. In
+this case however, a `--timeout` option is added to control this.
+
 ## 0.12.1
 
 This release fixes the `venv` PEX tool `--pip` option for Python 2.7.

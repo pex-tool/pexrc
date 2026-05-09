@@ -67,6 +67,12 @@ runs."
     /// The path of a file to write the `<pid>:<port>` of the find links server to.
     #[arg(long)]
     pid_file: Option<PathBuf>,
+
+    /// The maximum time to wait in (fractional) seconds for the server to start accepting
+    /// connections. If this timeout is reached, the command will exit with an error instead of
+    /// waiting indefinitely. The wait is indefinite by default.
+    #[arg(long, default_value_t = 0.0)]
+    timeout: f32,
 }
 
 pub(crate) fn extract(python: &Path, pex: Pex, args: ExtractArgs) -> anyhow::Result<()> {
@@ -107,6 +113,7 @@ pub(crate) fn extract(python: &Path, pex: Pex, args: ExtractArgs) -> anyhow::Res
                 &args.dest_dir,
                 args.port,
                 args.pid_file.as_deref(),
+                args.timeout,
             )?;
         }
     }
@@ -479,6 +486,7 @@ fn serve(
     root_dir: &Path,
     port: Option<u16>,
     pid_file: Option<&Path>,
+    timeout: f32,
 ) -> anyhow::Result<()> {
     let module = if interpreter.raw().version.major == 3 {
         "http.server"
@@ -527,7 +535,11 @@ fn serve(
         }
         Ok::<_, anyhow::Error>(())
     });
-    let port = recv.recv_timeout(Duration::from_secs(5))??;
+    let port = if timeout > 0.0 {
+        recv.recv_timeout(Duration::from_secs_f32(timeout))?
+    } else {
+        recv.recv()?
+    }?;
     eprintln!(
         "Serving find-links repo of {pex} via {find_links} at http://localhost:{port}",
         pex = pex_path.display(),
