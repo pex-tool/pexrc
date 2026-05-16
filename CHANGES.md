@@ -1,5 +1,9 @@
 # Release Notes
 
+## 0.12.4
+
+This release fixes extras handling when resolving a PEX's wheels.
+
 ## 0.12.3
 
 This release fixes platform tag detection for macOS arm64 and Windows arm64 and amd64.

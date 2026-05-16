@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::ffi::OsStr;
 use std::fmt::{Display, Formatter};
 use std::io;
@@ -205,6 +205,25 @@ pub struct Resolve<'a> {
     pub additional_wheels: Vec<(&'a Pex<'a>, IndexMap<&'a str, ResolvedWheel<'a>>)>,
 }
 
+#[derive(Hash, Eq, PartialEq)]
+struct RequirementKey {
+    package_name: PackageName,
+    extras: BTreeSet<ExtraName>,
+}
+
+impl RequirementKey {
+    fn of(requirement: &Requirement<Url>) -> Self {
+        Self {
+            package_name: requirement.name.clone(),
+            extras: requirement.extras.iter().cloned().collect(),
+        }
+    }
+
+    fn satisfies(&self, requested: &RequirementKey) -> bool {
+        self.package_name == requested.package_name && requested.extras.is_subset(&self.extras)
+    }
+}
+
 impl<'a> Pex<'a> {
     #[time("debug", "Pex.{}")]
     pub fn load(path: &'a Path) -> anyhow::Result<Self> {
@@ -327,9 +346,9 @@ impl<'a> Pex<'a> {
             wheels.sort_by_key(|WheelInfo { rank, .. }| *rank);
         }
 
-        let mut resolved_by_project_name: IndexMap<PackageName, ResolvedWheel> =
+        let mut resolved_by_project_name: IndexMap<RequirementKey, ResolvedWheel> =
             IndexMap::with_capacity(wheels_by_project_name.len());
-        let mut indexed_extras: Vec<Vec<ExtraName>> = vec![Vec::new()];
+        let mut indexed_extras: Vec<Vec<ExtraName>> = vec![vec![]];
         let mut to_resolve: VecDeque<(Requirement<Url>, usize)> = self
             .info
             .raw()
@@ -350,21 +369,34 @@ impl<'a> Pex<'a> {
             })
             .collect::<Result<_, _>>()?;
         let marker_env = &interpreter.raw().marker_env;
+        let no_wheels: Vec<WheelInfo> = vec![];
         while let Some((requirement, extras_index)) = to_resolve.pop_front() {
-            if resolved_by_project_name.contains_key(&requirement.name) {
+            let requirement_key = RequirementKey::of(&requirement);
+
+            // Already processed.
+            if resolved_by_project_name.contains_key(&requirement_key) {
                 continue;
             }
+            if resolved_by_project_name
+                .keys()
+                .any(|key| key.satisfies(&requirement_key))
+            {
+                continue;
+            }
+
+            // Does not apply.
             if !requirement
                 .marker
                 .evaluate(marker_env, &indexed_extras[extras_index])
             {
                 continue;
             }
+
             let wheels = wheels_by_project_name
-                .remove(&requirement.name)
+                .get(&requirement.name)
                 .or_else(|| {
                     if self.info.raw().ignore_errors {
-                        Some(vec![])
+                        Some(&no_wheels)
                     } else {
                         None
                     }
@@ -419,7 +451,7 @@ impl<'a> Pex<'a> {
                 if let Some(version_or_url) = requirement.version_or_url.as_ref() {
                     match version_or_url {
                         VersionOrUrl::VersionSpecifier(version_specifier) => {
-                            if !version_specifier.contains(&version) {
+                            if !version_specifier.contains(version) {
                                 continue;
                             }
                         }
@@ -443,29 +475,29 @@ impl<'a> Pex<'a> {
                         raw_project_name,
                         project_name: requirement.name.clone(),
                         raw_version,
-                        version,
+                        version: version.clone(),
                         requires_dists: requires_dists.clone(),
-                        requires_python,
-                        root_is_purelib,
+                        requires_python: requires_python.clone(),
+                        root_is_purelib: *root_is_purelib,
                     })
                 }
                 resolved_by_project_name.insert(
-                    requirement.name,
+                    requirement_key,
                     ResolvedWheel {
                         file_name,
                         project_name: raw_project_name,
                         version: raw_version,
-                        root_is_purelib,
+                        root_is_purelib: *root_is_purelib,
                     },
                 );
                 for req in requires_dists {
-                    if dependency_configuration.excluded(&req) {
+                    if dependency_configuration.excluded(req) {
                         continue;
                     }
                     to_resolve.push_back((
                         dependency_configuration
-                            .overridden(&req, interpreter, &indexed_extras[extras_index])?
-                            .unwrap_or(req),
+                            .overridden(req, interpreter, &indexed_extras[extras_index])?
+                            .unwrap_or_else(|| req.clone()),
                         extras_index,
                     ))
                 }
