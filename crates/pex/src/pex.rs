@@ -451,7 +451,7 @@ impl<'a> Pex<'a> {
                 if let Some(version_or_url) = requirement.version_or_url.as_ref() {
                     match version_or_url {
                         VersionOrUrl::VersionSpecifier(version_specifier) => {
-                            if !version_specifier.contains(&version) {
+                            if !version_specifier.contains(version) {
                                 continue;
                             }
                         }
@@ -491,12 +491,12 @@ impl<'a> Pex<'a> {
                     },
                 );
                 for req in requires_dists {
-                    if dependency_configuration.excluded(&req) {
+                    if dependency_configuration.excluded(req) {
                         continue;
                     }
                     to_resolve.push_back((
                         dependency_configuration
-                            .overridden(&req, interpreter, &indexed_extras[extras_index])?
+                            .overridden(req, interpreter, &indexed_extras[extras_index])?
                             .unwrap_or_else(|| req.clone()),
                         extras_index,
                     ))
