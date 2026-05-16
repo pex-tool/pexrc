@@ -272,6 +272,26 @@ impl<'a> ToolInventory<'a> {
     }
 }
 
+enum ZigTool {
+    Hit(FoundTool),
+    Miss(PathBuf),
+}
+
+fn zig_tool(version: &str, zig_candidate: PathBuf) -> ZigTool {
+    if platform::is_executable(&zig_candidate)
+        .ok()
+        .unwrap_or_default()
+        && check_zig_version(version, &zig_candidate)
+    {
+        ZigTool::Hit(FoundTool {
+            env_var: ZIG_TOOL_ENV_VAR,
+            path: zig_candidate,
+        })
+    } else {
+        ZigTool::Miss(zig_candidate)
+    }
+}
+
 fn install_tools<'a>(
     cargo: &Path,
     cargo_binstall: &CargoBinstall,
@@ -298,28 +318,15 @@ fn install_tools<'a>(
             let lock_file = File::create(install_dirs.bin_dir.join(".python-zig.lck"))?;
             lock_file.lock()?;
             let python_zig = install_dirs.bin_dir.join("python-zig");
-            if platform::is_executable(&python_zig)
-                .ok()
-                .unwrap_or_default()
-                && check_zig_version(version, &python_zig)
-            {
-                return Ok(Cow::Owned(FoundTool {
-                    env_var: ZIG_TOOL_ENV_VAR,
-                    path: python_zig,
-                }));
-            }
-            if !env::consts::EXE_EXTENSION.is_empty() {
-                let python_zig_exe = python_zig.with_extension(env::consts::EXE_EXTENSION);
-                if platform::is_executable(&python_zig_exe)
-                    .ok()
-                    .unwrap_or_default()
-                    && check_zig_version(version, &python_zig_exe)
-                {
-                    return Ok(Cow::Owned(FoundTool {
-                        env_var: ZIG_TOOL_ENV_VAR,
-                        path: python_zig_exe,
-                    }));
+            match zig_tool(version, python_zig) {
+                ZigTool::Hit(zig_tool) => return Ok(Cow::Owned(zig_tool)),
+                ZigTool::Miss(python_zig) if !env::consts::EXE_EXTENSION.is_empty() => {
+                    let python_zig_exe = python_zig.with_extension(env::consts::EXE_EXTENSION);
+                    if let ZigTool::Hit(zig_tool) = zig_tool(version, python_zig_exe) {
+                        return Ok(Cow::Owned(zig_tool));
+                    }
                 }
+                _ => {}
             }
 
             let zig_requirement = format!("ziglang=={version}");

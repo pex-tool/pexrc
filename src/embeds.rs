@@ -88,5 +88,5 @@ pub fn read_proxy_content(target: SimplifiedTarget) -> anyhow::Result<impl Read>
     let proxy = PROXY_BY_TARGET
         .get(&target)
         .ok_or_else(|| anyhow!("There is no python-proxy for {target}"))?;
-    return Ok(zstd::Decoder::new(proxy.contents)?);
+    Ok(zstd::Decoder::new(proxy.contents)?)
 }
