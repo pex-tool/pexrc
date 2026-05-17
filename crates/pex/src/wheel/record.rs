@@ -10,7 +10,7 @@ use csv::{StringRecord, Terminator};
 use fs_err::File;
 use ouroboros::self_referencing;
 
-use crate::wheel::WheelFile;
+use crate::wheel::file::MetadataDirs;
 
 pub(crate) struct Entry<'a> {
     pub(crate) path: Cow<'a, Path>,
@@ -71,8 +71,11 @@ pub struct Record {
 }
 
 impl Record {
-    pub fn parse(wheel_dir: &Path, wheel_file: &WheelFile) -> anyhow::Result<(Self, PathBuf)> {
-        let record_rel_path = wheel_file.dist_info_dir().as_path().join("RECORD");
+    pub(crate) fn parse(
+        wheel_dir: &Path,
+        metadata_dirs: &MetadataDirs,
+    ) -> anyhow::Result<(Self, PathBuf)> {
+        let record_rel_path = metadata_dirs.dist_info_dir().as_path().join("RECORD");
         let record = Self::read(File::open(wheel_dir.join(&record_rel_path))?)?;
         Ok((record, record_rel_path))
     }
@@ -116,7 +119,7 @@ impl Record {
 
     pub(crate) fn filtered(
         &self,
-        wheel_file: &WheelFile,
+        metadata_dirs: &MetadataDirs,
         stash_dir: Option<&Path>,
         legacy_bin_dir: Option<&Path>,
     ) -> anyhow::Result<Vec<u8>> {
@@ -127,7 +130,7 @@ impl Record {
             .delimiter(b',')
             .terminator(*self.borrow_terminator())
             .from_writer(&mut data);
-        let pex_info_dir = wheel_file.pex_info_dir();
+        let pex_info_dir = metadata_dirs.pex_info_dir();
         for entry in self.borrow_entries() {
             if pex_info_dir.contains(entry.path.as_ref()) {
                 continue;

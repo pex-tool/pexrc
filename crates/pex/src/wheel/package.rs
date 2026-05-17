@@ -3,6 +3,7 @@
 
 use std::borrow::Cow;
 use std::ffi::OsStr;
+use std::fmt::Display;
 use std::io;
 use std::io::{Cursor, Read, Seek, Write};
 use std::ops::{Deref, DerefMut};
@@ -144,7 +145,14 @@ fn repackage_zipapp_pex_wheel(
             dest_dir,
         )
     } else {
-        recompress_zipped_whl_chroot(pex_zip_fp, wheel_file, options, dest_dir, true)
+        recompress_zipped_whl_chroot(
+            pex_zip_fp,
+            pex_zip.display(),
+            wheel_file,
+            options,
+            dest_dir,
+            true,
+        )
     }
 }
 
@@ -165,7 +173,8 @@ fn repackage_directory_pex_wheel(
             dest_dir,
         ),
         DirPexDepType::ZippedChroot => recompress_zipped_whl_chroot(
-            ZipArchive::new(File::open(wheel_path)?)?,
+            ZipArchive::new(File::open(&wheel_path)?)?,
+            wheel_path.display(),
             wheel_file,
             options,
             dest_dir,
@@ -221,6 +230,7 @@ pub fn recompress_zipped_whl(
 
 fn recompress_zipped_whl_chroot(
     mut zipped_wheel_chroot: ZipArchive<impl Read + Seek>,
+    zip_source: impl Display,
     wheel_file: &WheelFile,
     options: &WheelOptions,
     dest_dir: &Path,
@@ -228,19 +238,23 @@ fn recompress_zipped_whl_chroot(
 ) -> anyhow::Result<File> {
     fs::create_dir_all(dest_dir)?;
     let file_options = options.file_options()?;
-    let prefix = if prefixed {
-        format_args!(
+    let wheel_prefix = if prefixed {
+        Some(format!(
             ".deps/{wheel_file_name}/",
             wheel_file_name = wheel_file.file_name
-        )
+        ))
     } else {
-        format_args!("")
+        None
     };
+    let prefix = wheel_prefix.as_deref().unwrap_or_default();
 
-    let record_name = format!(
-        "{prefix}{dist_info_dir}/RECORD",
-        dist_info_dir = wheel_file.dist_info_dir()
-    );
+    let metadata_dirs = wheel_file.metadata_dirs_from_zip(
+        &zipped_wheel_chroot,
+        zip_source,
+        wheel_prefix.as_deref(),
+    )?;
+    let dist_info_dir = metadata_dirs.dist_info_dir();
+    let record_name = format!("{prefix}{dist_info_dir}/RECORD");
     let record = Record::read(Cursor::new(io::read_to_string(
         zipped_wheel_chroot.by_name(&record_name)?,
     )?))?;
@@ -278,7 +292,7 @@ fn recompress_zipped_whl_chroot(
 
     let original_wheel_info = format!(
         "{prefix}{pex_info_dir}/{file_name}",
-        pex_info_dir = wheel_file.pex_info_dir(),
+        pex_info_dir = metadata_dirs.pex_info_dir(),
         file_name = OriginalWheelInfo::file_name()
     );
 
@@ -289,14 +303,10 @@ fn recompress_zipped_whl_chroot(
         None
     };
 
-    let data_dir = wheel_file.data_dir().as_path();
+    let data_dir = metadata_dirs.data_dir().as_path();
     let mut zip_finder = ZipPathFinder {
         zip: zipped_wheel_chroot,
-        prefix: if prefixed {
-            Some(prefix.to_string())
-        } else {
-            None
-        },
+        prefix: wheel_prefix.as_deref(),
     };
     let (dest_wheel, compressed_whl) = if let Some(wheel_info) = wheel_info {
         let dest_wheel = dest_dir.join(wheel_info.filename());
@@ -359,7 +369,7 @@ fn recompress_zipped_whl_chroot(
                     compressed_whl.write_all(
                         record
                             .filtered(
-                                wheel_file,
+                                &metadata_dirs,
                                 stash_dir.as_deref(),
                                 if legacy_bin_dir {
                                     Some(Path::new("bin"))
@@ -431,7 +441,8 @@ fn compress_whl_chroot(
     fs::create_dir_all(dest_dir)?;
     let file_options = options.file_options()?;
 
-    let (record, record_rel_path) = Record::parse(wheel_dir, wheel_file)?;
+    let metadata_dirs = wheel_file.metadata_dirs(wheel_dir)?;
+    let (record, record_rel_path) = Record::parse(wheel_dir, &metadata_dirs)?;
 
     let (stash_dir, legacy_bin_dir) = 'result: {
         if let Some(layout) = WheelLayout::load_from_dir(wheel_dir)? {
@@ -447,8 +458,8 @@ fn compress_whl_chroot(
         (None, None)
     };
 
-    let data_dir = wheel_file.data_dir().as_path();
-    let pex_info_dir = wheel_dir.join(wheel_file.pex_info_dir().to_string());
+    let data_dir = metadata_dirs.data_dir().as_path();
+    let pex_info_dir = wheel_dir.join(metadata_dirs.pex_info_dir().to_string());
     let (dest_wheel, compressed_whl) = if let Some(wheel_info) =
         OriginalWheelInfo::load_from_dir(pex_info_dir)?
     {
@@ -490,7 +501,7 @@ fn compress_whl_chroot(
                     compressed_whl.write_all(
                         record
                             .filtered(
-                                wheel_file,
+                                &metadata_dirs,
                                 stash_dir.as_deref().map(|dir| {
                                     dir.strip_prefix(wheel_dir)
                                         .expect("We appended the stash dir to the wheel dir above.")
@@ -596,12 +607,12 @@ impl<'a> ProjectPathFinder<'a> for LoosePathFinder {
     }
 }
 
-struct ZipPathFinder<R: Read + Seek> {
+struct ZipPathFinder<'a, R: Read + Seek> {
     zip: ZipArchive<R>,
-    prefix: Option<String>,
+    prefix: Option<&'a str>,
 }
 
-impl<R: Read + Seek> Deref for ZipPathFinder<R> {
+impl<'a, R: Read + Seek> Deref for ZipPathFinder<'a, R> {
     type Target = ZipArchive<R>;
 
     fn deref(&self) -> &<Self as Deref>::Target {
@@ -609,13 +620,13 @@ impl<R: Read + Seek> Deref for ZipPathFinder<R> {
     }
 }
 
-impl<R: Read + Seek> DerefMut for ZipPathFinder<R> {
+impl<'a, R: Read + Seek> DerefMut for ZipPathFinder<'a, R> {
     fn deref_mut(&mut self) -> &mut <Self as Deref>::Target {
         &mut self.zip
     }
 }
 
-impl<'a, R: Read + Seek> ProjectPathFinder<'a> for ZipPathFinder<R> {
+impl<'a, R: Read + Seek> ProjectPathFinder<'a> for ZipPathFinder<'a, R> {
     fn find(
         &'a self,
         strip_prefix: &Path,
@@ -623,7 +634,7 @@ impl<'a, R: Read + Seek> ProjectPathFinder<'a> for ZipPathFinder<R> {
         project: &WheelFile,
         suffix: PathBuf,
     ) -> anyhow::Result<Cow<'a, Path>> {
-        let (strip_prefix, prefix) = if let Some(zip_prefix) = self.prefix.as_deref() {
+        let (strip_prefix, prefix) = if let Some(zip_prefix) = self.prefix {
             let strip_prefix = Path::new(zip_prefix).join(strip_prefix);
             let zip_file_name_path = strip_prefix.join(prefix);
             (

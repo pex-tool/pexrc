@@ -17,16 +17,15 @@ use log::warn;
 use logging_timer::time;
 use pex::{
     BinPath,
-    DataDir,
-    DistInfoDir,
     EntryPoint,
     EntryPoints,
     Layout,
+    MetadataDirs,
     Pex,
-    PexInfoDir,
     RawPexInfo,
     Record,
     ResolvedWheel,
+    WheelDir,
     WheelLayout,
     collect_loose_user_source,
     collect_zipped_user_source_indexes,
@@ -73,13 +72,12 @@ fn populate_from_loose_pex<'a>(
                 let layout = WheelLayout::load_from_dir(&wheel_paths.path)?;
                 let record_file = File::open(wheel_paths.path.join(format!(
                     "{dist_info_dir}/RECORD",
-                    dist_info_dir = wheel_paths.dist_info_dir
+                    dist_info_dir = wheel_paths.metadata_dirs.dist_info_dir()
                 )))?;
                 let record = Record::read(record_file)?;
                 let wheel_details = WheelDetails::new(
                     project_name,
-                    wheel_paths.data_dir,
-                    wheel_paths.pex_info_dir,
+                    wheel_paths.metadata_dirs,
                     layout,
                     record.wheel_has_bin_dir(),
                 );
@@ -92,17 +90,15 @@ fn populate_from_loose_pex<'a>(
     Ok(())
 }
 
-struct WheelPaths {
+struct WheelPaths<'a> {
     path: PathBuf,
-    data_dir: DataDir,
-    dist_info_dir: DistInfoDir,
-    pex_info_dir: PexInfoDir,
+    metadata_dirs: &'a MetadataDirs,
 }
 
 fn collect_wheels_from_directory_pex<'a>(
     pex: &Pex,
     resolved_wheels: &'a IndexMap<&'a str, ResolvedWheel<'a>>,
-) -> anyhow::Result<Vec<(&'a str, WheelPaths)>> {
+) -> anyhow::Result<Vec<(&'a str, WheelPaths<'a>)>> {
     let mut wheels = Vec::with_capacity(resolved_wheels.len());
     let deps_dir = pex.path.join(".deps");
     if deps_dir.is_dir() {
@@ -115,9 +111,7 @@ fn collect_wheels_from_directory_pex<'a>(
                     wheel.project_name,
                     WheelPaths {
                         path: entry.path(),
-                        data_dir: wheel.data_dir(),
-                        dist_info_dir: wheel.dist_info_dir(),
-                        pex_info_dir: wheel.pex_info_info_dir(),
+                        metadata_dirs: &wheel.metadata_dirs,
                     },
                 ))
             }
@@ -135,7 +129,7 @@ fn spread(
     provenance: Arc<Provenance>,
 ) -> anyhow::Result<()> {
     let entry_points = virtualenv
-        .site_packages_path(wheel.dist_info_dir())
+        .site_packages_path(wheel.dist_info_dir().as_path())
         .join("entry_points.txt");
     if entry_points.exists() {
         install_scripts(
@@ -310,8 +304,8 @@ if __name__ == "__main__":
 
 struct WheelDetails<'a> {
     project_name: &'a str,
-    data_dir: DataDir,
-    pex_info_dir: PexInfoDir,
+    data_dir: WheelDir<'a>,
+    pex_info_dir: WheelDir<'a>,
     stash_dir: Option<PathBuf>,
     legacy_bin_dir: bool,
 }
@@ -319,8 +313,7 @@ struct WheelDetails<'a> {
 impl<'a> WheelDetails<'a> {
     fn new(
         project_name: &'a str,
-        data_dir: DataDir,
-        pex_info_dir: PexInfoDir,
+        metadata_dirs: &'a MetadataDirs,
         layout: Option<WheelLayout>,
         legacy_bin_dir: bool,
     ) -> Self {
@@ -331,8 +324,8 @@ impl<'a> WheelDetails<'a> {
         };
         Self {
             project_name,
-            data_dir,
-            pex_info_dir,
+            data_dir: metadata_dirs.data_dir(),
+            pex_info_dir: metadata_dirs.pex_info_dir(),
             stash_dir,
             legacy_bin_dir,
         }
@@ -344,7 +337,7 @@ fn calculate_spread_path(
     wheel_details: &WheelDetails,
     dst_rel_path: &Path,
 ) -> anyhow::Result<Option<PathBuf>> {
-    if let Ok(data_dir_relpath) = dst_rel_path.strip_prefix(wheel_details.data_dir.as_ref()) {
+    if let Ok(data_dir_relpath) = dst_rel_path.strip_prefix(wheel_details.data_dir.as_path()) {
         let mut components = data_dir_relpath.components();
         if let Some(paths_key) = components.next() {
             let key = paths_key.as_os_str().to_str().ok_or_else(|| {
@@ -430,7 +423,7 @@ fn calculate_spread_path(
             || dst_rel_path
                 .components()
                 .next()
-                .map(|first| wheel_details.pex_info_dir.as_ref() == Path::new(first.as_os_str()))
+                .map(|first| wheel_details.pex_info_dir.as_path() == Path::new(first.as_os_str()))
                 .unwrap_or_default())
     {
         Ok(None)
@@ -513,9 +506,7 @@ fn populate_from_packed_pex<'a>(
                     venv,
                     &wheel_paths.path,
                     project_name,
-                    wheel_paths.data_dir,
-                    wheel_paths.pex_info_dir,
-                    wheel_paths.dist_info_dir,
+                    wheel_paths.metadata_dirs,
                     provenance.clone(),
                 )
             })?;
@@ -530,9 +521,7 @@ fn populate_whl_zip(
     venv: &Virtualenv,
     wheel: &Path,
     project_name: &str,
-    data_dir: DataDir,
-    pex_info_dir: PexInfoDir,
-    dist_info_dir: DistInfoDir,
+    metadata_dirs: &MetadataDirs,
     provenance: Arc<Provenance>,
 ) -> anyhow::Result<()> {
     let mut whl_zip = ZipArchive::new(File::open(wheel)?.into_file())?;
@@ -542,14 +531,16 @@ fn populate_whl_zip(
     } else {
         None
     };
-    let record_name = format!("{dist_info_dir}/RECORD");
+    let record_name = format!(
+        "{dist_info_dir}/RECORD",
+        dist_info_dir = metadata_dirs.dist_info_dir()
+    );
     let record = Record::read(Cursor::new(io::read_to_string(
         whl_zip.by_name(&record_name)?,
     )?))?;
     let wheel_details = WheelDetails::new(
         project_name,
-        data_dir,
-        pex_info_dir,
+        metadata_dirs,
         layout,
         record.wheel_has_bin_dir(),
     );
@@ -649,8 +640,7 @@ fn populate_from_zip_app_with_whl_deps<'a>(
                 )?))?;
                 let wheel_details = WheelDetails::new(
                     wheel.project_name,
-                    wheel.data_dir(),
-                    wheel.pex_info_info_dir(),
+                    &wheel.metadata_dirs,
                     layout,
                     record.wheel_has_bin_dir(),
                 );
@@ -751,8 +741,7 @@ fn populate_from_zip_app<'a>(
                     *file_name,
                     WheelDetails::new(
                         wheel.project_name,
-                        wheel.data_dir(),
-                        wheel.pex_info_info_dir(),
+                        &wheel.metadata_dirs,
                         layout,
                         record.wheel_has_bin_dir(),
                     ),

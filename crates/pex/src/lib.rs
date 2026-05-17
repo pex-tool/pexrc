@@ -13,11 +13,8 @@ mod wheel;
 pub use dependency_configuration::DependencyConfiguration;
 pub use pex::{
     CollectWheelMetadata,
-    DataDir,
-    DistInfoDir,
     Layout,
     Pex,
-    PexInfoDir,
     Resolve,
     ResolveError,
     ResolvedWheel,
@@ -31,7 +28,9 @@ pub use pex_path::PexPath;
 pub use wheel::{
     EntryPoint,
     EntryPoints,
+    MetadataDirs,
     Record,
+    WheelDir,
     WheelFile,
     WheelLayout,
     WheelMetadata,

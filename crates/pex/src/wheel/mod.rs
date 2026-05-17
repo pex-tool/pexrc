@@ -10,7 +10,7 @@ mod package;
 mod record;
 
 pub use entry_points::{EntryPoint, EntryPoints};
-pub use file::WheelFile;
+pub use file::{MetadataDirs, WheelDir, WheelFile};
 pub use layout::WheelLayout;
 pub(crate) use metadata::MetadataReader;
 pub use metadata::WheelMetadata;
