@@ -1,5 +1,10 @@
 # Release Notes
 
+## 0.12.5
+
+This release fixes wheel metadata discovery to be robust to non-normalized wheel names, metadata
+directory names, or any combination of the two.
+
 ## 0.12.4
 
 This release fixes extras handling when resolving a PEX's wheels.

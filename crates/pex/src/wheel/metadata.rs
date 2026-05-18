@@ -10,7 +10,7 @@ use pep508_rs::{PackageName, Requirement};
 use python_pkginfo::Metadata;
 use url::Url;
 
-use crate::wheel::file::WheelFile;
+use crate::wheel::file::{MetadataDirs, WheelFile};
 
 pub struct WheelMetadata<'a> {
     pub file_name: &'a str,
@@ -21,13 +21,16 @@ pub struct WheelMetadata<'a> {
     pub requires_dists: Vec<Requirement<Url>>,
     pub requires_python: Option<VersionSpecifiers>,
     pub root_is_purelib: bool,
+    pub metadata_dirs: MetadataDirs,
 }
 
-pub(crate) trait MetadataReader<'a> {
+pub(crate) trait MetadataReader {
+    fn locate_dirs(&mut self, wheel_file: &WheelFile) -> anyhow::Result<MetadataDirs>;
     fn read(
         &mut self,
-        wheel_file_name: &'a str,
-        path_components: &[&str],
+        metadata_dirs: &MetadataDirs,
+        wheel_file: &WheelFile,
+        file_name: &str,
     ) -> anyhow::Result<String>;
 }
 
@@ -46,17 +49,12 @@ fn parse_root_is_purelib_from_wheel(content: &[u8]) -> anyhow::Result<bool> {
 impl<'a> WheelMetadata<'a> {
     pub(crate) fn parse(
         wheel_file: WheelFile<'a>,
-        metadata_reader: &mut impl MetadataReader<'a>,
+        metadata_dirs: MetadataDirs,
+        metadata_reader: &mut impl MetadataReader,
     ) -> anyhow::Result<Self> {
-        let dist_info_dir = format!(
-            "{project_name}-{version}.dist-info",
-            project_name = wheel_file.raw_project_name,
-            version = wheel_file.raw_version
-        );
-        let components = [&dist_info_dir, "METADATA"];
         let metadata = Metadata::parse(
             metadata_reader
-                .read(wheel_file.file_name, &components)?
+                .read(&metadata_dirs, &wheel_file, "METADATA")?
                 .as_bytes(),
         )?;
         let mut requires_dists: Vec<Requirement<Url>> =
@@ -70,10 +68,9 @@ impl<'a> WheelMetadata<'a> {
             None
         };
 
-        let components = [&dist_info_dir, "WHEEL"];
         let root_is_purelib = parse_root_is_purelib_from_wheel(
             metadata_reader
-                .read(wheel_file.file_name, &components)?
+                .read(&metadata_dirs, &wheel_file, "WHEEL")?
                 .as_bytes(),
         )?;
 
@@ -86,6 +83,7 @@ impl<'a> WheelMetadata<'a> {
             requires_dists,
             requires_python,
             root_is_purelib,
+            metadata_dirs,
         })
     }
 }
@@ -93,6 +91,7 @@ impl<'a> WheelMetadata<'a> {
 #[cfg(test)]
 mod tests {
     use std::ffi::OsStr;
+    use std::fmt::Display;
     use std::io;
     use std::path::{Path, PathBuf};
     use std::process::Command;
@@ -105,6 +104,7 @@ mod tests {
     use testing::{tmp_dir, venv_python_exe};
     use zip::ZipArchive;
 
+    use crate::wheel::MetadataDirs;
     use crate::wheel::file::WheelFile;
     use crate::wheel::metadata::{MetadataReader, WheelMetadata};
 
@@ -147,19 +147,29 @@ mod tests {
         assert_eq!("requests", wheel_file.raw_project_name);
         assert_eq!("2.32.5", wheel_file.raw_version);
 
-        struct RequestsMetadataReader(ZipArchive<File>);
-        impl<'a> MetadataReader<'a> for RequestsMetadataReader {
-            fn read(&mut self, _: &str, path_components: &[&str]) -> anyhow::Result<String> {
+        struct RequestsMetadataReader<D: Display>(ZipArchive<File>, D);
+        impl<D: Display> MetadataReader for RequestsMetadataReader<D> {
+            fn locate_dirs(&mut self, wheel_file: &WheelFile) -> anyhow::Result<MetadataDirs> {
+                wheel_file.metadata_dirs_from_zip(&self.0, &self.1, None)
+            }
+            fn read(
+                &mut self,
+                metadata_dirs: &MetadataDirs,
+                _wheel_file: &WheelFile,
+                file_name: &str,
+            ) -> anyhow::Result<String> {
+                let dist_info_dir = metadata_dirs.dist_info_dir();
                 Ok(io::read_to_string(
-                    self.0.by_name(&path_components.join("/"))?,
+                    self.0.by_name(&format!("{dist_info_dir}/{file_name}"))?,
                 )?)
             }
         }
         let mut metadata_reader = RequestsMetadataReader(
             ZipArchive::new(File::open(requests_2_32_5_whl).unwrap()).unwrap(),
+            requests_2_32_5_whl.display(),
         );
-
-        let wheel = WheelMetadata::parse(wheel_file, &mut metadata_reader).unwrap();
+        let metadata_dirs = metadata_reader.locate_dirs(&wheel_file).unwrap();
+        let wheel = WheelMetadata::parse(wheel_file, metadata_dirs, &mut metadata_reader).unwrap();
         assert_eq!(
             PackageName::new("requests".into()).unwrap(),
             wheel.project_name

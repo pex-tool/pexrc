@@ -4,7 +4,6 @@
 use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::ffi::OsStr;
-use std::fmt::{Display, Formatter};
 use std::io;
 use std::io::{BufReader, Read, Seek};
 use std::path::{Path, PathBuf};
@@ -29,8 +28,8 @@ use url::Url;
 use walkdir::{DirEntry, WalkDir};
 use zip::ZipArchive;
 
-use crate::wheel::{MetadataReader, WheelFile, WheelMetadata};
-use crate::{DependencyConfiguration, InterpreterSelectionStrategy, PexInfo};
+use crate::wheel::{MetadataDirs, MetadataReader, WheelFile, WheelMetadata};
+use crate::{DependencyConfiguration, InterpreterSelectionStrategy, PexInfo, WheelDir};
 
 #[derive(AsRefStr, EnumString)]
 pub enum Layout {
@@ -128,47 +127,20 @@ pub struct ResolvedWheel<'a> {
     pub project_name: &'a str,
     pub version: &'a str,
     pub root_is_purelib: bool,
+    pub metadata_dirs: MetadataDirs,
 }
-
-macro_rules! generate_dir_type {
-    ( $script_type:ident, $name:literal ) => {
-        pub struct $script_type(String);
-
-        impl $script_type {
-            fn new(project_name: &str, version: &str) -> Self {
-                Self(format!("{project_name}-{version}.{name}", name = $name))
-            }
-        }
-
-        impl Display for $script_type {
-            fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-                f.write_str(&self.0)
-            }
-        }
-
-        impl AsRef<Path> for $script_type {
-            fn as_ref(&self) -> &Path {
-                Path::new(&self.0)
-            }
-        }
-    };
-}
-
-generate_dir_type!(DataDir, "data");
-generate_dir_type!(DistInfoDir, "dist-info");
-generate_dir_type!(PexInfoDir, "pex-info");
 
 impl<'a> ResolvedWheel<'a> {
-    pub fn data_dir(&self) -> DataDir {
-        DataDir::new(self.project_name, self.version)
+    pub fn data_dir(&'a self) -> WheelDir<'a> {
+        self.metadata_dirs.data_dir()
     }
 
-    pub fn dist_info_dir(&self) -> DistInfoDir {
-        DistInfoDir::new(self.project_name, self.version)
+    pub fn dist_info_dir(&'a self) -> WheelDir<'a> {
+        self.metadata_dirs.dist_info_dir()
     }
 
-    pub fn pex_info_info_dir(&self) -> PexInfoDir {
-        PexInfoDir::new(self.project_name, self.version)
+    pub fn pex_info_dir(&'a self) -> WheelDir<'a> {
+        self.metadata_dirs.pex_info_dir()
     }
 }
 
@@ -323,6 +295,7 @@ impl<'a> Pex<'a> {
             requires_python: Option<VersionSpecifiers>,
             root_is_purelib: bool,
             rank: usize,
+            metadata_dirs: MetadataDirs,
         }
 
         let mut wheels_by_project_name: HashMap<PackageName, Vec<WheelInfo>> =
@@ -340,6 +313,7 @@ impl<'a> Pex<'a> {
                     requires_python: ranked_wheel.metadata.requires_python,
                     root_is_purelib: ranked_wheel.metadata.root_is_purelib,
                     rank: ranked_wheel.rank,
+                    metadata_dirs: ranked_wheel.metadata.metadata_dirs,
                 })
         }
         for wheels in wheels_by_project_name.values_mut() {
@@ -445,6 +419,7 @@ impl<'a> Pex<'a> {
                 requires_dists,
                 requires_python,
                 root_is_purelib,
+                metadata_dirs,
                 ..
             } in wheels
             {
@@ -479,6 +454,7 @@ impl<'a> Pex<'a> {
                         requires_dists: requires_dists.clone(),
                         requires_python: requires_python.clone(),
                         root_is_purelib: *root_is_purelib,
+                        metadata_dirs: metadata_dirs.clone(),
                     })
                 }
                 resolved_by_project_name.insert(
@@ -488,6 +464,7 @@ impl<'a> Pex<'a> {
                         project_name: raw_project_name,
                         version: raw_version,
                         root_is_purelib: *root_is_purelib,
+                        metadata_dirs: metadata_dirs.clone(),
                     },
                 );
                 for req in requires_dists {
@@ -744,74 +721,107 @@ struct RankedWheel<'a> {
     rank: usize,
 }
 
-struct ZipAppPexMetadataReader {
+struct ZipAppPexMetadataReader<'a> {
     pex_zip: ZipArchive<File>,
+    zip_path: &'a Path,
     deps_are_wheel_files: bool,
 }
 
-impl ZipAppPexMetadataReader {
-    fn new(path: impl AsRef<Path>, deps_are_wheel_files: bool) -> anyhow::Result<Self> {
+impl<'a> ZipAppPexMetadataReader<'a> {
+    fn new(zip_path: &'a Path, deps_are_wheel_files: bool) -> anyhow::Result<Self> {
         Ok(Self {
-            pex_zip: ZipArchive::new(File::open(path.as_ref())?)?,
+            pex_zip: ZipArchive::new(File::open(zip_path)?)?,
+            zip_path,
             deps_are_wheel_files,
         })
     }
 }
 
-impl<'a> MetadataReader<'a> for ZipAppPexMetadataReader {
+impl<'a> MetadataReader for ZipAppPexMetadataReader<'a> {
+    fn locate_dirs(&mut self, wheel_file: &WheelFile) -> anyhow::Result<MetadataDirs> {
+        if self.deps_are_wheel_files {
+            let whl = self
+                .pex_zip
+                .by_name_seek(&[".deps", wheel_file.file_name].join("/"))?;
+            let whl_zip = ZipArchive::new(whl)?;
+            wheel_file.metadata_dirs_from_zip(&whl_zip, self.zip_path.display(), None)
+        } else {
+            let prefix = format!(
+                ".deps/{wheel_file_name}/",
+                wheel_file_name = wheel_file.file_name
+            );
+            wheel_file.metadata_dirs_from_zip(&self.pex_zip, self.zip_path.display(), Some(&prefix))
+        }
+    }
+
     fn read(
         &mut self,
-        wheel_file_name: &'a str,
-        path_components: &[&str],
+        metadata_dirs: &MetadataDirs,
+        wheel_file: &WheelFile,
+        file_name: &str,
     ) -> anyhow::Result<String> {
         if self.deps_are_wheel_files {
             let whl = self
                 .pex_zip
-                .by_name_seek(&[".deps", wheel_file_name].join("/"))?;
+                .by_name_seek(&[".deps", wheel_file.file_name].join("/"))?;
             let mut whl_zip = ZipArchive::new(whl)?;
+            let dist_info_dir = metadata_dirs.dist_info_dir();
             Ok(io::read_to_string(
-                whl_zip.by_name(&path_components.join("/"))?,
+                whl_zip.by_name(&format!("{dist_info_dir}/{file_name}"))?,
             )?)
         } else {
-            Ok(io::read_to_string(
-                self.pex_zip.by_name(
-                    &[".deps", wheel_file_name]
-                        .iter()
-                        .chain(path_components.iter())
-                        .join("/"),
-                )?,
-            )?)
+            let prefix = format!(
+                ".deps/{wheel_file_name}/",
+                wheel_file_name = wheel_file.file_name
+            );
+            let dist_info_dir = metadata_dirs.dist_info_dir();
+            Ok(io::read_to_string(self.pex_zip.by_name(&format!(
+                "{prefix}{dist_info_dir}/{file_name}"
+            ))?)?)
         }
     }
 }
 
 struct LoosePexMetadataReader<'a>(&'a Path);
 
-impl<'a> MetadataReader<'a> for LoosePexMetadataReader<'a> {
+impl<'a> MetadataReader for LoosePexMetadataReader<'a> {
+    fn locate_dirs(&mut self, wheel_file: &WheelFile) -> anyhow::Result<MetadataDirs> {
+        wheel_file.metadata_dirs(&self.0.join(".deps").join(wheel_file.file_name))
+    }
+
     fn read(
         &mut self,
-        wheel_file_name: &'a str,
-        path_components: &[&str],
+        metadata_dirs: &MetadataDirs,
+        wheel_file: &WheelFile,
+        file_name: &str,
     ) -> anyhow::Result<String> {
-        let mut read_path = self.0.join(".deps").join(wheel_file_name);
-        for component in path_components {
-            read_path.push(component);
-        }
+        let mut read_path = self.0.join(".deps").join(wheel_file.file_name);
+        read_path.push(metadata_dirs.dist_info_dir().as_path());
+        read_path.push(file_name);
         Ok(fs::read_to_string(read_path)?)
     }
 }
 
 struct PackedPexMetadataReader<'a>(&'a Path);
 
-impl<'a> MetadataReader<'a> for PackedPexMetadataReader<'a> {
+impl<'a> MetadataReader for PackedPexMetadataReader<'a> {
+    fn locate_dirs(&mut self, wheel_file: &WheelFile) -> anyhow::Result<MetadataDirs> {
+        let wheel_file_path = self.0.join(".deps").join(wheel_file.file_name);
+        let zip = ZipArchive::new(File::open(&wheel_file_path)?)?;
+        wheel_file.metadata_dirs_from_zip(&zip, wheel_file_path.display(), None)
+    }
+
     fn read(
         &mut self,
-        wheel_file_name: &'a str,
-        path_components: &[&str],
+        metadata_dirs: &MetadataDirs,
+        wheel_file: &WheelFile,
+        file_name: &str,
     ) -> anyhow::Result<String> {
-        let mut zip = ZipArchive::new(File::open(self.0.join(".deps").join(wheel_file_name))?)?;
+        let wheel_file_path = self.0.join(".deps").join(wheel_file.file_name);
+        let mut zip = ZipArchive::new(File::open(&wheel_file_path)?)?;
+        let dist_info_dir = metadata_dirs.dist_info_dir();
         Ok(io::read_to_string(
-            zip.by_name(&path_components.iter().join("/"))?,
+            zip.by_name(&format!("{dist_info_dir}/{file_name}"))?,
         )?)
     }
 }
@@ -819,11 +829,13 @@ impl<'a> MetadataReader<'a> for PackedPexMetadataReader<'a> {
 fn read_wheel_metadata<'a>(
     python_version: Version,
     ranked_wheel_files: Vec<RankedWheelFile<'a>>,
-    metadata_reader: &mut impl MetadataReader<'a>,
+    metadata_reader: &mut impl MetadataReader,
 ) -> anyhow::Result<Vec<RankedWheel<'a>>> {
     let mut ranked_wheels = Vec::with_capacity(ranked_wheel_files.len());
     for ranked_wheel_file in ranked_wheel_files {
-        let metadata = WheelMetadata::parse(ranked_wheel_file.wheel_file, metadata_reader)?;
+        let metadata_dirs = metadata_reader.locate_dirs(&ranked_wheel_file.wheel_file)?;
+        let metadata =
+            WheelMetadata::parse(ranked_wheel_file.wheel_file, metadata_dirs, metadata_reader)?;
         if let Some(requires_python) = &metadata.requires_python
             && !requires_python.contains(&python_version)
         {
