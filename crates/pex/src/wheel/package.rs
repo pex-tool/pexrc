@@ -340,12 +340,15 @@ fn recompress_zipped_whl_chroot(
                         break 'result format!(
                             "{prefix}{stash_dir}/{rel_path}",
                             stash_dir = stash_dir.display(),
-                            rel_path = ZipPath(normalized_data_dir_relpath(
-                                stash_dir,
-                                data_dir_rel_path,
-                                wheel_file,
-                                &zip_finder
-                            )?.as_ref())
+                            rel_path = ZipPath(
+                                normalized_data_dir_relpath(
+                                    stash_dir,
+                                    data_dir_rel_path,
+                                    wheel_file,
+                                    &zip_finder
+                                )?
+                                .as_ref()
+                            )
                         );
                     }
                     if legacy_bin_dir {
