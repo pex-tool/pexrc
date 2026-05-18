@@ -7,7 +7,7 @@ import os.path
 import subprocess
 
 import pytest
-from testing import IS_WINDOWS
+from testing import IS_MAC, IS_WINDOWS
 from testing.compare import compare
 
 TYPE_CHECKING = False
@@ -105,4 +105,7 @@ def test_issue_103(
         create_sqlalchemy_pex(tmpdir, layout_args + deps_are_wheel_files_args + boot_args),
         args=["-c", "import sqlalchemy"],
         env=dict(PEXRC_ROOT=pexrc_root),
+        # N.B.: Mac SIP causes this 1st run of the --sh-boot variants to be unavoidably slow
+        # when they select an interpreter that is not the current one.
+        assert_faster=not IS_MAC,
     )
