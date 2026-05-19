@@ -740,9 +740,10 @@ impl<'a> ZipAppPexMetadataReader<'a> {
 impl<'a> MetadataReader for ZipAppPexMetadataReader<'a> {
     fn locate_dirs(&mut self, wheel_file: &WheelFile) -> anyhow::Result<MetadataDirs> {
         if self.deps_are_wheel_files {
-            let whl = self
-                .pex_zip
-                .by_name_seek(&[".deps", wheel_file.file_name].join("/"))?;
+            let whl = self.pex_zip.by_name_seek(&format!(
+                ".deps/{wheel_file_name}",
+                wheel_file_name = wheel_file.file_name
+            ))?;
             let whl_zip = ZipArchive::new(whl)?;
             wheel_file.metadata_dirs_from_zip(&whl_zip, self.zip_path.display(), None)
         } else {

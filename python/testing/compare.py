@@ -105,16 +105,22 @@ def compare(
     test_result=None,  # type: Optional[Callable[[ProcessResult, bool], None]]
     compare_results=None,  # type: Optional[Callable[[ProcessResult, ProcessResult], None]]
     injected_pex=None,  # type: Optional[str]
+    only_inject=False,  # type: bool
     assert_faster=True,  # type: bool
 ):
     # type: (...) -> str
 
-    traditional_result = execute_pex(pex, python_args, args, **(env or {}))
-    _test_result(traditional_result, True, test_result=test_result)
-    print(
-        "Traditional PEX run took {elapsed:.5}ms".format(elapsed=traditional_result.elapsed * 1000),
-        file=sys.stderr,
-    )
+    if only_inject:
+        traditional_result = None
+    else:
+        traditional_result = execute_pex(pex, python_args, args, **(env or {}))
+        _test_result(traditional_result, True, test_result=test_result)
+        print(
+            "Traditional PEX run took {elapsed:.5}ms".format(
+                elapsed=traditional_result.elapsed * 1000
+            ),
+            file=sys.stderr,
+        )
 
     injected = injected_pex or pexrc_inject(pex)
     injected_result = execute_pex(injected, python_args, args, **(env or {}))
@@ -124,23 +130,27 @@ def compare(
         file=sys.stderr,
     )
 
-    # N.B.: The traditional PEX runtime has never been supported on Windows; so we don't do a
-    # comparison here. Observation shows the same general speedup as on Linux, but there is the
-    # complication of virus scans that do slow things down much like the Mac case, leading to some
-    # CI instability for no obvious gain.
-    assert (
-        IS_WINDOWS or not assert_faster or (injected_result.elapsed < traditional_result.elapsed)
-    ), (
-        "An injected PEXRC ({injected_elapsed:.5}ms) should always run faster than a traditional "
-        "PEX ({traditional_elapsed:.5}ms).".format(
-            injected_elapsed=injected_result.elapsed, traditional_elapsed=traditional_result.elapsed
+    if traditional_result:
+        # N.B.: The traditional PEX runtime has never been supported on Windows; so we don't do a
+        # comparison here. Observation shows the same general speedup as on Linux, but there is the
+        # complication of virus scans that do slow things down much like the Mac case, leading to some
+        # CI instability for no obvious gain.
+        assert (
+            IS_WINDOWS
+            or not assert_faster
+            or (injected_result.elapsed < traditional_result.elapsed)
+        ), (
+            "An injected PEXRC ({injected_elapsed:.5}ms) should always run faster than a traditional "
+            "PEX ({traditional_elapsed:.5}ms).".format(
+                injected_elapsed=injected_result.elapsed,
+                traditional_elapsed=traditional_result.elapsed,
+            )
         )
-    )
-    print(
-        "Sped up by a factor of: {speedup_factor:.2}".format(
-            speedup_factor=traditional_result.elapsed / injected_result.elapsed
-        ),
-        file=sys.stderr,
-    )
-    _compare_results(traditional_result, injected_result, compare_results=compare_results)
+        print(
+            "Sped up by a factor of: {speedup_factor:.2}".format(
+                speedup_factor=traditional_result.elapsed / injected_result.elapsed
+            ),
+            file=sys.stderr,
+        )
+        _compare_results(traditional_result, injected_result, compare_results=compare_results)
     return injected

@@ -3,7 +3,7 @@
 
 use std::borrow::Cow;
 use std::ffi::OsStr;
-use std::fmt::{Display, Formatter};
+use std::fmt::Display;
 use std::io;
 use std::io::{Cursor, Read, Seek, Write};
 use std::ops::{Deref, DerefMut};
@@ -15,6 +15,7 @@ use chrono::{DateTime, Utc};
 use fs_err as fs;
 use fs_err::File;
 use logging_timer::time;
+use platform::PosixPath;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use walkdir::WalkDir;
 use zip::read::ZipArchiveMetadata;
@@ -228,23 +229,6 @@ pub fn recompress_zipped_whl(
     Ok(File::open(dest_wheel)?)
 }
 
-struct ZipPath<'a>(&'a Path);
-
-impl<'a> Display for ZipPath<'a> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        for (idx, component) in self.0.components().enumerate() {
-            if idx > 0 {
-                f.write_str("/")?;
-            }
-            match component {
-                Component::Normal(name) if let Some(name) = name.to_str() => write!(f, "{name}")?,
-                _ => return Err(std::fmt::Error),
-            }
-        }
-        Ok(())
-    }
-}
-
 fn recompress_zipped_whl_chroot(
     mut zipped_wheel_chroot: ZipArchive<impl Read + Seek>,
     zip_source: impl Display,
@@ -340,7 +324,7 @@ fn recompress_zipped_whl_chroot(
                         break 'result format!(
                             "{prefix}{stash_dir}/{rel_path}",
                             stash_dir = stash_dir.display(),
-                            rel_path = ZipPath(
+                            rel_path = PosixPath::relpath(
                                 normalized_data_dir_relpath(
                                     stash_dir,
                                     data_dir_rel_path,
@@ -348,7 +332,7 @@ fn recompress_zipped_whl_chroot(
                                     &zip_finder
                                 )?
                                 .as_ref()
-                            )
+                            )?
                         );
                     }
                     if legacy_bin_dir {
@@ -361,7 +345,7 @@ fn recompress_zipped_whl_chroot(
                         assert!(starts_with(rel_path.as_ref(), "bin"));
                         break 'result format!(
                             "{prefix}{rel_path}",
-                            rel_path = ZipPath(rel_path.as_ref())
+                            rel_path = PosixPath::relpath(rel_path.as_ref())?
                         );
                     }
                 }
@@ -415,7 +399,7 @@ fn recompress_zipped_whl_chroot(
                         break 'result format!(
                             "{prefix}{stash_dir}/{rel_path}",
                             stash_dir = stash_dir.display(),
-                            rel_path = ZipPath(
+                            rel_path = PosixPath::relpath(
                                 normalized_data_dir_relpath(
                                     stash_dir,
                                     data_dir_rel_path,
@@ -423,7 +407,7 @@ fn recompress_zipped_whl_chroot(
                                     &zip_finder
                                 )?
                                 .as_ref()
-                            )
+                            )?
                         );
                     }
                     if legacy_bin_dir {
@@ -436,11 +420,14 @@ fn recompress_zipped_whl_chroot(
                         assert!(starts_with(rel_path.as_ref(), "bin"));
                         break 'result format!(
                             "{prefix}{rel_path}",
-                            rel_path = ZipPath(rel_path.as_ref())
+                            rel_path = PosixPath::relpath(rel_path.as_ref())?
                         );
                     }
                 }
-                format!("{prefix}{rel_path}", rel_path = ZipPath(dst_rel_path))
+                format!(
+                    "{prefix}{rel_path}",
+                    rel_path = PosixPath::relpath(dst_rel_path)?
+                )
             };
             let mut src = zip_finder.by_name(&name)?;
             compressed_whl.start_file_from_path(dst_rel_path, file_options)?;

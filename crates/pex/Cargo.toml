@@ -21,6 +21,7 @@ mailparse = { workspace = true }
 ouroboros = { workspace = true }
 pep440_rs = { workspace = true }
 pep508_rs = { workspace = true }
+platform = { path = "../platform" }
 python-pkginfo = { workspace = true }
 rayon = { workspace = true }
 regex = { workspace = true }
