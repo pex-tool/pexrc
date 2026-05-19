@@ -3,6 +3,7 @@
 
 #![deny(clippy::all)]
 
+use std::borrow::Cow;
 use std::io::{ErrorKind, Read, Seek, Write};
 use std::path::Path;
 
@@ -21,7 +22,7 @@ use interpreter::{
 use itertools::Itertools;
 use pex::{Pex, PexPath};
 use pexrs::venv_dir;
-use platform::path_as_str;
+use platform::PosixPath;
 use zip::ZipWriter;
 use zip::write::{FileOptionExtension, FileOptions};
 
@@ -87,17 +88,22 @@ pub fn sh_boot_shebang(
     } else {
         ""
     };
+    let pexrc_root = if let Some(pex_root) = pex.info.raw().pex_root.as_deref() {
+        Cow::Owned(PosixPath::try_from(pex_root)?.to_string())
+    } else {
+        Cow::Borrowed("")
+    };
     Ok(Some(format!(
         "{shebang}{start_escape}{header}{vars}{body}{end_escape}\n",
         shebang = SH_BOOT_PARTS[0], // N.B.: SH_BOOT_SHEBANG
         start_escape = if escaped { "'''': pshprs\n" } else { "" },
         header = SH_BOOT_PARTS[1],
         vars = SH_BOOT_PARTS[2]
+            .replace("{pexrc_root}", pexrc_root.as_ref())
             .replace(
-                "{pexrc_root}",
-                pex.info.raw().pex_root.as_deref().unwrap_or_default()
+                "{venv_relpath}",
+                &PosixPath::relpath(venv_relpath)?.to_string()
             )
-            .replace("{venv_relpath}", path_as_str(venv_relpath)?)
             .replace(
                 "{pythons}",
                 &pythons

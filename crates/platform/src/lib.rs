@@ -14,7 +14,8 @@ pub mod unix;
 mod windows;
 
 use std::ffi::OsStr;
-use std::path::Path;
+use std::fmt::{Display, Formatter, Write};
+use std::path::{Component, Path};
 use std::process::Command;
 use std::{fs, io};
 
@@ -82,4 +83,58 @@ pub fn spawn(command: &mut Command) -> io::Result<i32> {
             .code()
             .unwrap_or_else(|| if exit_status.success() { 0 } else { 1 })
     })
+}
+
+pub struct PosixPath<'a>(&'a Path);
+
+impl<'a> PosixPath<'a> {
+    pub fn relpath(path: &'a Path) -> io::Result<Self> {
+        Self::new(path, false)
+    }
+
+    pub fn new(path: &'a Path, absolute_allowed: bool) -> io::Result<Self> {
+        if !absolute_allowed && !path.is_relative() {
+            return Err(io::Error::other(format!(
+                "Path {path} cannot be represented as a Posix relative path, it is absolute.",
+                path = path.display()
+            )));
+        }
+        if let Some(Component::Prefix(prefix)) = path.components().next() {
+            return Err(io::Error::other(format!(
+                "Path {path} cannot be represented as a Posix path because it has a Windows path \
+                prefix of {prefix}",
+                path = path.display(),
+                prefix = prefix.as_os_str().display()
+            )));
+        }
+        Ok(Self(path))
+    }
+}
+
+impl<'a> TryFrom<&'a str> for PosixPath<'a> {
+    type Error = io::Error;
+
+    fn try_from(value: &'a str) -> Result<Self, Self::Error> {
+        Self::new(Path::new(value), true)
+    }
+}
+
+impl<'a> Display for PosixPath<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        for (idx, component) in self.0.components().enumerate() {
+            if idx > 0 {
+                f.write_str("/")?;
+            }
+            match component {
+                Component::CurDir => f.write_char('.')?,
+                Component::ParentDir => f.write_str("..")?,
+                Component::RootDir => f.write_char('/')?,
+                Component::Normal(name) => f.write_str(name.to_str().ok_or(std::fmt::Error)?)?,
+                Component::Prefix(_) => {
+                    panic!("We confirmed the path had no prefix on construction")
+                }
+            }
+        }
+        Ok(())
+    }
 }

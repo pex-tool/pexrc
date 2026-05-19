@@ -1,5 +1,9 @@
 # Release Notes
 
+## 0.12.6
+
+This release fixes generation of `--sh-boot` headers on Windows.
+
 ## 0.12.5
 
 This release fixes wheel metadata discovery to be robust to non-normalized wheel names, metadata

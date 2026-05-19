@@ -2018,6 +2018,7 @@ dependencies = [
  "ouroboros",
  "pep440_rs",
  "pep508_rs",
+ "platform",
  "python-pkginfo",
  "rayon",
  "regex",
@@ -2039,7 +2040,7 @@ dependencies = [
 
 [[package]]
 name = "pexrc"
-version = "0.12.5"
+version = "0.12.6"
 dependencies = [
  "anstream",
  "anyhow",
