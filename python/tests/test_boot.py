@@ -12,7 +12,7 @@ from testing.compare import compare
 TYPE_CHECKING = False
 if TYPE_CHECKING:
     # Ruff doesn't understand Python 2 and thus the type comment usages.
-    from typing import Any, Text  # noqa: F401
+    from typing import Any, Iterable, Text  # noqa: F401
 
     from testing.compare import ProcessResult  # noqa: F401
 
@@ -22,20 +22,25 @@ def create_cowsay_pex(
     *pex_args,  # type: str
 ):
     pex = os.path.join(str(tmpdir), "cowsay.pex")
-    pex_root = os.path.join(str(tmpdir), "pex-root")
-    subprocess.check_call(
-        args=[
-            "pex",
-            "cowsay<6",
-            "-c",
-            "cowsay",
-            "-o",
-            pex,
-            "--runtime-pex-root",
-            pex_root,
-        ]
-        + list(pex_args)
-    )
+    args = [
+        "pex",
+        "cowsay<6",
+        "-c",
+        "cowsay",
+        "-o",
+        pex,
+    ] + list(pex_args)
+
+    if not IS_WINDOWS or "--sh-boot" not in pex_args:
+        pex_root = os.path.join(str(tmpdir), "pex-root")
+        args.extend(
+            (
+                "--runtime-pex-root",
+                pex_root,
+            )
+        )
+
+    subprocess.check_call(args=args)
     return pex
 
 
@@ -85,11 +90,15 @@ def test_sh_boot(
     assert expected_shebang == "#!/bin/sh\n"
 
     pexrc_env = dict(PEXRC_ROOT=pexrc_root)
+
     injected_pex = compare(
         pex,
         args=["Moo!"],
         env=pexrc_env,
         test_result=assert_result,
+        # N.B.: Traditional Pex does not set up a valid --sh-boot shebang header on Windows; so we can
+        # inject such PEXes and get a valid, runnable PEXrc, but we cannot run the original PEX.
+        only_inject=IS_WINDOWS,
     )
     assert expected_shebang == read_shebang(injected_pex)
 
@@ -137,15 +146,19 @@ def test_packed_sh_boot(
     injected_pex_script = os.path.join(injected_pex, "pex")
     assert "#!/bin/sh\n" == read_shebang(injected_pex_script)
 
+    pexrc_env = dict(PEXRC_ROOT=pexrc_root)
+    compare(
+        pex,
+        args=["Moo!"],
+        env=pexrc_env,
+        test_result=assert_result,
+        injected_pex=injected_pex,
+        # N.B.: Traditional Pex does not set up a valid --sh-boot shebang header on Windows; so we can
+        # inject such PEXes and get a valid, runnable PEXrc, but we cannot run the original PEX.
+        only_inject=not IS_WINDOWS,
+    )
+
     if not IS_WINDOWS:
-        pexrc_env = dict(PEXRC_ROOT=pexrc_root)
-
-        # N.B.: The `--layout packed --sh-boot` PEXes Pex builds are broken on Windows; so we just
-        # run the comparison on unix.
-        compare(
-            pex, args=["Moo!"], env=pexrc_env, test_result=assert_result, injected_pex=injected_pex
-        )
-
         # N.B.: The above uses `compare` which executes python against the PEX, which just proves
         # the `--sh-boot` shebang does not interfere with that. As long as we're not on Windows, we
         # can run the `--sh-boot` shebang directly.
